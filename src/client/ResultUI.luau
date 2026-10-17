@@ -1,6 +1,8 @@
 --!nonstrict
 -- 결과 화면 (승리와 실패 공용). 재도전 버튼은 RequestRestart를 보낸다.
 
+local Players = game:GetService("Players")
+
 local UI = require(script.Parent.UI)
 local Colors = UI.Colors
 
@@ -13,6 +15,10 @@ local reasonLabel
 local values = {}
 local restartButton
 local visible = false
+local noteLabel
+local restartPressed = false
+local restartAvailableAt = nil -- workspace:GetServerTimeNow() 기준, nil이면 즉시 가능
+local chooserUserId = nil -- nil이면 누구나 (기존 동작)
 
 local function makeRow(parent, order, labelText)
     local value = UI.create("TextLabel", {
@@ -39,6 +45,40 @@ local function makeRow(parent, order, labelText)
         value,
     })
     return value
+end
+
+-- 재도전 버튼 상태: 권한자 아님(숨김), 카운트다운(비활성), 가능, 이미 눌림
+local function updateRestartButton()
+    local localId = Players.LocalPlayer.UserId
+    if chooserUserId ~= nil and chooserUserId ~= localId then
+        local chooser = Players:GetPlayerByUserId(chooserUserId)
+        noteLabel.Text = if chooser
+            then string.format(
+                "선택 권한자(%s)가 재도전을 결정합니다",
+                chooser.DisplayName
+            )
+            else "선택 권한자가 재도전을 결정합니다"
+        noteLabel.Visible = true
+        restartButton.Visible = false
+        return
+    end
+    noteLabel.Visible = false
+    restartButton.Visible = true
+    if restartPressed then
+        return
+    end
+    local remaining = if restartAvailableAt
+        then restartAvailableAt - workspace:GetServerTimeNow()
+        else 0
+    if remaining > 0 then
+        restartButton.Active = false
+        restartButton.BackgroundColor3 = Colors.disabled
+        restartButton.Text = string.format("재도전 %d초 후", math.ceil(remaining))
+    else
+        restartButton.Active = true
+        restartButton.BackgroundColor3 = Colors.accent
+        restartButton.Text = "재도전"
+    end
 end
 
 function ResultUI.init(ctx)
@@ -83,6 +123,18 @@ function ResultUI.init(ctx)
         Preset = "heading",
     }, { UI.corner(10) })
 
+    noteLabel = UI.create("TextLabel", {
+        Name = "RestartNote",
+        LayoutOrder = 5,
+        Size = UDim2.fromScale(1, 0),
+        AutomaticSize = Enum.AutomaticSize.Y,
+        Text = "",
+        TextColor3 = Colors.textDim,
+        Preset = "body",
+        TextWrapped = true,
+        Visible = false,
+    })
+
     UI.create("Frame", {
         Name = "Dim",
         Size = UDim2.fromScale(1, 1),
@@ -106,14 +158,29 @@ function ResultUI.init(ctx)
             reasonLabel,
             summary,
             restartButton,
+            noteLabel,
         }),
     })
 
     restartButton.Activated:Connect(function()
+        if not restartButton.Active then
+            return
+        end
+        restartPressed = true
         restartButton.Active = false
         restartButton.BackgroundColor3 = Colors.disabled
         restartButton.Text = "다시 준비 중..."
         restartRemote:FireServer()
+    end)
+
+    -- 카운트다운 갱신
+    task.spawn(function()
+        while true do
+            if visible then
+                updateRestartButton()
+            end
+            task.wait(0.25)
+        end
     end)
 end
 
@@ -128,13 +195,14 @@ function ResultUI.show(result)
     values.deaths.Text = string.format("%d회", result.oxygenDeaths)
     values.site.Text = result.siteName or "-"
 
+    restartAvailableAt = result.restartAvailableAt
+    chooserUserId = result.chooserUserId
     if not visible then
-        restartButton.Active = true
-        restartButton.BackgroundColor3 = Colors.accent
-        restartButton.Text = "재도전"
+        restartPressed = false
     end
     visible = true
     gui.Enabled = true
+    updateRestartButton()
 end
 
 -- 늦게 들어온 플레이어용 대체 표시 (GameOver를 놓친 경우)
@@ -151,6 +219,7 @@ end
 
 function ResultUI.hide()
     visible = false
+    restartPressed = false
     gui.Enabled = false
 end
 

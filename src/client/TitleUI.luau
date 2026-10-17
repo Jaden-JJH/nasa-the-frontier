@@ -55,10 +55,7 @@ function TitleUI.init(ctx)
                 Name = "Subtitle",
                 LayoutOrder = 2,
                 Size = UDim2.new(1, 0, 0, 36),
-                Text = string.format(
-                    "달 기지를 건설하고 %d일을 살아남으세요",
-                    ctx.Config.TOTAL_DAYS
-                ),
+                Text = "3개월 안에 거주, 식량, 연구 시설을 완성해 달 기지를 세우세요",
                 TextColor3 = Colors.textDim,
                 Preset = "body",
                 TextSize = 22,

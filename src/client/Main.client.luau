@@ -19,6 +19,7 @@ local ResultUI = require(script.Parent.ResultUI)
 local PromptUI = require(script.Parent.PromptUI)
 local PadSignUI = require(script.Parent.PadSignUI)
 local RoverHint = require(script.Parent.RoverHint)
+local ObjectiveHighlight = require(script.Parent.ObjectiveHighlight)
 
 -- 기본 체력바는 산소 바와 혼동되므로 끈다 (실패해도 무시)
 pcall(function()
@@ -27,6 +28,11 @@ end)
 
 pcall(function()
     StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.PlayerList, false)
+end)
+
+-- 메뉴의 캐릭터 초기화(Reset)를 끈다 (실패해도 무시)
+pcall(function()
+    StarterGui:SetCore("ResetButtonCallback", false)
 end)
 
 local REMOTE_NAMES = {
@@ -92,12 +98,14 @@ ResultUI.init(ctx)
 PromptUI.init(ctx)
 PadSignUI.init(ctx)
 RoverHint.init(ctx)
+ObjectiveHighlight.init(ctx)
 
 remotes.StateUpdate.OnClientEvent:Connect(function(state)
     lastState = state
     HUD.update(state)
     PadSignUI.update(state)
     RoverHint.onState(state)
+    ObjectiveHighlight.update(state)
     applyScreens()
     -- GameOver를 놓친 늦은 입장자를 위한 대체 표시
     if (state.phase == "won" or state.phase == "lost") and not ResultUI.isVisible() then

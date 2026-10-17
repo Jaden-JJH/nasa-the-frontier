@@ -21,6 +21,7 @@ local STATUS_STYLE = {
     active = { text = "가동 중", color = Colors.water },
 }
 
+local RESOURCE_NAME = { energy = "Energy", water = "Water" }
 local RESOURCE_SHORT = { energy = "E", water = "W", food = "F" }
 local RESOURCE_ORDER = { "energy", "water", "food" }
 
@@ -35,6 +36,30 @@ local function costText(moduleId)
     for _, key in ipairs(RESOURCE_ORDER) do
         if cost[key] and cost[key] > 0 then
             table.insert(parts, string.format("%d %s", cost[key], RESOURCE_SHORT[key]))
+        end
+    end
+    return table.concat(parts, ", ")
+end
+
+-- 선행 조건 문구. 예: "A 완공 필요"
+local function requiresText(moduleId)
+    local requires = config.MODULES[moduleId].requires or {}
+    if #requires == 0 then
+        return ""
+    end
+    return table.concat(requires, ", ") .. " 완공 필요"
+end
+
+-- 부족한 자원 차액 문구. 예: "Energy 12 부족, Water 3 부족". 부족이 없으면 ""
+local function shortfallText(shortfall)
+    local parts = {}
+    for _, key in ipairs({ "energy", "water" }) do
+        local amount = shortfall and shortfall[key]
+        if type(amount) == "number" and amount > 0 then
+            table.insert(
+                parts,
+                string.format("%s %d 부족", RESOURCE_NAME[key], math.ceil(amount))
+            )
         end
     end
     return table.concat(parts, ", ")
@@ -74,6 +99,17 @@ local function makeSign(moduleId, pad)
         TextColor3 = Colors.textDim,
     }, { UI.worldStroke() })
 
+    local noteLabel = UI.create("TextLabel", {
+        Name = "Note",
+        LayoutOrder = 6,
+        Size = UDim2.new(1, 0, 0, 18),
+        Preset = "caption",
+        Text = "",
+        TextColor3 = Colors.energy,
+        TextWrapped = true,
+        Visible = false,
+    }, { UI.worldStroke() })
+
     local panel = UI.create("Frame", {
         Name = "Panel",
         AnchorPoint = Vector2.new(0.5, 1),
@@ -103,6 +139,7 @@ local function makeSign(moduleId, pad)
         bar.root,
         daysLabel,
         costLabel,
+        noteLabel,
     })
 
     local gui = UI.create("BillboardGui", {
@@ -124,6 +161,7 @@ local function makeSign(moduleId, pad)
         bar = bar,
         daysLabel = daysLabel,
         costLabel = costLabel,
+        noteLabel = noteLabel,
     }
 end
 
@@ -131,12 +169,36 @@ local function applyState(sign, moduleId)
     local moduleState = lastState and lastState.modules and lastState.modules[moduleId]
     local status = moduleState and moduleState.status or "locked"
     local style = STATUS_STYLE[status] or STATUS_STYLE.locked
+    local note = ""
+    local noteColor = Colors.energy
+    local lightBadge = status == "building" or status == "available"
+
+    -- unlocked와 shortfall이 있으면 세 상태(잠김, 자원 부족, 착공 가능)로 나눈다
+    local hasUnlocked = moduleState ~= nil and moduleState.unlocked ~= nil
+    if hasUnlocked and (status == "locked" or status == "available") then
+        if not moduleState.unlocked then
+            status = "locked"
+            style = STATUS_STYLE.locked
+            lightBadge = false
+            note = requiresText(moduleId)
+            noteColor = Colors.textDim
+        else
+            status = "available"
+            local missing = shortfallText(moduleState.shortfall)
+            if missing ~= "" then
+                style = { text = "자원 부족", color = Colors.energy }
+                note = missing
+            else
+                style = STATUS_STYLE.available
+            end
+            lightBadge = true
+        end
+    end
 
     sign.badge.BackgroundColor3 = style.color
     sign.badgeLabel.Text = style.text
     -- 밝은 배지(노랑, 초록)는 어두운 글자, 어두운 배지는 흰 글자
-    local darkText = status == "building" or status == "available"
-    sign.badgeLabel.TextColor3 = if darkText then Colors.bg else Colors.text
+    sign.badgeLabel.TextColor3 = if lightBadge then Colors.bg else Colors.text
 
     local building = status == "building"
     sign.bar.root.Visible = building
@@ -146,6 +208,9 @@ local function applyState(sign, moduleId)
         sign.daysLabel.Text = string.format("%d일 남음", moduleState.daysLeft)
     end
     sign.costLabel.Visible = status == "available"
+    sign.noteLabel.Visible = note ~= ""
+    sign.noteLabel.Text = note
+    sign.noteLabel.TextColor3 = noteColor
 end
 
 local function clearSigns()

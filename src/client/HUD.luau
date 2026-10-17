@@ -36,12 +36,23 @@ local function makeResourceRow(parent, order, name, color)
     })
     local net = UI.create("TextLabel", {
         Name = "Net",
-        Position = UDim2.fromOffset(150, 0),
-        Size = UDim2.new(1, -150, 1, 0),
+        Position = UDim2.fromOffset(210, 0),
+        Size = UDim2.new(1, -210, 1, 0),
         Text = "0/일",
         TextColor3 = Colors.neutral,
         Preset = "caption",
         TextXAlignment = Enum.TextXAlignment.Right,
+    })
+    local days = UI.create("TextLabel", {
+        Name = "DaysLeft",
+        Position = UDim2.fromOffset(150, 0),
+        Size = UDim2.new(0, 56, 1, 0),
+        Text = "",
+        TextColor3 = Colors.textDim,
+        Preset = "caption",
+        TextSize = 12,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        Visible = false,
     })
     UI.create("Frame", {
         Name = name .. "Row",
@@ -66,9 +77,22 @@ local function makeResourceRow(parent, order, name, color)
             TextXAlignment = Enum.TextXAlignment.Left,
         }),
         value,
+        days,
         net,
     })
-    return { value = value, net = net }
+    return { value = value, net = net, days = days }
+end
+
+-- 남은 일수 표시 (nil이거나 999 이상이면 숨김, 3일 이하는 빨강)
+local function setDaysLeft(label, days)
+    if type(days) ~= "number" or days >= 999 then
+        label.Visible = false
+        return
+    end
+    local n = math.max(0, math.floor(days))
+    label.Visible = true
+    label.Text = string.format("%d일분", n)
+    label.TextColor3 = if n <= 3 then Colors.bad else Colors.textDim
 end
 
 local function setNet(label, net)
@@ -159,7 +183,7 @@ function HUD.init(ctx)
     local resources = UI.create("Frame", {
         Name = "Resources",
         Position = UDim2.fromOffset(12, 12),
-        Size = UDim2.fromOffset(236, 0),
+        Size = UDim2.fromOffset(280, 0),
         AutomaticSize = Enum.AutomaticSize.Y,
         BackgroundColor3 = Colors.panel,
         BackgroundTransparency = 0.12,
@@ -174,6 +198,7 @@ function HUD.init(ctx)
         Size = UDim2.fromScale(1, 1),
         Text = "",
         Preset = "heading",
+        TextWrapped = true,
     })
     refs.banner = UI.create("Frame", {
         Name = "ShortageBanner",
@@ -268,30 +293,33 @@ function HUD.init(ctx)
     end
 
     -- 우하단: 속도 토글
-    refs.speed = UI.create("TextButton", {
-        Name = "SpeedButton",
-        -- 모바일은 상단 중앙 Day 패널(폭 460) 오른쪽 옆, PC는 우하단
-        AnchorPoint = if UI.isTouchOnly() then Vector2.new(0, 0) else Vector2.new(1, 1),
-        Position = if UI.isTouchOnly()
-            then UDim2.new(0.5, 238, 0, 10)
-            else UDim2.new(1, -12, 1, -12),
-        Size = UDim2.fromOffset(72, 44),
-        BackgroundColor3 = Colors.panelLight,
-        Text = "1x",
-        Preset = "heading",
-        Parent = gui,
-    }, { UI.corner(10), UI.stroke(Colors.accent, 1) })
-    refs.speed.Activated:Connect(function()
-        local speeds = config.SPEEDS
-        local nextSpeed = speeds[1]
-        for index, speed in ipairs(speeds) do
-            if speed == currentSpeed then
-                nextSpeed = speeds[index % #speeds + 1]
-                break
+    -- 배속이 1개뿐이면 버튼을 만들지 않는다
+    if #config.SPEEDS > 1 then
+        refs.speed = UI.create("TextButton", {
+            Name = "SpeedButton",
+            -- 모바일은 상단 중앙 Day 패널(폭 460) 오른쪽 옆, PC는 우하단
+            AnchorPoint = if UI.isTouchOnly() then Vector2.new(0, 0) else Vector2.new(1, 1),
+            Position = if UI.isTouchOnly()
+                then UDim2.new(0.5, 238, 0, 10)
+                else UDim2.new(1, -12, 1, -12),
+            Size = UDim2.fromOffset(72, 44),
+            BackgroundColor3 = Colors.panelLight,
+            Text = "1x",
+            Preset = "heading",
+            Parent = gui,
+        }, { UI.corner(10), UI.stroke(Colors.accent, 1) })
+        refs.speed.Activated:Connect(function()
+            local speeds = config.SPEEDS
+            local nextSpeed = speeds[1]
+            for index, speed in ipairs(speeds) do
+                if speed == currentSpeed then
+                    nextSpeed = speeds[index % #speeds + 1]
+                    break
+                end
             end
-        end
-        setSpeedRemote:FireServer(nextSpeed)
-    end)
+            setSpeedRemote:FireServer(nextSpeed)
+        end)
+    end
 end
 
 local function updateModule(row, moduleState)
@@ -319,6 +347,8 @@ function HUD.update(state)
     setNet(refs.energy.net, state.netEnergy)
     setNet(refs.water.net, state.netWater)
     setNet(refs.food.net, state.netFood)
+    setDaysLeft(refs.water.days, state.daysLeft and state.daysLeft.water)
+    setDaysLeft(refs.food.days, state.daysLeft and state.daysLeft.food)
 
     refs.day.Text = string.format("Day %d / %d", state.day, state.totalDays)
     refs.mission.Text = state.missionText or ""
@@ -343,15 +373,27 @@ function HUD.update(state)
     end
 
     currentSpeed = state.speed
-    refs.speed.Text = string.format("%dx", state.speed)
+    if refs.speed then
+        refs.speed.Text = string.format("%dx", state.speed)
+    end
 
+    local stallReason = state.stallReason
     if state.shortageDays > 0 then
         refs.banner.Visible = true
+        refs.banner.BackgroundColor3 = Colors.bad
+        refs.bannerText.TextColor3 = Colors.text
+        refs.bannerText.TextSize = 20
         refs.bannerText.Text = string.format(
             "자원 부족 %d일째. %d일이면 임무 실패",
             state.shortageDays,
             config.SHORTAGE_DAYS_TO_LOSE
         )
+    elseif type(stallReason) == "string" and stallReason ~= "" then
+        refs.banner.Visible = true
+        refs.banner.BackgroundColor3 = Colors.energy
+        refs.bannerText.TextColor3 = Colors.bg
+        refs.bannerText.TextSize = 16
+        refs.bannerText.Text = stallReason
     else
         refs.banner.Visible = false
     end
