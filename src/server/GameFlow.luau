@@ -1,0 +1,210 @@
+--!strict
+-- 게임 흐름: phase 전이, DayTick 처리, 승리/실패 판정, 배속, 재시작 (CONTRACT 3절)
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Config = require(ReplicatedStorage.Shared.Config)
+local Remotes = require(ReplicatedStorage.Shared.Remotes)
+local Simulation = require(ReplicatedStorage.Shared.Simulation)
+local Types = require(ReplicatedStorage.Shared.Types)
+local Construction = require(script.Parent.Construction)
+local GameClock = require(script.Parent.GameClock)
+local LandingSite = require(script.Parent.LandingSite)
+local Oxygen = require(script.Parent.Oxygen)
+local ResourceState = require(script.Parent.ResourceState)
+local RoverDrive = require(script.Parent.RoverDrive)
+local RoverRecovery = require(script.Parent.RoverRecovery)
+local ServerUtil = require(script.Parent.ServerUtil)
+local SolarPanels = require(script.Parent.SolarPanels)
+local WaterLoop = require(script.Parent.WaterLoop)
+
+local GameFlow = {}
+
+local started = false
+local lastSpeedRequest: { [Player]: number } = {} -- 플레이어별 마지막 SetSpeed 수락 시각 (os.clock)
+
+-- 기지가 놓이면 각 시스템을 연결한다.
+-- Oxygen은 Construction이 Ghost/Built를 빼기 전에 구역을 모아야 하고,
+-- RoverRecovery는 물리가 시작되기 전에 로버 홈 위치를 저장해야 한다.
+local function onBasePlaced(base: Model)
+    Oxygen.attach(base)
+    RoverRecovery.attach(base)
+    SolarPanels.attach(base)
+    Construction.attach(base)
+    WaterLoop.attach(base)
+    RoverDrive.attach(base)
+end
+
+-- phase에 따라 켜고 끄는 프롬프트를 모두 현재 상태에 맞춘다
+local function refreshPrompts(prev: Simulation.GameState?)
+    local state = ResourceState.get()
+    Construction.sync(prev, state)
+    SolarPanels.refresh()
+    WaterLoop.refresh()
+    RoverRecovery.refresh()
+end
+
+-- 착륙 연출이 끝나 playing이 되면 프롬프트를 켜고 시계를 시작한다
+local function onPlaying()
+    refreshPrompts(nil)
+    GameClock.start(ResourceState.get().speed)
+end
+
+local handlers: LandingSite.Handlers = {
+    onBasePlaced = onBasePlaced,
+    onPlaying = onPlaying,
+}
+
+local function endGame(result: Simulation.EndResult, reason: string)
+    GameClock.stop()
+    local finished = Simulation.finishGame(ResourceState.get(), Config, result)
+    ResourceState.set(finished)
+    refreshPrompts(nil)
+    ResourceState.publish()
+    local info: Types.GameOverInfo = {
+        won = result == "won",
+        reason = reason,
+        day = finished.day,
+        waterTrips = finished.waterTrips,
+        oxygenDeaths = finished.oxygenDeaths,
+        siteName = finished.siteName or "",
+    }
+    Remotes.get("GameOver"):FireAllClients(info)
+end
+
+-- DayTick 1회: 하루 계산 -> 화면 반영 -> 경고 -> 종료 판정 -> 송신
+local function onDayTick()
+    local prev = ResourceState.get()
+    if prev.phase ~= "playing" then
+        return
+    end
+    local new = Simulation.applyDay(prev, Config)
+    ResourceState.set(new)
+    refreshPrompts(prev)
+
+    local t = Config.TEXTS
+    if new.modulesStalled and not prev.modulesStalled then
+        ResourceState.notifyAll(t.modulesStalled, "warn")
+    end
+
+    local result: Simulation.EndResult, reason: string = Simulation.checkEnd(new, Config)
+    if result == "won" or result == "lost" then
+        endGame(result, reason)
+        return
+    end
+    if new.shortageDays > 0 then
+        local text = string.format(
+            t.shortageWarn,
+            Simulation.shortageName(new, Config),
+            new.shortageDays,
+            Config.SHORTAGE_DAYS_TO_LOSE
+        )
+        ResourceState.notifyAll(text, "warn")
+    end
+    ResourceState.publish()
+end
+
+-- 새 게임: 상태 초기화 후 착륙지 선택 단계로. leaving은 지금 나가는 중이라 권한자에서 뺄 플레이어
+local function beginNewGame(leaving: Player?)
+    ResourceState.reset()
+    Oxygen.resetAll()
+    ResourceState.publish()
+    LandingSite.beginSelection(handlers, leaving)
+end
+
+-- 재시작: 전원 하차, 시스템 분리, 기지 제거, 상태 초기화 후 selecting으로
+local function restart(leaving: Player?)
+    GameClock.stop()
+    for _, player in Players:GetPlayers() do
+        ServerUtil.unseatPlayer(player)
+    end
+    RoverRecovery.detach()
+    SolarPanels.detach()
+    Construction.detach()
+    WaterLoop.detach()
+    RoverDrive.detach()
+    Oxygen.detach()
+    local base = ServerUtil.getBase()
+    if base then
+        base:Destroy()
+    end
+    beginNewGame(leaving)
+end
+
+local function onSetSpeed(player: Player, speed: any)
+    local state = ResourceState.get()
+    if state.phase ~= "playing" then
+        return
+    end
+    if typeof(speed) ~= "number" or not table.find(Config.SPEEDS, speed) then
+        return
+    end
+    if state.speed == speed then
+        return
+    end
+    local now = os.clock()
+    local last = lastSpeedRequest[player]
+    if last and now - last < Config.SPEED_COOLDOWN_SECONDS then
+        return
+    end
+    lastSpeedRequest[player] = now
+    ResourceState.patch(function(s)
+        s.speed = speed
+    end)
+    GameClock.setSpeed(speed)
+    ResourceState.notifyAll(string.format(Config.TEXTS.speedChanged, speed), "info")
+    ResourceState.publish()
+end
+
+local function onRequestRestart(_player: Player)
+    local phase = ResourceState.get().phase
+    if phase ~= "won" and phase ~= "lost" then
+        return
+    end
+    restart()
+end
+
+local function onPlayerAdded(player: Player)
+    ResourceState.publishTo(player)
+    Oxygen.addPlayer(player)
+    LandingSite.onPlayerAdded(player)
+end
+
+-- 마지막 플레이어가 나가면 재시작과 같은 정리를 하고 selecting으로 되돌린다 (선택 타이머도 취소됨)
+local function onPlayerRemoving(player: Player)
+    lastSpeedRequest[player] = nil
+    LandingSite.onPlayerRemoving(player)
+    for _, other in Players:GetPlayers() do
+        if other ~= player then
+            return
+        end
+    end
+    restart(player)
+end
+
+function GameFlow.start()
+    if started then
+        return
+    end
+    started = true
+
+    LandingSite.init()
+    WaterLoop.init()
+    Oxygen.init()
+    RoverRecovery.init()
+    GameClock.onDayTick(onDayTick)
+
+    Remotes.get("SetSpeed").OnServerEvent:Connect(onSetSpeed)
+    Remotes.get("RequestRestart").OnServerEvent:Connect(onRequestRestart)
+
+    beginNewGame()
+
+    Players.PlayerAdded:Connect(onPlayerAdded)
+    Players.PlayerRemoving:Connect(onPlayerRemoving)
+    for _, player in Players:GetPlayers() do
+        onPlayerAdded(player)
+    end
+end
+
+return GameFlow

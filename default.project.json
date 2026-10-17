@@ -29,7 +29,7 @@
     "Workspace": {
       "$className": "Workspace",
       "$properties": {
-        "Gravity": 16
+        "Gravity": 32.7
       }
     }
   }
