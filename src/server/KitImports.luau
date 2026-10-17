@@ -194,6 +194,13 @@ function KitImports.fitInto(model: Model, box: Vector3, bottomCenter: Vector3)
     KitImports.placeBottom(model, bottomCenter)
 end
 
+-- 앞뒤(Z) 길이가 length가 되도록 균일 스케일한 뒤 바닥면 중심을 bottomCenter에 맞춘다 (높이 제한 없음)
+function KitImports.fitLength(model: Model, length: number, bottomCenter: Vector3)
+    local lo, hi = KitImports.bounds(model)
+    KitImports.scaleBy(model, length / math.max(hi.Z - lo.Z, MIN_EXTENT))
+    KitImports.placeBottom(model, bottomCenter)
+end
+
 -- 수평 긴 축이 axis("X" 또는 "Z")를 향하도록 필요하면 90도 돌린다
 function KitImports.alignLongAxis(model: Model, axis: "X" | "Z")
     local lo, hi = KitImports.bounds(model)

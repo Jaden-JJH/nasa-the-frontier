@@ -72,8 +72,10 @@ local ROVER_CONSOLE_SIZE = Vector3.new(2, 3, 1)
 
 local SOLAR_CENTER = Vector3.new(34, 0, 6)
 local SOLAR_COLUMNS, SOLAR_ROWS = 5, 6
-local SLOT_SIZE = Vector3.new(5, 0.2, 3.5)
-local SLOT_GAP_X, SLOT_GAP_Z = 1.2, 1.5
+-- 슬롯 한 칸 5 x 4, 간격 1 (필드 전체 약 29 x 29). 키트 패널 바닥 비율(약 1.29 : 1.67)에 맞춰
+-- 정사각형 대신 5 x 4로 두어 균일 스케일해도 두 변이 모두 슬롯의 90% 이상을 채운다
+local SLOT_SIZE = Vector3.new(5, 0.2, 4)
+local SLOT_GAP_X, SLOT_GAP_Z = 1, 1
 local INSTALL_PAD_POSITION = Vector3.new(34, 0, -13)
 local INSTALL_PAD_SIZE = Vector3.new(6, 0.6, 6)
 
@@ -101,7 +103,8 @@ local WALL = 1
 -- 로버 치수
 local CHASSIS_SIZE = Vector3.new(6, 1, 10)
 local WHEEL_WIDTH = 1.2
-local WHEEL_OFFSET_X = CHASSIS_SIZE.X / 2 + 0.2 + WHEEL_WIDTH / 2
+local WHEEL_CHASSIS_GAP = 0.2 -- 섀시 옆면과 바퀴 안쪽 사이 틈
+local WHEEL_OFFSET_X = CHASSIS_SIZE.X / 2 + WHEEL_CHASSIS_GAP + WHEEL_WIDTH / 2
 local WHEEL_OFFSET_Z = 3.5
 local WHEEL_CLEARANCE = 0.1
 -- 바퀴 위치 부호 (x: 좌 -1 우 1, z: 앞 -1 뒤 1)
@@ -114,9 +117,13 @@ local WHEEL_CORNERS: { { x: number, z: number, tag: string } } = {
 
 -- KitImports 외형 목표 크기 (studs, 폭 X, 높이 Y, 깊이 Z). 메시는 이 상자 안에 들어가게 균일 스케일한다
 local ROVER_SEAT_SIZE = Vector3.new(2, 1, 2)
-local ROVER_VISUAL_BOX = Vector3.new(8.8, 3.5, 11) -- 바퀴 포함 리그 크기. 높이를 낮게 두어 좌석 높이를 제한
+local ROVER_VISUAL_LENGTH = 11 -- 로버 메시 앞뒤 길이 (리그 길이). 폭과 높이는 원본 비율 그대로
+local ROVER_MIN_WHEEL_OFFSET_X = 2.5 -- 메시가 아주 좁아도 바퀴 간격은 이보다 좁히지 않는다 (전복 방지)
+local ROVER_SEAT_HEIGHT_RATIO = 0.55 -- 좌석 중심 높이 = 메시 바닥에서 메시 높이의 이 비율 (조종석 높이)
+local ROVER_SEAT_MAX_HEIGHT = 4.5 -- 좌석 중심 높이 상한 (메시 바닥 기준)
+local ROVER_SEAT_FORWARD_RATIO = 0.2 -- 좌석을 메시 중심에서 앞쪽(-Z)으로 메시 길이의 이 비율만큼
 local ROVER_SHOW_RIG_WHEELS = false -- 메시를 쓸 때 물리 바퀴 원기둥을 보일지 (메시 바퀴와 겹치므로 기본은 숨김)
-local LANDER_VISUAL_BOX = Vector3.new(14, 18, 14) -- 그레이박스 착륙선 바닥 넓이 안
+local LANDER_VISUAL_BOX = Vector3.new(14, 40, 14) -- 폭 약 14, 높이는 원본 비율대로 (높이 상한은 사실상 없음)
 local LANDER_ZONE_MARGIN = 4 -- 착륙선 메시 경계 상자 바깥으로 산소 구역을 넓히는 거리
 local MODULE_VISUAL_BOX = {
     A = Vector3.new(17, 12, 17),
@@ -124,7 +131,10 @@ local MODULE_VISUAL_BOX = {
     C = Vector3.new(20, 16, 20),
 }
 local HABITAT_ZONE_MARGIN = 4 -- Habitat 메시 경계 상자 바깥으로 산소 구역을 넓히는 거리
-local PANEL_VISUAL_BOX = Vector3.new(4.8, 1.5, 3.4) -- 슬롯(5 x 3.5) 안
+local PANEL_FILL = 0.95 -- 패널 바닥이 슬롯 x, z의 이 비율을 채운다 (메시와 그레이박스 공통)
+local PANEL_MAX_HEIGHT = 20 -- 메시 패널 높이 상한 (사실상 없음, 높이는 원본 비율대로)
+local PANEL_FRAME_HEIGHT, PANEL_GLASS_HEIGHT = 0.2, 0.3 -- 그레이박스 패널 틀과 판 두께
+local PANEL_GLASS_INSET = 0.1 -- 그레이박스 패널 판이 틀 안쪽으로 들어가는 폭
 local ROCK_BASE_SIZE = 5.5 -- 바위 메시의 기준 크기 (가장 긴 변)
 local ROCK_SCALE_MIN, ROCK_SCALE_MAX = 0.7, 1.4 -- 기준 크기에 곱하는 무작위 배율
 
@@ -132,12 +142,12 @@ local ROCK_SCALE_MIN, ROCK_SCALE_MAX = 0.7, 1.4 -- 기준 크기에 곱하는 �
 local ICE_CRYSTAL_FILL = 0.85 -- 얼음 Part 바닥 넓이 대비 결정 메시 폭 (Part보다 약간 작게)
 local ICE_CRYSTAL_MAX_HEIGHT = 9 -- 결정은 위로 솟아도 되지만 이 높이까지
 local ICE_CRYSTAL_EMBED = 0.3 -- 지면에 묻는 깊이
-local WATER_TANK_VISUAL_BOX = Vector3.new(8, 7, 8)
+local WATER_TANK_VISUAL_BOX = Vector3.new(7, 7, 7)
 local PAD_RING_MAX_HEIGHT = 1.5 -- 링 메시 높이 상한
 local PAD_RING_RAISE = 0.1 -- 링 윗면이 패드 윗면보다 이만큼만 올라오게 묻는다 (Ghost, Built와 겹치지 않게)
-local MAST_BOX = Vector3.new(2, 3.5, 2) -- 착륙선 지붕 안테나
-local RADAR_BOX = Vector3.new(3.5, 3.5, 3.5) -- 착륙선 지붕 레이더
-local CONSOLE_MAST_BOX = Vector3.new(1.2, 3, 1.2) -- 로버 복구 콘솔 위 안테나
+local MAST_BOX = Vector3.new(1.5, 2.5, 1.5) -- 착륙선 지붕 안테나 (높이 2.5)
+local RADAR_BOX = Vector3.new(2.5, 2.5, 2.5) -- 착륙선 지붕 레이더 (높이 2.5)
+local CONSOLE_MAST_BOX = Vector3.new(1, 1.5, 1) -- 로버 복구 콘솔 위 안테나 (높이 1.5)
 local ROOF_DECOR_OFFSET = 3 -- 지붕 중심에서 안테나와 레이더를 좌우로 띄우는 거리 (지붕 반폭의 절반까지)
 local CRATE_SIZE = 3
 local CRATE_ORIGIN = Vector3.new(11, 0, 16) -- 착륙선 뒤 오른쪽 (스폰, 로버 경로, 모듈 통로를 피함)
@@ -675,9 +685,30 @@ local function buildRover(kit: Model)
     local chassisY = wheelY + CHASSIS_SIZE.Y / 2 - 0.2
     local chassisCFrame = CFrame.new(ROVER_CENTER.X, chassisY, ROVER_CENTER.Z)
 
+    -- 외형 메시 (KitImports.Rover)를 먼저 앞뒤 길이 기준으로 스케일해서 바퀴 간격을 메시 폭에 맞춘다
+    local visual, yawSet = KitImports.take("Rover")
+    local wheelOffsetX = WHEEL_OFFSET_X
+    local chassisSize = CHASSIS_SIZE
+    if visual then
+        if not yawSet then
+            KitImports.alignLongAxis(visual, "Z")
+        end
+        KitImports.fitLength(
+            visual,
+            ROVER_VISUAL_LENGTH,
+            Vector3.new(chassisCFrame.X, FLOOR_Y + WHEEL_CLEARANCE, chassisCFrame.Z)
+        )
+        local lo, hi = KitImports.bounds(visual)
+        wheelOffsetX = math.max((hi.X - lo.X) / 2 - WHEEL_WIDTH / 2, ROVER_MIN_WHEEL_OFFSET_X)
+        -- 섀시는 두 바퀴 사이에 들어가는 폭으로 (기본 폭보다 넓히지는 않는다)
+        local innerWidth = 2 * (wheelOffsetX - WHEEL_WIDTH / 2 - WHEEL_CHASSIS_GAP)
+        chassisSize =
+            Vector3.new(math.min(CHASSIS_SIZE.X, innerWidth), CHASSIS_SIZE.Y, CHASSIS_SIZE.Z)
+    end
+
     local chassis = makePart({
         name = "Chassis",
-        size = CHASSIS_SIZE,
+        size = chassisSize,
         cframe = chassisCFrame,
         color = COLORS.rover,
         material = Enum.Material.Metal,
@@ -704,8 +735,7 @@ local function buildRover(kit: Model)
 
     for _, corner in WHEEL_CORNERS do
         local sx, sz, tag = corner.x, corner.z, corner.tag
-        local localPosition =
-            Vector3.new(sx * WHEEL_OFFSET_X, wheelY - chassisY, sz * WHEEL_OFFSET_Z)
+        local localPosition = Vector3.new(sx * wheelOffsetX, wheelY - chassisY, sz * WHEEL_OFFSET_Z)
         local wheelCFrame = chassisCFrame * CFrame.new(localPosition)
         local wheel = makePart({
             name = "Wheel" .. tag,
@@ -764,19 +794,10 @@ local function buildRover(kit: Model)
         end
     end
 
-    -- 외형 메시 (KitImports.Rover). 물리 리그는 그대로 두고 메시를 얹어 섀시에 용접한다
+    -- 메시를 섀시에 용접한다 (물리 리그는 그대로)
     local seatCFrame = chassisCFrame
         * CFrame.new(0, CHASSIS_SIZE.Y / 2 + ROVER_SEAT_SIZE.Y / 2, 1.5)
-    local visual, yawSet = KitImports.take("Rover")
     if visual then
-        if not yawSet then
-            KitImports.alignLongAxis(visual, "Z")
-        end
-        KitImports.fitInto(
-            visual,
-            ROVER_VISUAL_BOX,
-            Vector3.new(chassisCFrame.X, FLOOR_Y + WHEEL_CLEARANCE, chassisCFrame.Z)
-        )
         visual.Name = "Visual"
         KitImports.forEachPart(visual, function(part)
             part.Anchored = false
@@ -795,9 +816,11 @@ local function buildRover(kit: Model)
                 wheel.Transparency = 1
             end
         end
-        -- 좌석은 메시 윗면 중앙에 올려 보이고 탈 수 있게 한다
-        local _, top = KitImports.bounds(visual)
-        seatCFrame = CFrame.new(chassisCFrame.X, top.Y + ROVER_SEAT_SIZE.Y / 2, chassisCFrame.Z)
+        -- 좌석은 조종석 높이, 앞쪽 중앙. 메시는 CanCollide가 꺼져 있어 캐릭터가 겹쳐 앉아도 된다
+        local lo, hi = KitImports.bounds(visual)
+        local seatHeight = math.min((hi.Y - lo.Y) * ROVER_SEAT_HEIGHT_RATIO, ROVER_SEAT_MAX_HEIGHT)
+        local seatForward = (hi.Z - lo.Z) * ROVER_SEAT_FORWARD_RATIO
+        seatCFrame = CFrame.new(chassisCFrame.X, lo.Y + seatHeight, (lo.Z + hi.Z) / 2 - seatForward)
     end
 
     -- 좌석은 위치를 정한 뒤 용접한다
@@ -1130,11 +1153,13 @@ end
 local function buildPanelTemplate()
     local visual, yawSet = KitImports.take("Panel")
     if visual then
-        -- 외형 메시: 슬롯 크기에 맞게 스케일 (긴 변을 슬롯의 긴 변 X에 맞춘다)
+        -- 외형 메시: 슬롯 바닥을 꽉 채우게 균일 스케일 (긴 변을 슬롯의 긴 변 X에 맞추고 높이는 비율대로)
         if not yawSet then
             KitImports.alignLongAxis(visual, "X")
         end
-        KitImports.fitInto(visual, PANEL_VISUAL_BOX, Vector3.zero)
+        local footprint =
+            Vector3.new(SLOT_SIZE.X * PANEL_FILL, PANEL_MAX_HEIGHT, SLOT_SIZE.Z * PANEL_FILL)
+        KitImports.fitInto(visual, footprint, Vector3.zero)
         KitImports.forEachPart(visual, function(part)
             part.Anchored = true
             part.CanCollide = false
@@ -1146,11 +1171,17 @@ local function buildPanelTemplate()
         visual.Parent = ServerStorage
         return
     end
+    -- 그레이박스 패널도 같은 규칙: 틀이 슬롯 x, z의 PANEL_FILL을 채운다
     local template = makeModel("PanelTemplate", nil)
+    local frameX, frameZ = SLOT_SIZE.X * PANEL_FILL, SLOT_SIZE.Z * PANEL_FILL
     local panel = makePart({
         name = "Panel",
-        size = Vector3.new(4.6, 0.3, 3.2),
-        cframe = CFrame.new(0, 0.35, 0),
+        size = Vector3.new(
+            frameX - 2 * PANEL_GLASS_INSET,
+            PANEL_GLASS_HEIGHT,
+            frameZ - 2 * PANEL_GLASS_INSET
+        ),
+        cframe = CFrame.new(0, PANEL_FRAME_HEIGHT + PANEL_GLASS_HEIGHT / 2, 0),
         color = COLORS.panel,
         material = Enum.Material.Glass,
         parent = template,
@@ -1158,8 +1189,8 @@ local function buildPanelTemplate()
     panel.Reflectance = 0.2
     makePart({
         name = "Frame",
-        size = Vector3.new(4.8, 0.2, 3.4),
-        cframe = CFrame.new(0, 0.1, 0),
+        size = Vector3.new(frameX, PANEL_FRAME_HEIGHT, frameZ),
+        cframe = CFrame.new(0, PANEL_FRAME_HEIGHT / 2, 0),
         color = COLORS.panelFrame,
         material = Enum.Material.Metal,
         parent = template,

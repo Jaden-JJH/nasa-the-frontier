@@ -26,6 +26,37 @@ local function check(cond, label)
     end
 end
 
+-- 패널 복제본 바닥이 슬롯 x, z를 채우는 비율 (슬롯 좌표계 기준)
+local function panelFill(panel, slot)
+    local lo = Vector3.new(math.huge, math.huge, math.huge)
+    local hi = -lo
+    for _, d in panel:GetDescendants() do
+        if d:IsA("BasePart") then
+            local h = d.Size / 2
+            for _, sx in { -1, 1 } do
+                for _, sy in { -1, 1 } do
+                    for _, sz in { -1, 1 } do
+                        local p = slot.CFrame:PointToObjectSpace(
+                            d.CFrame * Vector3.new(sx * h.X, sy * h.Y, sz * h.Z)
+                        )
+                        lo = Vector3.new(
+                            math.min(lo.X, p.X),
+                            math.min(lo.Y, p.Y),
+                            math.min(lo.Z, p.Z)
+                        )
+                        hi = Vector3.new(
+                            math.max(hi.X, p.X),
+                            math.max(hi.Y, p.Y),
+                            math.max(hi.Z, p.Z)
+                        )
+                    end
+                end
+            end
+        end
+    end
+    return (hi.X - lo.X) / slot.Size.X, (hi.Z - lo.Z) / slot.Size.Z
+end
+
 -- 가상 시계와 task 스케줄러 ---------------------------------------------
 local now = 0
 local queue = {}
@@ -632,6 +663,17 @@ check(
     ) < 0.01,
     "패널이 슬롯 윗면에 놓임"
 )
+do
+    local fillX, fillZ = panelFill(panel1, slot1)
+    check(
+        fillX >= 0.8 and fillZ >= 0.8 and fillX <= 1 and fillZ <= 1,
+        string.format(
+            "그레이박스 패널 바닥이 슬롯의 %.0f%% x %.0f%% (80%% 이상)",
+            fillX * 100,
+            fillZ * 100
+        )
+    )
+end
 
 advance(Config.DAY_SECONDS)
 check(
@@ -1119,23 +1161,24 @@ local function fakeModel(name, specs)
     m.Parent = importsFolder
     return m
 end
--- Rover: 긴 축이 X인 큰 모델 (자동 방향 맞춤과 축소 확인)
+-- Rover: 실제 키트 비율 4.58 x 4.88(안테나 포함 높이) x 6.56 (폭, 높이, 길이)
 local roverSource = fakeModel("Rover", {
-    { Vector3.new(16, 3, 8), Vector3.new(100, 50, 0) },
-    { Vector3.new(4, 2, 4), Vector3.new(100, 52.5, 0) },
+    { Vector3.new(4.58, 3.6, 6.56), Vector3.new(100, 50, 0) }, -- 차체: y 48.2 ~ 51.8
+    { Vector3.new(0.3, 1.28, 0.3), Vector3.new(100, 52.44, 1) }, -- 안테나: y 51.8 ~ 53.08
 })
+-- Lander: House Cylinder 비율 5.6 x 4.3 x 5.6 (다리 달린 돔)
 fakeModel("Lander", {
-    { Vector3.new(6, 20, 6), Vector3.new(-50, 10, 0) },
-    { Vector3.new(10, 1, 10), Vector3.new(-50, 0.5, 0) },
+    { Vector3.new(5.6, 3.3, 5.6), Vector3.new(-50, 2.65, 0) },
+    { Vector3.new(0.4, 1, 0.4), Vector3.new(-47.6, 0.5, 2.4) },
 })
 fakeModel("HabitatA", {
     { Vector3.new(40, 10, 30), Vector3.new(0, 5, 200) },
     { Vector3.new(10, 4, 10), Vector3.new(0, 12, 200) },
 })
--- Panel: 단일 파트 (MeshPart 대용), 긴 축이 Z
+-- Panel: 단일 파트 (MeshPart 대용), 키트 비율 1.29 x 1.10 x 1.67 (긴 축이 Z)
 local panelSource = Instance.new("Part")
 panelSource.Name = "Panel"
-panelSource.Size = Vector3.new(1.4, 0.1, 2)
+panelSource.Size = Vector3.new(1.29, 1.10, 1.67)
 panelSource.CFrame = CFrame.new(0, 30, 30)
 panelSource.Parent = importsFolder
 fakeModel("Rock1", { { Vector3.new(2, 1.5, 2.5), Vector3.zero } })
@@ -1147,10 +1190,7 @@ fakeModel("Rovr", { { Vector3.one, Vector3.zero } }) -- 이름 오타
 -- 장식 10종 (원본 크기는 키트 유닛 수준으로 작게)
 fakeModel("Planet", { { Vector3.new(3.8, 3.8, 3.8), Vector3.new(0, 80, 0) } })
 fakeModel("IceCrystal", { { Vector3.new(1.5, 2.5, 1.2), Vector3.new(0, 90, 0) } })
-fakeModel("WaterTank", {
-    { Vector3.new(5.6, 3.3, 5.6), Vector3.new(0, 100, 0) },
-    { Vector3.new(0.4, 1, 0.4), Vector3.new(2, 98, 2) },
-})
+fakeModel("WaterTank", { { Vector3.new(4, 4, 3.8), Vector3.new(0, 100, 0) } }) -- House Single 비율
 fakeModel("Connector", { { Vector3.new(3.37, 2.2, 2.2), Vector3.new(0, 110, 0) } }) -- 긴 축 X
 fakeModel("ConnectorElbow", { { Vector3.new(7.8, 2.2, 7.8), Vector3.new(0, 120, 0) } })
 fakeModel("Pad", { { Vector3.new(6, 0.87, 6), Vector3.new(0, 130, 0) } })
@@ -1224,24 +1264,45 @@ check(
     weldedToChassis == #visual:GetChildren(),
     "로버 메시 파트 전부 섀시에 용접 (" .. weldedToChassis .. ")"
 )
-local vLo, vHi = boundsOf(visual)
-local vSize = vHi - vLo
-check(
-    vSize.X <= 8.8 + EPS and vSize.Y <= 3.5 + EPS and vSize.Z <= 11 + EPS and vSize.Z >= vSize.X,
-    string.format(
-        "로버 메시가 리그 상자 안, 긴 축 Z (%.1f x %.1f x %.1f)",
-        vSize.X,
-        vSize.Y,
-        vSize.Z
+do
+    local vLo, vHi = boundsOf(visual)
+    local vSize = vHi - vLo
+    local roverScale = 11 / 6.56
+    check(
+        math.abs(vSize.Z - 11) < 0.01
+            and math.abs(vSize.X - 4.58 * roverScale) < 0.01
+            and math.abs(vSize.Y - 4.88 * roverScale) < 0.01,
+        string.format(
+            "로버 메시: 앞뒤 길이 11 기준 균일 스케일, 높이 제한 없음 (%.2f x %.2f x %.2f)",
+            vSize.X,
+            vSize.Y,
+            vSize.Z
+        )
     )
-)
-local seat2 = rover2.DriverSeat
-check(
-    math.abs((seat2.CFrame.Position.Y - seat2.Size.Y / 2) - vHi.Y) < EPS
-        and math.abs(seat2.CFrame.Position.X - rover2.Chassis.CFrame.Position.X) < EPS
-        and math.abs(seat2.CFrame.Position.Z - rover2.Chassis.CFrame.Position.Z) < EPS,
-    "DriverSeat가 메시 윗면 중앙"
-)
+    local seat2 = rover2.DriverSeat
+    local chassis2 = rover2.Chassis
+    local seatHeight = seat2.CFrame.Position.Y - vLo.Y
+    check(
+        seatHeight <= 4.5 + EPS
+            and math.abs(seatHeight - math.min(vSize.Y * 0.55, 4.5)) < EPS
+            and seat2.CFrame.Position.Z < (vLo.Z + vHi.Z) / 2
+            and math.abs(seat2.CFrame.Position.X - chassis2.CFrame.Position.X) < EPS,
+        string.format(
+            "DriverSeat: 메시 바닥에서 %.2f (4.5 이하), 앞쪽 중앙",
+            seatHeight
+        )
+    )
+    local wheelHalf = rover2.WheelFL.Size.X / 2
+    local track = math.abs(rover2.WheelFL.CFrame.Position.X - chassis2.CFrame.Position.X)
+    check(
+        math.abs(track - (vSize.X / 2 - wheelHalf)) < EPS
+            and chassis2.Size.X / 2 <= track - wheelHalf + EPS,
+        string.format(
+            "바퀴 간격이 메시 폭에 맞고 섀시는 바퀴 사이 (중심에서 %.2f)",
+            track
+        )
+    )
+end
 check(
     rover2.Chassis.Transparency == 1 and rover2.WheelFL.Transparency == 1,
     "리그 섀시와 바퀴는 숨김"
@@ -1259,6 +1320,32 @@ check(
 )
 local lLo, lHi = boundsOf(landerVisual)
 check(boxContains(lander2.OxygenZone, lLo, lHi), "착륙선 OxygenZone이 메시를 덮음")
+do
+    local size = lHi - lLo
+    check(
+        math.abs(size.X - 14) < 0.01 and math.abs(size.Y - 4.3 * 14 / 5.6) < 0.01,
+        string.format(
+            "착륙선 메시: 폭 14, 높이는 비율대로 (%.2f x %.2f x %.2f)",
+            size.X,
+            size.Y,
+            size.Z
+        )
+    )
+    local function overlapsXZ(model)
+        local lo, hi = boundsOf(model)
+        return lo.X < lHi.X and hi.X > lLo.X and lo.Z < lHi.Z and hi.Z > lLo.Z
+    end
+    local function partOverlapsXZ(part)
+        local c, h = part.CFrame.Position, part.Size / 2
+        return c.X - h.X < lHi.X and c.X + h.X > lLo.X and c.Z - h.Z < lHi.Z and c.Z + h.Z > lLo.Z
+    end
+    check(
+        not partOverlapsXZ(lander2.SpawnPoint)
+            and not partOverlapsXZ(lander2.RoverConsole)
+            and not overlapsXZ(kitImport.Crates),
+        "SpawnPoint, 복구 콘솔, 상자가 착륙선 발밑과 겹치지 않음"
+    )
+end
 -- 산소 판정은 캐릭터 중심 기준이므로 스폰된 캐릭터 중심 높이에서 본다
 local spawnPart = lander2.SpawnPoint
 local spawnRoot = spawnPart.CFrame.Position
@@ -1302,7 +1389,7 @@ local panel2 = ServerStorage2:FindFirstChild("PanelTemplate")
 local pLo, pHi = boundsOf(panel2)
 check(panel2.PrimaryPart ~= nil, "PanelTemplate PrimaryPart")
 check(
-    pHi.X - pLo.X <= 5 + EPS and pHi.Z - pLo.Z <= 3.5 + EPS and pHi.X - pLo.X >= pHi.Z - pLo.Z,
+    pHi.X - pLo.X <= 5 + EPS and pHi.Z - pLo.Z <= 4 + EPS and pHi.X - pLo.X >= pHi.Z - pLo.Z,
     string.format(
         "패널이 슬롯 크기 안, 긴 축 X (%.2f x %.2f)",
         pHi.X - pLo.X,
@@ -1393,7 +1480,10 @@ local function runDecorScenario()
     check(tankB.Transparency == 1 and tankVisual ~= nil, "WaterTank Part 투명 + 메시 교체")
     local tLo, tHi = boundsOf(tankVisual)
     check(
-        tHi.X - tLo.X <= 8 + EPS and tHi.Y - tLo.Y <= 7 + EPS and tHi.Z - tLo.Z <= 8 + EPS,
+        tHi.X - tLo.X <= 7 + EPS
+            and tHi.Y - tLo.Y <= 7 + EPS
+            and tHi.Z - tLo.Z <= 7 + EPS
+            and math.max(tHi.X - tLo.X, tHi.Y - tLo.Y, tHi.Z - tLo.Z) > 7 - EPS,
         string.format(
             "물탱크 메시 크기 %.1f x %.1f x %.1f",
             tHi.X - tLo.X,
@@ -1429,12 +1519,17 @@ local function runDecorScenario()
     local aLo2, aHi2 = boundsOf(landerB.RoofAntenna)
     local _, landerTop = boundsOf(landerB.Visual)
     check(
-        math.abs(aLo2.Y - landerTop.Y) < EPS and aHi2.Y - aLo2.Y <= 3.5 + EPS,
-        "안테나가 착륙선 위, 높이 3.5 이하"
+        math.abs(aLo2.Y - landerTop.Y) < EPS and aHi2.Y - aLo2.Y <= 2.5 + EPS,
+        "안테나가 착륙선 위, 높이 2.5 이하"
     )
     local consoleTop = landerB.RoverConsole.CFrame.Position.Y + landerB.RoverConsole.Size.Y / 2
-    local caLo = boundsOf(landerB.ConsoleAntenna)
-    check(math.abs(caLo.Y - consoleTop) < EPS, "콘솔 안테나가 콘솔 윗면 위")
+    local caLo, caHi = boundsOf(landerB.ConsoleAntenna)
+    check(
+        math.abs(caLo.Y - consoleTop) < EPS and caHi.Y - caLo.Y <= 1.5 + EPS,
+        "콘솔 안테나가 콘솔 윗면 위, 높이 1.5 이하"
+    )
+    local rdLo, rdHi = boundsOf(landerB.RoofRadar)
+    check(rdHi.Y - rdLo.Y <= 2.5 + EPS, "레이더 높이 2.5 이하")
     -- 상자
     local crates = kitImport:FindFirstChild("Crates")
     check(crates ~= nil and #crates:GetChildren() == 4, "상자 4개")
@@ -1474,6 +1569,24 @@ local function runDecorScenario()
     local Server2 = dm2:GetService("ServerScriptService").Server
     local ResourceState2 = loadModule2(Server2.ResourceState)
     check(ResourceState2.get().phase == "playing", "두 번째 place도 playing")
+    do
+        local field = Workspace2.Base.SolarField
+        signalFor(field.InstallPad:FindFirstChildOfClass("ProximityPrompt"), "Triggered"):Fire(
+            carol
+        )
+        advance(0)
+        local placed = field.Panels:FindFirstChild("Panel1")
+        check(placed ~= nil, "KitImports 패널 1장 설치")
+        local fillX, fillZ = panelFill(placed, field.Slots.Slot1)
+        check(
+            fillX >= 0.8 and fillZ >= 0.8 and fillX <= 1 and fillZ <= 1,
+            string.format(
+                "KitImports 패널 바닥이 슬롯의 %.0f%% x %.0f%% (80%% 이상)",
+                fillX * 100,
+                fillZ * 100
+            )
+        )
+    end
     ResourceState2.patch(function(st)
         st.energy = 1000
         st.water = 1000
