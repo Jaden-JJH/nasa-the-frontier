@@ -237,10 +237,21 @@ OxygenZone 은 플레이어가 "실내"에 있다고 판단하는 보이지 않�
 | `HabitatC` | Research Lab C 완공 모델과 고스트 | 큰 돔. 키트 파일 `Geodesic Dome.glb` |
 | `Panel` | 태양광 패널 원본(PanelTemplate). 슬롯 한 칸 크기에 맞춥니다. | 지면형 태양광 패널 1장. 키트 파일 `Solar Panel Ground.glb` |
 | `Rock1`, `Rock2`, ... | 지형 바위. 번호 순서로 돌려 쓰고 크기는 0.7 ~ 1.4배 사이에서 무작위입니다. 바위 위치는 그레이박스와 같습니다. | 바위. 키트 파일 `Rock Large.glb`, `Rock Large-li0YBlBEMz.glb`, `Rock.glb` |
+| `Planet` | 하늘의 거대한 행성(지구). 맵 원점에서 약 1500 studs, 고도각 약 25도, 지름 약 400 studs 에 놓이고 충돌과 판정이 없습니다. `Workspace.Decor.Planet` 이 이미 있으면 만들지 않습니다. | 행성. 키트 파일 `Planet-B7xd3SZq0z.glb` |
+| `IceCrystal` | 얼음 지점 외형. 그레이박스가 만든 Ice1 ~ Ice3 Part 는 숨기고(프롬프트와 레이더 거리 기준은 Part 그대로) 결정 메시를 Part 보다 약간 좁게 얹습니다. 충돌은 메시가 맡습니다. | 청록 결정 덩어리. 키트 파일 `Bush-RfUP3gXj69.glb` |
+| `WaterTank` | 기지 물탱크 외형(약 8 x 7 x 8 studs). WaterTank Part 는 숨기고 하역 프롬프트와 하역 거리 기준은 Part 그대로입니다. | 다리 달린 원통 돔. 키트 파일 `House Cylinder.glb` |
+| `Connector` | 모듈 연결 통로. 두 모듈이 모두 완공되는 순간 A-B, B-C 사이에 굵기 약 4 studs 튜브 세그먼트를 길이 방향으로 이어 붙여 놓습니다(늘리지 않음). Base 아래에 생겨 재시작하면 함께 사라집니다. | 직선 튜브. 키트 파일 `Connector.glb` |
+| `ConnectorElbow` | 꺾인 통로용 예약 이름. 지금은 직선 통로만 놓으므로 넣어도 쓰이지 않습니다(경고도 없음). | L자 튜브. 키트 파일 `Building L.glb` |
+| `Pad` | 모듈 패드 3개와 패널 설치대 위의 링 장식. 패드 크기에 맞추고 대부분을 묻어 윗면만 살짝 보이게 해서 고스트와 겹치지 않습니다. 프롬프트 대상은 패드 Part 그대로입니다. | 납작한 링. 키트 파일 `House Single Support.glb` |
+| `Antenna` | 착륙선 지붕 안테나와 로버 복구 콘솔 위 안테나(높이 3 ~ 3.5 studs, 충돌 없음). | 가는 마스트. 키트 파일 `Roof Antenna.glb` |
+| `Radar` | 착륙선 지붕 레이더 접시(충돌 없음). | 접시. 키트 파일 `Roof Radar.glb` |
+| `Crate` | 착륙선 뒤 오른쪽 바닥의 상자 4개(2 x 2, 약 3 studs, 충돌 있음). 스폰 지점, 로버 경로, 모듈로 가는 길을 막지 않는 자리입니다. | 상자. 키트 파일 `Pickup Crate.glb` |
+| `Crop` | Farm B 가 완공되는 순간 건물 앞쪽 반원 바닥에 작물 8개(약 2 studs, 충돌 없음). 정면 통로 자리는 비워 둡니다. Base 아래에 생겨 재시작하면 함께 사라집니다. | 초록 식물. 키트 파일 `Plant-VwXvoIpCHP.glb` |
 
 - 각 항목은 Model 또는 MeshPart 하나입니다. MeshPart 하나만 넣어도 코드가 Model 로 감싸서 처리합니다.
 - 방향: Rover 는 긴 쪽이 앞뒤, Panel 은 긴 쪽이 좌우가 되도록 코드가 90도 돌려 맞춥니다. 앞뒤가 반대로 보이면 그 항목에 number Attribute `Yaw` 를 추가해 각도(도)를 넣습니다. 예: 180. `Yaw` 가 있으면 자동 방향 맞춤은 하지 않습니다.
 - 바위는 맵 전체를 그레이박스로 만들 때, 즉 `Workspace.LandingPads` 가 없을 때만 쓰입니다.
+- 장식 10종은 모두 외형 전용이고, 없으면 지금과 똑같이 동작합니다. `IceCrystal` 은 코드가 얼음 지점을 만들 때만, `WaterTank`, `Pad`, `Antenna`, `Radar`, `Crate` 는 코드가 BaseKit 을 조립할 때만 쓰입니다. `Planet`, `Connector`, `Crop` 은 디자이너가 만든 BaseKit 이나 맵에서도 동작합니다.
 
 ### Studio 에서 하는 일
 

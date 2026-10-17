@@ -17,6 +17,7 @@ local ServerStorage = game:GetService("ServerStorage")
 
 local Config = require(ReplicatedStorage.Shared.Config)
 local KitImports = require(script.Parent.KitImports)
+local ServerUtil = require(script.Parent.ServerUtil)
 
 local DevMap = {}
 
@@ -126,6 +127,22 @@ local HABITAT_ZONE_MARGIN = 4 -- Habitat 메시 경계 상자 바깥으로 산�
 local PANEL_VISUAL_BOX = Vector3.new(4.8, 1.5, 3.4) -- 슬롯(5 x 3.5) 안
 local ROCK_BASE_SIZE = 5.5 -- 바위 메시의 기준 크기 (가장 긴 변)
 local ROCK_SCALE_MIN, ROCK_SCALE_MAX = 0.7, 1.4 -- 기준 크기에 곱하는 무작위 배율
+
+-- KitImports 장식 (선택, 외형 전용). 그레이박스 조립 때만 쓴다
+local ICE_CRYSTAL_FILL = 0.85 -- 얼음 Part 바닥 넓이 대비 결정 메시 폭 (Part보다 약간 작게)
+local ICE_CRYSTAL_MAX_HEIGHT = 9 -- 결정은 위로 솟아도 되지만 이 높이까지
+local ICE_CRYSTAL_EMBED = 0.3 -- 지면에 묻는 깊이
+local WATER_TANK_VISUAL_BOX = Vector3.new(8, 7, 8)
+local PAD_RING_MAX_HEIGHT = 1.5 -- 링 메시 높이 상한
+local PAD_RING_RAISE = 0.1 -- 링 윗면이 패드 윗면보다 이만큼만 올라오게 묻는다 (Ghost, Built와 겹치지 않게)
+local MAST_BOX = Vector3.new(2, 3.5, 2) -- 착륙선 지붕 안테나
+local RADAR_BOX = Vector3.new(3.5, 3.5, 3.5) -- 착륙선 지붕 레이더
+local CONSOLE_MAST_BOX = Vector3.new(1.2, 3, 1.2) -- 로버 복구 콘솔 위 안테나
+local ROOF_DECOR_OFFSET = 3 -- 지붕 중심에서 안테나와 레이더를 좌우로 띄우는 거리 (지붕 반폭의 절반까지)
+local CRATE_SIZE = 3
+local CRATE_ORIGIN = Vector3.new(11, 0, 16) -- 착륙선 뒤 오른쪽 (스폰, 로버 경로, 모듈 통로를 피함)
+local CRATE_PITCH = 3.8
+local CRATE_YAWS = { 0, 12, -8, 20 } -- 2 x 2 상자의 회전(도)
 
 -- 색상
 local COLORS = {
@@ -242,6 +259,72 @@ local function makeSign(part: BasePart, text: string, offsetY: number)
     label.TextSize = layout.textSize
     label.Text = text
     label.Parent = gui
+end
+
+-- KitImports 장식 하나를 box에 맞춰 바닥 중심 bottomCenter에 놓는다 (메시가 없으면 nil)
+local function placeDecor(
+    importName: string,
+    box: Vector3,
+    bottomCenter: Vector3,
+    canCollide: boolean,
+    parent: Instance,
+    name: string
+): Model?
+    local model = KitImports.take(importName)
+    if not model then
+        return nil
+    end
+    KitImports.fitInto(model, box, bottomCenter)
+    KitImports.setStatic(model, canCollide)
+    model.Name = name
+    model.Parent = parent
+    return model
+end
+
+-- 패드 윗면에 링 메시를 패드 크기로 얹고 대부분을 묻는다 (프롬프트 대상은 패드 Part 그대로)
+local function addPadRing(pad: BasePart)
+    local ring = KitImports.take("Pad")
+    if not ring then
+        return
+    end
+    KitImports.fitInto(ring, Vector3.new(pad.Size.X, PAD_RING_MAX_HEIGHT, pad.Size.Z), Vector3.zero)
+    local lo, hi = KitImports.bounds(ring)
+    local padTop = pad.CFrame.Position.Y + pad.Size.Y / 2
+    KitImports.placeBottom(
+        ring,
+        Vector3.new(
+            pad.CFrame.Position.X,
+            padTop + PAD_RING_RAISE - (hi.Y - lo.Y),
+            pad.CFrame.Position.Z
+        )
+    )
+    KitImports.setStatic(ring, false)
+    ring.Name = "Ring"
+    ring.Parent = pad
+end
+
+-- 얼음 Part는 숨기고(프롬프트와 레이더 거리 기준은 그대로) 결정 메시를 얹는다
+local function dressIce(ice: BasePart)
+    local crystal = KitImports.take("IceCrystal")
+    if not crystal then
+        return
+    end
+    local box = Vector3.new(
+        ice.Size.X * ICE_CRYSTAL_FILL,
+        ICE_CRYSTAL_MAX_HEIGHT,
+        ice.Size.Z * ICE_CRYSTAL_FILL
+    )
+    local p = ice.CFrame.Position
+    KitImports.fitInto(
+        crystal,
+        box,
+        Vector3.new(p.X, p.Y - ice.Size.Y / 2 - ICE_CRYSTAL_EMBED, p.Z)
+    )
+    KitImports.setStatic(crystal, true)
+    crystal.Name = "Crystal"
+    crystal.Parent = ice
+    ice.Transparency = 1
+    ice.CanCollide = false -- 충돌은 결정 메시가 맡는다
 end
 
 -- 바닥에 놓이는 슬래브: 윗면이 floorY + height, 아래로 EMBED만큼 묻힌다
@@ -495,6 +578,7 @@ local function buildTerrainAndSites()
         light.Color = COLORS.ice
         light.Range = ICE_LIGHT_RANGE
         light.Parent = ice
+        ServerUtil.safeCall("DevMap IceCrystal", dressIce, ice)
     end
 
     local padsFolder = makeFolder("LandingPads", workspace)
@@ -529,7 +613,7 @@ end
 local function buildIceOnly()
     local iceFolder = makeFolder("IceSites", workspace)
     for index, position in ICE_POSITIONS do
-        makePart({
+        local ice = makePart({
             name = "Ice" .. index,
             size = ICE_SIZE,
             cframe = CFrame.new(position.X, GROUND_TOP + ICE_SIZE.Y / 2, position.Z),
@@ -537,6 +621,7 @@ local function buildIceOnly()
             material = Enum.Material.Ice,
             parent = iceFolder,
         })
+        ServerUtil.safeCall("DevMap IceCrystal", dressIce, ice)
     end
 end
 
@@ -737,6 +822,8 @@ local function buildLander(kit: Model)
     local zoneFront = SPAWN_POSITION.Z - 3 -- 산소 구역은 문 앞 스폰 위치까지 덮는다
     local zoneMin: Vector3
     local zoneMax: Vector3
+    local roofCenter: Vector3 -- 지붕 장식 기준 (윗면 중심)
+    local roofHalfWidth: number
     local visual = KitImports.take("Lander")
     if visual then
         -- 착륙 데크(Floor, PrimaryPart) 위에 메시를 올린다
@@ -757,6 +844,8 @@ local function buildLander(kit: Model)
         local m = LANDER_ZONE_MARGIN
         zoneMin = Vector3.new(lo.X - m, floorTop, math.min(lo.Z - m, zoneFront))
         zoneMax = Vector3.new(hi.X + m, math.max(hi.Y, floorTop + LANDER_SIZE.Y), hi.Z + m)
+        roofCenter = Vector3.new((lo.X + hi.X) / 2, hi.Y, (lo.Z + hi.Z) / 2)
+        roofHalfWidth = (hi.X - lo.X) / 2
     else
         local floorTop =
             buildHut(lander, LANDER_CENTER, LANDER_SIZE, COLORS.lander, Enum.Material.Metal)
@@ -768,6 +857,8 @@ local function buildLander(kit: Model)
             floorTop + LANDER_SIZE.Y,
             LANDER_CENTER.Z + LANDER_SIZE.Z / 2 - WALL
         )
+        roofCenter = Vector3.new(LANDER_CENTER.X, floorTop + LANDER_SIZE.Y + WALL, LANDER_CENTER.Z)
+        roofHalfWidth = LANDER_SIZE.X / 2
     end
     lander.PrimaryPart = lander:FindFirstChild("Floor") :: BasePart
     makeMarker("OxygenZone", zoneMax - zoneMin, CFrame.new((zoneMin + zoneMax) / 2), lander)
@@ -796,6 +887,19 @@ local function buildLander(kit: Model)
         parent = lander,
     })
     makeSign(console, Config.PROMPT_TEXTS.recoverRover, ROVER_CONSOLE_SIZE.Y)
+
+    -- KitImports 장식: 지붕 안테나와 레이더, 콘솔 위 안테나 (충돌 없음)
+    ServerUtil.safeCall("DevMap LanderDecor", function()
+        local offset = Vector3.new(math.min(ROOF_DECOR_OFFSET, roofHalfWidth / 2), 0, 0)
+        placeDecor("Antenna", MAST_BOX, roofCenter + offset, false, lander, "RoofAntenna")
+        placeDecor("Radar", RADAR_BOX, roofCenter - offset, false, lander, "RoofRadar")
+        local consoleTop = Vector3.new(
+            ROVER_CONSOLE_POSITION.X,
+            FLOOR_Y + ROVER_CONSOLE_SIZE.Y,
+            ROVER_CONSOLE_POSITION.Z
+        )
+        placeDecor("Antenna", CONSOLE_MAST_BOX, consoleTop, false, lander, "ConsoleAntenna")
+    end)
 end
 
 local function buildSolarField(kit: Model)
@@ -811,6 +915,7 @@ local function buildSolarField(kit: Model)
         parent = field,
     })
     makeSign(installPad, Config.PROMPT_TEXTS.installPanel, Config.WORLD_LABEL.offsetY / 2)
+    ServerUtil.safeCall("DevMap PadRing", addPadRing, installPad)
 
     local slots = makeFolder("Slots", field)
     local pitchX = SLOT_SIZE.X + SLOT_GAP_X
@@ -856,7 +961,7 @@ local function buildModulePads(kit: Model)
         local layout = MODULE_LAYOUT[id]
         local padModel = makeModel("Pad" .. id, pads)
         local padCFrame, padTotal = slabCFrame(CFrame.identity, layout.center, layout.pad.Y)
-        makePart({
+        local padPart = makePart({
             name = "Pad",
             size = Vector3.new(layout.pad.X, padTotal, layout.pad.Z),
             cframe = padCFrame,
@@ -864,6 +969,7 @@ local function buildModulePads(kit: Model)
             material = Enum.Material.Concrete,
             parent = padModel,
         })
+        ServerUtil.safeCall("DevMap PadRing", addPadRing, padPart)
         local top = FLOOR_Y + layout.pad.Y
 
         local visual = KitImports.take("Habitat" .. id)
@@ -964,6 +1070,48 @@ local function buildWaterTank(kit: Model)
         parent = kit,
     })
     makeSign(tank, Config.PROMPT_TEXTS.unload, WATER_TANK_SIZE.Y)
+
+    -- KitImports 장식: 탱크 Part는 숨기고(프롬프트와 하역 거리 기준은 그대로) 메시를 같은 자리에
+    ServerUtil.safeCall("DevMap WaterTank", function()
+        local bottom = Vector3.new(WATER_TANK_POSITION.X, FLOOR_Y, WATER_TANK_POSITION.Z)
+        if placeDecor("WaterTank", WATER_TANK_VISUAL_BOX, bottom, true, tank, "Visual") then
+            tank.Transparency = 1
+            tank.CanCollide = false
+        end
+    end)
+end
+
+-- KitImports 장식: 착륙선 옆 바닥에 상자 2 x 2
+local function addCrates(kit: Model)
+    if not KitImports.has("Crate") then
+        return
+    end
+    local crates = makeModel("Crates", kit)
+    local index = 0
+    for row = 0, 1 do
+        for column = 0, 1 do
+            index += 1
+            local crate = KitImports.take("Crate")
+            if crate then
+                KitImports.fitInto(crate, Vector3.one * CRATE_SIZE, Vector3.zero)
+                KitImports.rotateAboutCenter(
+                    crate,
+                    CFrame.Angles(0, math.rad(CRATE_YAWS[index]), 0)
+                )
+                KitImports.placeBottom(
+                    crate,
+                    Vector3.new(
+                        CRATE_ORIGIN.X + column * CRATE_PITCH,
+                        FLOOR_Y,
+                        CRATE_ORIGIN.Z + row * CRATE_PITCH
+                    )
+                )
+                KitImports.setStatic(crate, true)
+                crate.Name = "Crate"
+                crate.Parent = crates
+            end
+        end
+    end
 end
 
 local function buildBaseKit()
@@ -975,6 +1123,7 @@ local function buildBaseKit()
     buildSolarField(kit)
     buildModulePads(kit)
     buildWaterTank(kit)
+    ServerUtil.safeCall("DevMap Crates", addCrates, kit)
     kit.Parent = ServerStorage
 end
 
@@ -1023,6 +1172,8 @@ end
 function DevMap.ensure()
     -- Workspace.KitImports를 ServerStorage로 옮기고 항목을 검사한다 (플레이 중에는 보이지 않게)
     KitImports.load()
+    -- 하늘의 행성은 맵 종류와 관계없이 (Workspace.Decor.Planet이 이미 있으면 건너뜀)
+    ServerUtil.safeCall("KitImports Planet", KitImports.ensurePlanet)
     local kitParts = { "Rover", "Lander", "HabitatA", "HabitatB", "HabitatC" }
     if ServerStorage:FindFirstChild("BaseKit") then
         for _, name in kitParts do

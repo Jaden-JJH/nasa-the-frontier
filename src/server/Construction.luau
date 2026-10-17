@@ -6,6 +6,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Config = require(ReplicatedStorage.Shared.Config)
 local Simulation = require(ReplicatedStorage.Shared.Simulation)
+local KitImports = require(script.Parent.KitImports)
 local ResourceState = require(script.Parent.ResourceState)
 local ServerUtil = require(script.Parent.ServerUtil)
 
@@ -26,6 +27,7 @@ local Construction = {}
 
 local entries: { [string]: PadEntry } = {}
 local connections: { RBXScriptConnection } = {}
+local currentBase: Model? = nil
 
 local LABEL_BACKGROUND = Color3.fromRGB(16, 22, 40)
 local LABEL_TEXT = Color3.fromRGB(255, 255, 255)
@@ -101,6 +103,20 @@ function Construction.sync(prev: GameState?, new: GameState)
                         string.format(Config.TEXTS.buildDone, def.displayName),
                         "good"
                     )
+                    -- KitImports 장식 (연결 통로, 작물). 메시가 없으면 아무 것도 하지 않는다
+                    local base = currentBase
+                    if base then
+                        ServerUtil.safeCall(
+                            "KitImports",
+                            KitImports.onModuleActivated,
+                            id,
+                            base,
+                            function(moduleId: string): boolean
+                                local m = new.modules[moduleId]
+                                return m ~= nil and m.status == "active"
+                            end
+                        )
+                    end
                 elseif after.status == "available" and before.status == "locked" then
                     ResourceState.notifyAll(
                         string.format(Config.TEXTS.moduleUnlocked, def.displayName),
@@ -128,6 +144,7 @@ end
 -- 새 기지에 연결
 function Construction.attach(base: Model)
     Construction.detach()
+    currentBase = base
     local pads = base:FindFirstChild("ModulePads")
     for _, id in Config.MODULE_ORDER do
         local model = ServerUtil.findModel(pads, "Pad" .. id)
@@ -194,6 +211,7 @@ function Construction.detach()
         end
     end
     table.clear(entries)
+    currentBase = nil
 end
 
 return Construction

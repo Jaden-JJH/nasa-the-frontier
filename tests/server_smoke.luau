@@ -247,6 +247,9 @@ end)
 roblox.implementMethod("RemoteEvent", "FireClient", function(inst, player, ...)
     table.insert(sent, { name = inst.Name, target = player, args = table.pack(...) })
 end)
+roblox.implementMethod("Workspace", "Raycast", function()
+    return nil -- 지면 탐색은 실패한 것으로 보고 코드의 대체 높이를 쓴다
+end)
 roblox.implementMethod("Workspace", "GetServerTimeNow", function()
     return 1700000000 + now
 end)
@@ -319,6 +322,11 @@ local function makeLoader(dataModel, warnSink)
             UDim2 = roblox.UDim2,
             Enum = roblox.Enum,
             PhysicalProperties = roblox.PhysicalProperties,
+            RaycastParams = {
+                new = function()
+                    return {}
+                end,
+            },
             Random = Random,
             math = math,
             string = string,
@@ -1084,7 +1092,7 @@ end
 -- 두 번째 place에 가짜 메시를 넣고 DevMap만 다시 돌린다
 local dm2 = roblox.deserializePlace(fs.readFile(placePath))
 local importWarnings = {}
-local loadModule2 = makeLoader(dm2, importWarnings)
+local loadModule2, makeEnv2 = makeLoader(dm2, importWarnings)
 local Workspace2 = dm2:GetService("Workspace")
 local ServerStorage2 = dm2:GetService("ServerStorage")
 local importsFolder = Instance.new("Folder")
@@ -1130,11 +1138,30 @@ local emptyHabitat = Instance.new("Model")
 emptyHabitat.Name = "HabitatB" -- 빈 모델 -> 그레이박스
 emptyHabitat.Parent = importsFolder
 fakeModel("Rovr", { { Vector3.one, Vector3.zero } }) -- 이름 오타
+-- 장식 10종 (원본 크기는 키트 유닛 수준으로 작게)
+fakeModel("Planet", { { Vector3.new(3.8, 3.8, 3.8), Vector3.new(0, 80, 0) } })
+fakeModel("IceCrystal", { { Vector3.new(1.5, 2.5, 1.2), Vector3.new(0, 90, 0) } })
+fakeModel("WaterTank", {
+    { Vector3.new(5.6, 3.3, 5.6), Vector3.new(0, 100, 0) },
+    { Vector3.new(0.4, 1, 0.4), Vector3.new(2, 98, 2) },
+})
+fakeModel("Connector", { { Vector3.new(3.37, 2.2, 2.2), Vector3.new(0, 110, 0) } }) -- 긴 축 X
+fakeModel("ConnectorElbow", { { Vector3.new(7.8, 2.2, 7.8), Vector3.new(0, 120, 0) } })
+fakeModel("Pad", { { Vector3.new(6, 0.87, 6), Vector3.new(0, 130, 0) } })
+fakeModel("Antenna", { { Vector3.new(0.3, 4, 0.3), Vector3.new(0, 140, 0) } })
+fakeModel("Radar", { { Vector3.new(2, 1.5, 2), Vector3.new(0, 150, 0) } })
+fakeModel("Crate", { { Vector3.new(0.9, 0.9, 0.9), Vector3.new(0, 160, 0) } })
+fakeModel("Crop", { { Vector3.new(0.6, 1, 0.6), Vector3.new(0, 170, 0) } })
 local roverSourceSize = roverSource.RoverPart1.Size
 local roverSourceCFrame = roverSource.RoverPart1.CFrame
 
+-- 두 번째 place도 서버 전체를 부팅한다 (Remotes.init -> DevMap.ensure -> GameFlow.start)
 task.spawn(function()
-    loadModule2(dm2:GetService("ServerScriptService").Server.DevMap).ensure()
+    local main2 = dm2:GetService("ServerScriptService").Server.Main
+    luau.load(
+        main2.Source,
+        { debugName = "Main2", environment = makeEnv2(main2), injectGlobals = false }
+    )()
 end)
 advance(0)
 
@@ -1300,6 +1327,293 @@ check(
         and importRocks[2]:FindFirstChild("Rock2Part1") ~= nil,
     "Rock1, Rock2 순환 사용"
 )
+
+-- KitImports 장식 ---------------------------------------------------------
+-- 최상위 지역 변수 한도(200)를 넘지 않도록 함수 안에서 돌린다
+local function runDecorScenario()
+    print("[KitImports 장식]")
+    -- 행성
+    local decor2 = Workspace2:FindFirstChild("Decor")
+    local planet = decor2 and decor2:FindFirstChild("Planet")
+    check(planet ~= nil, "Planet이 Workspace.Decor 아래")
+    check(
+        allParts(planet, function(p)
+            return p.Anchored and not p.CanCollide and not p.CanTouch and not p.CanQuery
+        end),
+        "Planet: 고정, CanCollide/CanTouch/CanQuery 꺼짐"
+    )
+    local planetLo, planetHi = boundsOf(planet)
+    local planetCenter = (planetLo + planetHi) / 2
+    local planetSize = planetHi - planetLo
+    local elevation = math.deg(math.asin(planetCenter.Y / planetCenter.Magnitude))
+    check(
+        math.abs(math.max(planetSize.X, planetSize.Y, planetSize.Z) - 400) < 1
+            and math.abs(planetCenter.Magnitude - 1500) < 1
+            and math.abs(elevation - 25) < 0.5,
+        string.format(
+            "Planet 지름 %.0f, 거리 %.0f, 고도각 %.1f도",
+            planetSize.X,
+            planetCenter.Magnitude,
+            elevation
+        )
+    )
+    check(
+        planet.ModelStreamingMode == roblox.Enum.ModelStreamingMode.Persistent,
+        "Planet은 항상 스트리밍"
+    )
+    -- 얼음 결정
+    local iceB = Workspace2.IceSites.Ice1
+    local crystal = iceB:FindFirstChild("Crystal")
+    check(
+        iceB.Transparency == 1
+            and crystal ~= nil
+            and iceB:FindFirstChildOfClass("ProximityPrompt") ~= nil,
+        "Ice Part 투명 + 자식 결정 메시, 프롬프트는 Part에 유지"
+    )
+    local cLo, cHi = boundsOf(crystal)
+    check(
+        cHi.X - cLo.X < iceB.Size.X and cHi.Z - cLo.Z < iceB.Size.Z,
+        "결정 메시 바닥 넓이가 Part보다 작음"
+    )
+    check(
+        allParts(crystal, function(p)
+            return p.Anchored and p.CanCollide
+        end),
+        "결정 메시: 고정, CanCollide"
+    )
+    -- 물탱크
+    local tankB = kitImport.WaterTank
+    local tankVisual = tankB:FindFirstChild("Visual")
+    check(tankB.Transparency == 1 and tankVisual ~= nil, "WaterTank Part 투명 + 메시 교체")
+    local tLo, tHi = boundsOf(tankVisual)
+    check(
+        tHi.X - tLo.X <= 8 + EPS and tHi.Y - tLo.Y <= 7 + EPS and tHi.Z - tLo.Z <= 8 + EPS,
+        string.format(
+            "물탱크 메시 크기 %.1f x %.1f x %.1f",
+            tHi.X - tLo.X,
+            tHi.Y - tLo.Y,
+            tHi.Z - tLo.Z
+        )
+    )
+    -- 패드 링
+    local padRingA = kitImport.ModulePads.PadA.Pad:FindFirstChild("Ring")
+    local installRing = kitImport.SolarField.InstallPad:FindFirstChild("Ring")
+    check(padRingA ~= nil and installRing ~= nil, "PadA와 InstallPad에 링 메시")
+    local rLo, rHi = boundsOf(padRingA)
+    local padAPart = kitImport.ModulePads.PadA.Pad
+    check(
+        math.abs(rHi.Y - (padAPart.CFrame.Position.Y + padAPart.Size.Y / 2 + 0.1)) < EPS
+            and rHi.X - rLo.X <= padAPart.Size.X + EPS,
+        "링이 패드 크기 안, 윗면은 패드 윗면 바로 위 (Ghost와 겹치지 않게 묻음)"
+    )
+    -- 착륙선 안테나, 레이더, 콘솔 안테나
+    local landerB = kitImport.Lander
+    check(
+        landerB:FindFirstChild("RoofAntenna") ~= nil
+            and landerB:FindFirstChild("RoofRadar") ~= nil
+            and landerB:FindFirstChild("ConsoleAntenna") ~= nil,
+        "착륙선 지붕 안테나와 레이더, 콘솔 안테나"
+    )
+    check(
+        allParts(landerB.RoofAntenna, function(p)
+            return p.Anchored and not p.CanCollide
+        end),
+        "안테나: 고정, CanCollide 꺼짐"
+    )
+    local aLo2, aHi2 = boundsOf(landerB.RoofAntenna)
+    local _, landerTop = boundsOf(landerB.Visual)
+    check(
+        math.abs(aLo2.Y - landerTop.Y) < EPS and aHi2.Y - aLo2.Y <= 3.5 + EPS,
+        "안테나가 착륙선 위, 높이 3.5 이하"
+    )
+    local consoleTop = landerB.RoverConsole.CFrame.Position.Y + landerB.RoverConsole.Size.Y / 2
+    local caLo = boundsOf(landerB.ConsoleAntenna)
+    check(math.abs(caLo.Y - consoleTop) < EPS, "콘솔 안테나가 콘솔 윗면 위")
+    -- 상자
+    local crates = kitImport:FindFirstChild("Crates")
+    check(crates ~= nil and #crates:GetChildren() == 4, "상자 4개")
+    local spawnB = landerB.SpawnPoint.CFrame.Position
+    local cratesClear = true
+    for _, crate in crates:GetChildren() do
+        local lo, hi = boundsOf(crate)
+        if hi.Y - lo.Y > 3 + EPS then
+            cratesClear = false
+        end
+        local center = (lo + hi) / 2
+        if
+            (Vector3.new(center.X, 0, center.Z) - Vector3.new(spawnB.X, 0, spawnB.Z)).Magnitude < 10
+        then
+            cratesClear = false
+        end
+        if
+            not allParts(crate, function(p)
+                return p.Anchored and p.CanCollide
+            end)
+        then
+            cratesClear = false
+        end
+    end
+    check(cratesClear, "상자: 크기 3 이하, 고정, CanCollide, 스폰 지점에서 떨어짐")
+
+    -- 게임을 진행해 A, B를 완공시키고 연결 통로와 작물을 확인
+    local carol = makePlayer("Carol", 3)
+    table.insert(players, carol)
+    local Players2 = dm2:GetService("Players")
+    signalFor(Players2, "PlayerAdded"):Fire(carol)
+    advance(0)
+    local remotes2 = dm2:GetService("ReplicatedStorage").Remotes
+    signalFor(remotes2.SelectSite, "OnServerEvent"):Fire(carol, 1)
+    advance(0)
+    advance(Config.LANDING_SECONDS + 0.01)
+    local Server2 = dm2:GetService("ServerScriptService").Server
+    local ResourceState2 = loadModule2(Server2.ResourceState)
+    check(ResourceState2.get().phase == "playing", "두 번째 place도 playing")
+    ResourceState2.patch(function(st)
+        st.energy = 1000
+        st.water = 1000
+        st.food = 1000
+    end)
+    local baseB = Workspace2.Base
+    local function padPrompt(id)
+        return baseB.ModulePads["Pad" .. id].Pad:FindFirstChildOfClass("ProximityPrompt")
+    end
+    signalFor(padPrompt("A"), "Triggered"):Fire(carol)
+    advance(Config.DAY_SECONDS * Config.MODULES.A.buildDays)
+    check(ResourceState2.get().modules.A.status == "active", "A 완공")
+    local kitDecor = baseB:FindFirstChild("KitDecor")
+    check(
+        kitDecor == nil or kitDecor:FindFirstChild("ConnectorAB") == nil,
+        "A만 완공이면 통로 없음"
+    )
+    signalFor(padPrompt("B"), "Triggered"):Fire(carol)
+    advance(Config.DAY_SECONDS * Config.MODULES.B.buildDays)
+    check(ResourceState2.get().modules.B.status == "active", "B 완공")
+    kitDecor = baseB:FindFirstChild("KitDecor")
+    local connector = kitDecor and kitDecor:FindFirstChild("ConnectorAB")
+    check(
+        connector ~= nil and #connector:GetChildren() >= 1,
+        "A, B 완공 후 Connector 세그먼트 "
+            .. (connector and #connector:GetChildren() or 0)
+            .. "개"
+    )
+    -- 통로가 두 Built 사이에 있는지
+    local builtLoA, builtHiA = boundsOf(baseB.ModulePads.PadA.Built)
+    local builtLoB, builtHiB = boundsOf(baseB.ModulePads.PadB.Built)
+    local segLo, segHi = boundsOf(connector)
+    local between = true
+    for _, segmentModel in connector:GetChildren() do
+        local lo, hi = boundsOf(segmentModel)
+        local width = math.min(hi.X - lo.X, hi.Z - lo.Z)
+        if math.abs(width - 4) > 0.05 then
+            between = false
+        end
+    end
+    -- A에서 B로 가는 축에 투영해 통로가 두 건물 가장자리 사이 틈을 정확히 채우는지
+    local centerA = (builtLoA + builtHiA) / 2
+    local centerB = (builtLoB + builtHiB) / 2
+    local dir = Vector3.new(centerB.X - centerA.X, 0, centerB.Z - centerA.Z).Unit
+    local side = Vector3.new(-dir.Z, 0, dir.X)
+    local function project(lo, hi, axis)
+        local c, h = (lo + hi) / 2, (hi - lo) / 2
+        local r = h.X * math.abs(axis.X) + h.Z * math.abs(axis.Z)
+        local m = c.X * axis.X + c.Z * axis.Z
+        return m - r, m + r
+    end
+    local _, edgeA = project(builtLoA, builtHiA, dir)
+    local edgeB = project(builtLoB, builtHiB, dir)
+    local segMin, segMax = project(segLo, segHi, dir)
+    local segCenter = (segLo + segHi) / 2
+    local lateral = (segCenter.X - centerA.X) * side.X + (segCenter.Z - centerA.Z) * side.Z
+    check(
+        between
+            and math.abs(segMin - edgeA) < 0.05
+            and math.abs(segMax - edgeB) < 0.05
+            and math.abs(lateral) < 0.05,
+        string.format(
+            "통로 굵기 4, A 가장자리에서 B 가장자리까지 틈 %.1f studs를 채움",
+            edgeB - edgeA
+        )
+    )
+    check(
+        allParts(connector, function(p)
+            return p.Anchored and not p.CanCollide
+        end),
+        "통로: 고정, CanCollide 꺼짐"
+    )
+    local crops = kitDecor and kitDecor:FindFirstChild("CropsB")
+    check(crops ~= nil and #crops:GetChildren() == 8, "B 완공 후 작물 8개")
+    local cropsOk = true
+    for _, crop in crops:GetChildren() do
+        local lo, hi = boundsOf(crop)
+        if math.max(hi.X - lo.X, hi.Y - lo.Y, hi.Z - lo.Z) > 2 + EPS then
+            cropsOk = false
+        end
+        local center = (lo + hi) / 2
+        -- 앞쪽(기지 기준 -Z) 반원: 기지 좌표로 바꿔 B 중심보다 앞인지
+        local localCenter = baseB.PrimaryPart.CFrame:PointToObjectSpace(center)
+        local localB = baseB.PrimaryPart.CFrame:PointToObjectSpace((builtLoB + builtHiB) / 2)
+        if localCenter.Z >= localB.Z then
+            cropsOk = false
+        end
+        if
+            not allParts(crop, function(p)
+                return p.Anchored and not p.CanCollide
+            end)
+        then
+            cropsOk = false
+        end
+    end
+    check(cropsOk, "작물: 크기 2 이하, 앞쪽 반원, 고정, CanCollide 꺼짐")
+    -- C까지 완공: B-C 대각선 통로
+    signalFor(padPrompt("C"), "Triggered"):Fire(carol)
+    advance(Config.DAY_SECONDS * Config.MODULES.C.buildDays)
+    check(ResourceState2.get().phase == "won", "C 완공으로 승리")
+    local connectorBC = kitDecor:FindFirstChild("ConnectorBC")
+    check(
+        connectorBC ~= nil and #connectorBC:GetChildren() >= 1,
+        "B, C 완공 후 대각선 통로 "
+            .. (connectorBC and #connectorBC:GetChildren() or 0)
+            .. "개"
+    )
+    local builtLoC, builtHiC = boundsOf(baseB.ModulePads.PadC.Built)
+    local centerB2 = (builtLoB + builtHiB) / 2
+    local centerC2 = (builtLoC + builtHiC) / 2
+    local dirBC = Vector3.new(centerC2.X - centerB2.X, 0, centerC2.Z - centerB2.Z)
+    local lengthBC = dirBC.Magnitude
+    dirBC = dirBC.Unit
+    local sideBC = Vector3.new(-dirBC.Z, 0, dirBC.X)
+    local bcOk = true
+    for _, segmentModel in connectorBC:GetChildren() do
+        local lo, hi = boundsOf(segmentModel)
+        local c = (lo + hi) / 2
+        local along = (c.X - centerB2.X) * dirBC.X + (c.Z - centerB2.Z) * dirBC.Z
+        local offsetBC = (c.X - centerB2.X) * sideBC.X + (c.Z - centerB2.Z) * sideBC.Z
+        if math.abs(offsetBC) > 0.05 or along <= 0 or along >= lengthBC then
+            bcOk = false
+        end
+    end
+    check(
+        bcOk,
+        "대각선 통로 세그먼트가 B와 C 중심을 잇는 선 위, 두 건물 사이"
+    )
+    -- 재시작하면 Base 아래 장식은 함께 사라지고 행성은 남는다
+    signalFor(remotes2.RequestRestart, "OnServerEvent"):Fire(carol)
+    advance(0)
+    check(
+        Workspace2:FindFirstChild("Base") == nil
+            and connector.Parent == nil
+            and connectorBC.Parent == nil
+            and crops.Parent == nil,
+        "재시작 후 Base 아래 통로와 작물 제거"
+    )
+    check(Workspace2.Decor:FindFirstChild("Planet") ~= nil, "재시작 후에도 Planet 유지")
+    check(
+        #importWarnings == 2,
+        "장식 추가 후에도 경고는 두 줄 (" .. #importWarnings .. ")"
+    )
+    table.remove(players, table.find(players, carol))
+end
+runDecorScenario()
 
 print("")
 print(
