@@ -25,6 +25,7 @@ local WaterLoop = require(script.Parent.WaterLoop)
 local GameFlow = {}
 
 local started = false
+local lastGameOver: Types.GameOverInfo? = nil -- 결과 화면 정보 (재시작 게이트와 권한자 변경 재송신)
 local lastSpeedRequest: { [Player]: number } = {} -- 플레이어별 마지막 SetSpeed 수락 시각 (os.clock)
 
 -- 기지가 놓이면 각 시스템을 연결한다.
@@ -68,6 +69,7 @@ local function endGame(result: Simulation.EndResult, reason: string)
     ResourceState.set(finished)
     refreshPrompts(nil)
     ResourceState.publish()
+    local chooser = LandingSite.getChooser()
     local info: Types.GameOverInfo = {
         won = result == "won",
         reason = reason,
@@ -75,7 +77,10 @@ local function endGame(result: Simulation.EndResult, reason: string)
         waterTrips = finished.waterTrips,
         oxygenDeaths = finished.oxygenDeaths,
         siteName = finished.siteName or "",
+        restartAvailableAt = workspace:GetServerTimeNow() + Config.RESULT_MIN_SECONDS,
+        chooserUserId = if chooser then chooser.UserId else 0,
     }
+    lastGameOver = info
     Remotes.get("GameOver"):FireAllClients(info)
 end
 
@@ -113,6 +118,7 @@ end
 
 -- 새 게임: 상태 초기화 후 착륙지 선택 단계로. leaving은 지금 나가는 중이라 권한자에서 뺄 플레이어
 local function beginNewGame(leaving: Player?)
+    lastGameOver = nil
     ResourceState.reset()
     Oxygen.resetAll()
     ResourceState.publish()
@@ -164,9 +170,28 @@ local function onSetSpeed(player: Player, speed: any)
     ResourceState.publish()
 end
 
-local function onRequestRestart(_player: Player)
+-- 재시작 게이트 (리뷰 I12): 결과 화면이 RESULT_MIN_SECONDS 이상 떠 있었고, 요청자가 선택 권한자일 때만
+local function onRequestRestart(player: Player)
     local phase = ResourceState.get().phase
     if phase ~= "won" and phase ~= "lost" then
+        return
+    end
+    local info = lastGameOver
+    if info then
+        local remaining = info.restartAvailableAt - workspace:GetServerTimeNow()
+        if remaining > 0 then
+            ResourceState.notify(
+                player,
+                string.format(Config.TEXTS.restartTooSoon, math.ceil(remaining)),
+                "info"
+            )
+            return
+        end
+    end
+    local chooser = LandingSite.getChooser()
+    if chooser ~= player then
+        local name = if chooser then chooser.DisplayName else ""
+        ResourceState.notify(player, string.format(Config.TEXTS.restartNotChooser, name), "info")
         return
     end
     restart()
@@ -182,9 +207,17 @@ end
 -- 마지막 플레이어가 나가면 재시작과 같은 정리를 하고 selecting으로 되돌린다 (선택 타이머도 취소됨)
 local function onPlayerRemoving(player: Player)
     lastSpeedRequest[player] = nil
-    LandingSite.onPlayerRemoving(player)
+    local chooserChanged = LandingSite.onPlayerRemoving(player)
     for _, other in Players:GetPlayers() do
         if other ~= player then
+            -- 결과 화면 중 권한자가 나갔으면 새 권한자로 결과 정보를 다시 보낸다 (재시작 버튼 주인 변경)
+            local info = lastGameOver
+            local phase = ResourceState.get().phase
+            if chooserChanged and info and (phase == "won" or phase == "lost") then
+                local chooser = LandingSite.getChooser()
+                info.chooserUserId = if chooser then chooser.UserId else 0
+                Remotes.get("GameOver"):FireAllClients(info)
+            end
             return
         end
     end

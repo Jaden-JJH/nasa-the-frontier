@@ -29,7 +29,7 @@ local Config = {
     DAY_SECONDS = 10, -- 게임 1일 = 현실 10초 (1배속)
     TOTAL_DAYS = 90,
     FAST_FORWARD = 2,
-    SPEEDS = { 1, 2 }, -- SetSpeed로 허용되는 배속
+    SPEEDS = { 1 }, -- SetSpeed로 허용되는 배속 (2026-10-18 사용자 결정: 2배속 제거. GameClock의 배속 경로는 남겨 둔다)
     SPEED_COOLDOWN_SECONDS = 1, -- 플레이어별 SetSpeed 최소 간격(초)
 
     -- 인트로
@@ -40,7 +40,7 @@ local Config = {
     -- 시작 자원 (착륙선)
     -- energy 50 = 착륙선 잔여 배터리. 첫 물 원정(약 6일)에서 돌아오면 Habitat A(60E)를 바로 착공할 수 있게
     -- (2026-10-17 밸런스 조정, tests/simulation.spec.luau 현실적 봇 기준)
-    START = { energy = 50, water = 25, food = 30 },
+    START = { energy = 50, water = 25, food = 35 },
 
     -- 크루 생명유지 (매일)
     CREW = { food = 1, water = 1 },
@@ -115,6 +115,7 @@ local Config = {
         flipSeconds = 3, -- 무인 상태로 뒤집힌 채 이만큼 지나면 자동 복구
         fallDepth = 20, -- 기지 Origin보다 이만큼 아래로 떨어지면 자동 복구
         hold = 1, -- 수동 복구 프롬프트 홀드 시간(초)
+        cooldownSeconds = 15, -- 복구(수동, 자동 공용) 뒤 다음 복구까지 기다리는 시간(초). 복구하면 탱크의 물은 잃는다
         promptDistance = 8, -- 콘솔 프롬프트 활성 거리 (에어락 문에서 14 studs 넘게 떨어져 있어 문 앞에서는 안 뜬다)
     },
     RADAR_RANGE = 150,
@@ -133,6 +134,7 @@ local Config = {
 
     -- 실패와 승리
     SHORTAGE_DAYS_TO_LOSE = 3,
+    RESULT_MIN_SECONDS = 10, -- 결과 화면이 뜬 뒤 재시작을 받기까지 최소 시간(초). 재시작은 선택 권한자만
 
     -- 자원 값 반올림 자릿수 (일조율 곱셈의 부동소수 오차 제거용)
     RESOURCE_DECIMALS = 2,
@@ -177,9 +179,6 @@ local Config = {
         closeCheckDepth = 1.6, -- 닫기 전 캐릭터를 찾는 범위 = 문 두께 + 이 깊이 (문 앞뒤 1 stud. 문에서 2 안쪽 스폰은 닿지 않게)
         closeRetrySeconds = 0.5, -- 문 범위에 캐릭터가 있으면 이 간격으로 다시 확인
     },
-
-    -- 튜토리얼: 이 날이 되면 패널 설치 안내를 건너뛰고 로버 탑승 안내로 넘어간다
-    TUTORIAL_BOARD_DAY = 2,
 
     -- 우주복 (서버가 캐릭터마다 입힌다). 색은 RGB 0..255, 크기는 studs
     SUIT = {
@@ -263,8 +262,10 @@ local Config = {
         selecting = "착륙지를 선택하세요",
         landing = "착륙 중입니다. 잠시 기다리세요",
         installPanels = "솔라 필드에서 패널 %d장을 설치하세요",
-        boardRover = "로버에 다가가 E로 탑승하고 레이더로 얼음을 찾으세요",
-        firstWaterTrip = "로버를 타고 얼음 지점에서 물을 채운 뒤 기지 물탱크에 하역하세요",
+        -- 튜토리얼 단계(missionStage)는 날짜가 아니라 행동 완료로 넘어간다
+        boardRover = "로버에 다가가 E로 탑승하세요",
+        findIce = "레이더의 점을 따라 얼음 지점으로 가서 E를 길게 눌러 물을 채우세요",
+        unloadWater = "기지로 돌아와 물탱크 옆에 로버를 세우고 E로 물을 하역하세요",
         -- 모듈별 착공 안내 (Habitat A, Farm B, Research Lab C)
         build = {
             A = "Habitat A를 착공하세요 (Energy %d, Water %d 필요)",
@@ -310,6 +311,9 @@ local Config = {
         waterUnloaded = "물 %dW 하역 완료",
         needRoverAtTank = "로버를 물탱크 옆에 세워야 하역할 수 있습니다",
         roverRecovered = "로버가 복구되었습니다",
+        roverOccupied = "탑승 중에는 복구할 수 없습니다",
+        tankLostOnRecover = "복구 중 탱크의 물을 잃었습니다",
+        recoverCooldown = "로버 복구는 %d초 뒤에 할 수 있습니다",
 
         oxygenDepleted = "산소 고갈. 착륙선에서 구조되었습니다",
         airlock = "에어락",
@@ -318,6 +322,11 @@ local Config = {
         oxygenDepletedOther = "%s 대원의 산소가 고갈되었습니다. Food -%d, Water -%d",
 
         modulesStalled = "전력 부족으로 모듈이 정지했습니다",
+        stallReason = "전력 부족으로 시설이 멈췄습니다. 패널을 더 설치하세요",
+        resetPenalty = "쓰러져서 착륙선으로 구조되었습니다. Food -%d, Water -%d",
+        resetPenaltyOther = "%s 대원이 쓰러져 구조되었습니다. Food -%d, Water -%d",
+        restartTooSoon = "결과를 확인하는 시간입니다. %d초 뒤에 다시 시작할 수 있습니다",
+        restartNotChooser = "재시작은 %s 대원이 할 수 있습니다",
         shortageWarn = "%s이 바닥났습니다 (%d/%d일)",
         speedChanged = "%d배속으로 진행합니다",
         notChooser = "착륙지는 %s 대원이 선택합니다",
@@ -349,6 +358,7 @@ local Config = {
         fillIce = "얼음 채취",
         unload = "물 하역",
         recoverRover = "로버 복구",
+        recoverCooldown = "로버 복구 (%d초 뒤)",
         board = "탑승",
         openDoor = "열기",
     },

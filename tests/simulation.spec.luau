@@ -11,6 +11,7 @@ local function playingState(sunlight: number?)
     s.siteId = 1
     s.siteName = "Shackleton Rim"
     s.sunlight = sunlight or 1
+    Simulation.refreshDerived(s, Config)
     return s
 end
 
@@ -25,8 +26,18 @@ local function installMany(state, count: number)
     return s
 end
 
+local function moduleState(status, progress: number, daysLeft: number)
+    return {
+        status = status,
+        progress = progress,
+        daysLeft = daysLeft,
+        unlocked = true,
+        shortfall = { energy = 0, water = 0 },
+    }
+end
+
 local function setActive(state, id: string)
-    state.modules[id] = { status = "active", progress = 1, daysLeft = 0 }
+    state.modules[id] = moduleState("active", 1, 0)
 end
 
 return function(t)
@@ -62,7 +73,7 @@ return function(t)
                 t.eq(s.day, 7)
                 t.near(s.netEnergy, perPanel * perDay * 6, "6일차 순증감")
                 t.near(s.water, 19, "물 25 - 6")
-                t.near(s.food, 24, "식량 30 - 6")
+                t.near(s.food, Config.START.food - 6, "시작 식량 - 6")
                 t.near(s.netWater, -1)
                 t.near(s.netFood, -1)
                 t.eq(s.panelsInstalled, perDay * 6)
@@ -298,7 +309,7 @@ return function(t)
         setActive(s, "B")
         s.energy = 500
         s.water = 100
-        s.modules.C = { status = "building", progress = 6 / 7, daysLeft = 1 }
+        s.modules.C = moduleState("building", 6 / 7, 1)
         t.eq((Simulation.checkEnd(s, Config)), "none")
         s = Simulation.applyDay(s, Config)
         t.eq(s.modules.C.status, "active")
@@ -379,42 +390,149 @@ return function(t)
         t.eq(clamped.food, 0)
     end)
 
-    t.test("미션 문구: 패널을 덜 깔아도 2일차가 되면 탑승 안내", function()
+    t.test(
+        "같은 틱에 부족 실패와 C 완공이 겹치면 실패가 먼저 (리뷰 I06)",
+        function()
+            local s = playingState(1)
+            setActive(s, "A")
+            setActive(s, "B")
+            s.energy = 500
+            s.water = 0
+            s.food = 100
+            s.shortageDays = Config.SHORTAGE_DAYS_TO_LOSE - 1
+            s.modules.C = moduleState("building", 6 / 7, 1)
+            s = Simulation.applyDay(s, Config)
+            t.eq(s.modules.C.status, "active", "C는 이 틱에 완공")
+            t.eq(s.shortageDays, Config.SHORTAGE_DAYS_TO_LOSE, "물 부족 3일째")
+            local result, reason = Simulation.checkEnd(s, Config)
+            t.eq(result, "lost")
+            t.contains(reason, "물이")
+        end
+    )
+
+    t.test("미션 단계: 날짜가 지나도 패널 3장 전에는 panels 유지", function()
         local s = installMany(playingState(1), 1)
-        t.contains(Simulation.missionText(s, Config), "패널 2장")
+        t.eq(s.missionStage, "panels")
+        t.contains(s.missionText, "패널 2장")
         s = Simulation.applyDay(s, Config)
-        t.eq(s.day, Config.TUTORIAL_BOARD_DAY)
-        t.eq(s.missionText, Config.MISSION_TEXTS.boardRover)
+        s = Simulation.applyDay(s, Config)
+        t.eq(s.missionStage, "panels", "날짜 기준 전이 없음")
+        t.contains(s.missionText, "패널 2장")
     end)
 
-    t.test("미션 문구가 단계에 따라 바뀐다", function()
+    t.test(
+        "미션 단계가 행동 완료로 넘어가고 문구는 단계에서 파생된다",
+        function()
+            local s = playingState(1)
+            t.eq(s.missionStage, "panels")
+            t.eq(s.missionText, "솔라 필드에서 패널 3장을 설치하세요")
+            s = installMany(s, 3)
+            t.eq(s.missionStage, "board_rover", "패널 3장이면 탑승")
+            t.eq(s.missionText, Config.MISSION_TEXTS.boardRover)
+            s = Simulation.markBoarded(s, Config)
+            t.eq(s.missionStage, "find_ice", "탑승하면 얼음 찾기")
+            t.eq(s.missionText, Config.MISSION_TEXTS.findIce)
+            local again = Simulation.markBoarded(s, Config)
+            t.eq(again.missionStage, "find_ice", "다시 타도 그대로")
+            local _, filled = Simulation.fillTank(s, Config)
+            t.eq(filled.missionStage, "unload", "만충이면 하역")
+            t.eq(filled.missionText, Config.MISSION_TEXTS.unloadWater)
+            -- 하역 전에 탱크를 잃으면(로버 복구) 다시 얼음 찾기
+            local lost = Simulation.copy(filled)
+            lost.rover.tank = 0
+            Simulation.refreshDerived(lost, Config)
+            t.eq(lost.missionStage, "find_ice", "탱크를 잃으면 얼음 찾기로")
+            local _, unloaded = Simulation.unloadWater(filled, Config)
+            t.eq(unloaded.missionStage, "build_A", "하역하면 A 착공")
+            t.eq(unloaded.missionText, "Habitat A를 착공하세요 (Energy 60, Water 20 필요)")
+            unloaded.energy = 100
+            local _, building = Simulation.startBuild(unloaded, Config, "A")
+            t.eq(building.missionStage, "build_B", "A 착공하면 build_B")
+            t.contains(building.missionText, "Habitat A 건설 중: 5일 남음")
+            local withA = Simulation.copy(building)
+            setActive(withA, "A")
+            withA.modules.B.status = "available"
+            Simulation.refreshDerived(withA, Config)
+            t.eq(withA.missionStage, "build_B")
+            t.eq(withA.missionText, "Farm B를 착공하세요 (Energy 80, Water 30 필요)")
+            setActive(withA, "B")
+            withA.modules.C.status = "available"
+            Simulation.refreshDerived(withA, Config)
+            t.eq(withA.missionStage, "build_C", "B 완공하면 build_C")
+            setActive(withA, "C")
+            Simulation.refreshDerived(withA, Config)
+            t.eq(withA.missionStage, "done", "C 완공하면 done")
+            local dry = Simulation.copy(building)
+            dry.water = 0
+            Simulation.refreshDerived(dry, Config)
+            t.contains(dry.missionText, "물이 바닥났습니다")
+            t.eq(dry.missionStage, "build_B", "부족 경고 중에도 단계는 그대로")
+        end
+    )
+
+    t.test("미션 단계: 순서를 건너뛴 행동은 앞으로만 반영", function()
+        local s = installMany(playingState(1), 1)
+        s = Simulation.markBoarded(s, Config)
+        t.eq(s.missionStage, "find_ice", "패널 전에 탑승해도 얼음 찾기로")
+        local fresh = playingState(1)
+        local _, filled = Simulation.fillTank(fresh, Config)
+        t.eq(filled.missionStage, "unload", "바로 만충하면 하역")
+        local back = installMany(filled, 3)
+        t.eq(back.missionStage, "unload", "되돌아가지 않음")
+    end)
+
+    t.test(
+        "daysLeft: 보유량 / 하루 순소비, 내림 정수, 순소비 0 이하면 999",
+        function()
+            local s = playingState(1)
+            t.eq(s.daysLeft.water, 25, "물 25, 크루 1/일")
+            t.eq(s.daysLeft.food, Config.START.food, "시작 식량, 크루 1/일")
+            setActive(s, "A")
+            s.water = 25
+            Simulation.refreshDerived(s, Config)
+            t.eq(s.daysLeft.water, 12, "물 25 / (크루 1 + A 1) = 12.5 -> 12")
+            setActive(s, "B")
+            s.energy = 500
+            s.water = 100
+            Simulation.refreshDerived(s, Config)
+            t.eq(s.daysLeft.food, 999, "Farm이 식량 +2, 크루 -1이면 줄지 않음")
+            t.eq(s.daysLeft.water, 25, "물 100 / (1 + 1 + 2) = 25")
+            s.water = 0
+            Simulation.refreshDerived(s, Config)
+            t.eq(s.daysLeft.water, 0)
+        end
+    )
+
+    t.test("stallReason: 전력 부족 정지면 사유 문구, 아니면 빈 문자열", function()
         local s = playingState(1)
+        t.eq(s.stallReason, "")
+        setActive(s, "A")
+        s.energy = 0
+        s = Simulation.applyDay(s, Config)
+        t.truthy(s.modulesStalled)
+        t.eq(s.stallReason, Config.TEXTS.stallReason)
         t.eq(
-            Simulation.missionText(s, Config),
-            "솔라 필드에서 패널 3장을 설치하세요"
+            s.stallReason,
+            "전력 부족으로 시설이 멈췄습니다. 패널을 더 설치하세요"
         )
-        local one = installMany(s, 1)
-        t.eq(one.missionText, "솔라 필드에서 패널 2장을 설치하세요")
-        s = installMany(s, 3)
-        t.eq(
-            s.missionText,
-            Config.MISSION_TEXTS.boardRover,
-            "오늘 한도를 채우면 탑승 안내"
-        )
-        local _, filled = Simulation.fillTank(s, Config)
-        t.eq(
-            Simulation.missionText(filled, Config),
-            Config.MISSION_TEXTS.firstWaterTrip,
-            "탱크를 채우면 하역 안내"
-        )
-        local _, unloaded = Simulation.unloadWater(filled, Config)
-        t.eq(unloaded.missionText, "Habitat A를 착공하세요 (Energy 60, Water 20 필요)")
-        unloaded.energy = 100
-        local _, building = Simulation.startBuild(unloaded, Config, "A")
-        t.contains(building.missionText, "Habitat A 건설 중: 5일 남음")
-        local dry = Simulation.copy(building)
-        dry.water = 0
-        t.contains(Simulation.missionText(dry, Config), "물이 바닥났습니다")
+    end)
+
+    t.test("모듈 unlocked와 shortfall", function()
+        local s = playingState(1)
+        t.truthy(s.modules.A.unlocked, "A는 선행 조건 없음")
+        t.falsy(s.modules.B.unlocked, "B는 A 완공 전 잠김")
+        t.eq(s.modules.A.shortfall.energy, 10, "A 에너지 60 - 보유 50")
+        t.eq(s.modules.A.shortfall.water, 0, "A 물 20 <= 보유 25")
+        t.eq(s.modules.B.shortfall.energy, 30, "잠긴 모듈도 부족량은 계산")
+        t.eq(s.modules.B.shortfall.water, 5)
+        s.energy = 100
+        local _, building = Simulation.startBuild(s, Config, "A")
+        t.eq(building.modules.A.shortfall.energy, 0, "착공한 모듈은 0")
+        t.eq(building.modules.A.status, "building", "status 의미 유지")
+        local withA = Simulation.copy(building)
+        setActive(withA, "A")
+        Simulation.refreshDerived(withA, Config)
+        t.truthy(withA.modules.B.unlocked, "A 완공 뒤 B 해금")
     end)
 
     -- 현실적 플레이어 봇 (GDD 4절 밸런스 검증 메모) ----------------------------

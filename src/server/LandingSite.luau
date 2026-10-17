@@ -246,17 +246,36 @@ function LandingSite.onPlayerAdded(player: Player)
     end)
 end
 
-function LandingSite.onPlayerRemoving(player: Player)
-    if player ~= chooser or ResourceState.get().phase ~= "selecting" then
-        return
+-- 권한자가 나가면 남은 플레이어 중 가장 먼저 들어온 사람에게 넘긴다 (모든 단계).
+-- 선택 단계에서는 선택 화면도 다시 보낸다. 권한자가 바뀌었으면 true
+function LandingSite.onPlayerRemoving(player: Player): boolean
+    if player ~= chooser then
+        return false
     end
     chooser = nil
     for _, other in Players:GetPlayers() do
         if other ~= player then
-            assignChooser(other) -- 마감 시각은 그대로 유지
-            return
+            if ResourceState.get().phase == "selecting" then
+                assignChooser(other) -- 마감 시각은 그대로 유지
+            else
+                chooser = other
+            end
+            return true
         end
     end
+    return true
+end
+
+-- 현재 선택 권한자 (재시작 권한에도 쓴다). 권한자가 없거나 나갔으면 가장 먼저 들어온 플레이어
+function LandingSite.getChooser(): Player?
+    local current = chooser
+    local list = Players:GetPlayers()
+    if current and table.find(list, current) then
+        return current
+    end
+    local first = list[1]
+    chooser = first
+    return first
 end
 
 -- SelectSite 수신 연결 (한 번만)

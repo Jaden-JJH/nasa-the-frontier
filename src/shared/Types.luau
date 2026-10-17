@@ -13,6 +13,9 @@ export type Modules = Simulation.Modules -- 키는 "A", "B", "C"
 export type RoverState = Simulation.RoverState
 export type GameState = Simulation.GameState
 export type EndResult = Simulation.EndResult
+export type MissionStage = Simulation.MissionStage
+export type Shortfall = Simulation.Shortfall -- ModuleState.shortfall { energy, water }
+export type DaysLeft = Simulation.DaysLeft -- GameState.daysLeft { water, food }
 
 export type NotifyKind = "info" | "warn" | "good"
 
@@ -40,6 +43,8 @@ export type GameOverInfo = {
     waterTrips: number,
     oxygenDeaths: number,
     siteName: string,
+    restartAvailableAt: number, -- workspace:GetServerTimeNow() 기준 재시작을 받기 시작하는 시각(초)
+    chooserUserId: number, -- 재시작할 수 있는 플레이어(선택 권한자). 권한자가 나가면 다시 보낸다
 }
 
 return {}

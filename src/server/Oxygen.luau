@@ -22,6 +22,7 @@ type Record = {
     lastSentOxygen: number,
     lastSentInside: boolean,
     lowWarned: boolean, -- 산소 부족 경고를 이번 하락에서 이미 보냈는지
+    rescuing: boolean, -- 산소 고갈 구조 처리 중 (이 사이의 사망은 초기화 페널티를 다시 매기지 않는다)
 }
 type Zone = { part: BasePart, moduleId: string? }
 
@@ -42,6 +43,7 @@ local function newRecord(): Record
         lastSentOxygen = -1,
         lastSentInside = false,
         lowWarned = false,
+        rescuing = false,
     }
 end
 
@@ -101,6 +103,7 @@ local function isInside(humanoid: Humanoid, position: Vector3, state: GameState)
 end
 
 local function onDepleted(player: Player, record: Record, now: number)
+    record.rescuing = true
     local penalty = Config.OXYGEN.deathPenalty
     ResourceState.set(Simulation.applyOxygenDeath(ResourceState.get(), Config))
     ResourceState.notify(player, Config.TEXTS.oxygenDepleted, "warn")
@@ -118,7 +121,53 @@ local function onDepleted(player: Player, record: Record, now: number)
     record.oxygen = Config.OXYGEN.max
     record.inside = true
     send(player, record, now)
+    record.rescuing = false
     ResourceState.publish()
+end
+
+-- 캐릭터 초기화(Reset Character)나 추락사로 죽으면 산소 고갈 구조와 같은 페널티 (리뷰 I17).
+-- 산소 고갈 구조는 캐릭터를 죽이지 않고 착륙선으로 옮기므로 겹치지 않지만, 구조 중 플래그로 한 번 더 막는다
+local function onDied(player: Player)
+    local record = records[player]
+    if not record or record.rescuing then
+        return
+    end
+    local state = ResourceState.get()
+    if state.phase ~= "playing" or not ServerUtil.getBase() then
+        return
+    end
+    local penalty = Config.OXYGEN.deathPenalty
+    ResourceState.set(Simulation.applyOxygenDeath(state, Config))
+    ResourceState.notify(
+        player,
+        string.format(Config.TEXTS.resetPenalty, penalty.food, penalty.water),
+        "warn"
+    )
+    ResourceState.notifyOthers(
+        player,
+        string.format(
+            Config.TEXTS.resetPenaltyOther,
+            player.DisplayName,
+            penalty.food,
+            penalty.water
+        ),
+        "warn"
+    )
+    ResourceState.publish()
+end
+
+-- 캐릭터의 Humanoid.Died에 페널티 처리를 연결한다
+local function watchDeath(player: Player, character: Model)
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    if not humanoid then
+        local found = character:WaitForChild("Humanoid", Config.CHARACTER_LOAD_TIMEOUT)
+        humanoid = if found and found:IsA("Humanoid") then found else nil
+    end
+    if humanoid then
+        humanoid.Died:Connect(function()
+            onDied(player)
+        end)
+    end
 end
 
 local function step(dt: number, now: number)
@@ -160,15 +209,20 @@ function Oxygen.addPlayer(player: Player)
     local record = newRecord()
     records[player] = record
     send(player, record, os.clock())
-    -- 다른 이유로 죽어 리스폰하면 산소를 채워 준다
-    player.CharacterAdded:Connect(function()
+    -- 다른 이유로 죽어 리스폰하면 산소를 채워 준다 (페널티는 Died에서 이미 매겼다)
+    player.CharacterAdded:Connect(function(character: Model)
         local current = records[player]
         if current then
             current.oxygen = Config.OXYGEN.max
             current.inside = true
             send(player, current, os.clock())
         end
+        watchDeath(player, character)
     end)
+    local existing = player.Character
+    if existing then
+        task.spawn(watchDeath, player, existing)
+    end
 end
 
 function Oxygen.removePlayer(player: Player)

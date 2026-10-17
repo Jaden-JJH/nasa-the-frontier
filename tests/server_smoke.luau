@@ -369,6 +369,9 @@ end)
 roblox.implementProperty("Model", "ChildAdded", function(inst)
     return signalFor(inst, "ChildAdded")
 end)
+roblox.implementProperty("Humanoid", "Died", function(inst)
+    return signalFor(inst, "Died")
+end)
 roblox.implementProperty("ProximityPrompt", "Triggered", function(inst)
     return signalFor(inst, "Triggered")
 end)
@@ -1651,16 +1654,23 @@ check(
 -- 물 원정 ---------------------------------------------------------------
 print("[물]")
 local seat = base.Rover.DriverSeat
+-- 미션 단계: 패널 3장 -> board_rover (날짜가 아니라 행동으로)
+check(state().missionStage == "board_rover", "패널 3장 설치 뒤 단계 board_rover")
 local ice1 = Workspace.IceSites.Ice1
 local icePrompt = ice1:FindFirstChildOfClass("ProximityPrompt")
 check(icePrompt.Enabled == false, "운전자 없으면 얼음 프롬프트 비활성")
 seat.CFrame = ice1.CFrame * CFrame.new(0, 0, 12)
 advance(1)
 check(icePrompt.Enabled == false, "가까워도 운전자 없으면 비활성")
-seat.Occupant = humanoid
-humanoid.SeatPart = seat
+seat:Sit(humanoid)
 advance(1)
 check(icePrompt.Enabled == true, "운전 중 + 20 studs 안이면 활성")
+check(
+    state().missionStage == "find_ice"
+        and lastSent("StateUpdate").args[1].missionStage == "find_ice"
+        and state().missionText == Config.MISSION_TEXTS.findIce,
+    "로버에 타면 단계 find_ice, 문구 파생"
+)
 signalFor(icePrompt, "Triggered"):Fire(bob)
 advance(0)
 check(state().rover.tank == 0, "운전자가 아닌 Bob의 채취 거부")
@@ -1670,6 +1680,7 @@ check(
     state().rover.tank == 40 and seat:GetAttribute("Tank") == 40,
     "탱크 만충 40, Attribute 반영"
 )
+check(state().missionStage == "unload", "만충하면 단계 unload")
 seat.CFrame = ice1.CFrame * CFrame.new(0, 0, 60)
 advance(1)
 check(icePrompt.Enabled == false, "멀어지면 비활성")
@@ -1699,6 +1710,32 @@ check(
     "하역: 물 +40, 탱크 0, 원정 1회"
 )
 check(seat:GetAttribute("Tank") == 0, "Tank Attribute 0")
+check(state().missionStage == "build_A", "하역하면 단계 build_A")
+do
+    local sentState = lastSent("StateUpdate").args[1]
+    local a = sentState.modules.A
+    check(
+        a.unlocked == true
+            and sentState.modules.B.unlocked == false
+            and a.shortfall.energy == math.max(0, Config.MODULES.A.cost.energy - sentState.energy)
+            and a.shortfall.water == math.max(0, Config.MODULES.A.cost.water - sentState.water),
+        string.format(
+            "StateUpdate 모듈 unlocked와 shortfall (A 부족 E %s, W %s)",
+            tostring(a.shortfall.energy),
+            tostring(a.shortfall.water)
+        )
+    )
+    check(
+        sentState.daysLeft.water == math.floor(sentState.water / Config.CREW.water)
+            and sentState.daysLeft.food == math.floor(sentState.food / Config.CREW.food)
+            and sentState.stallReason == "",
+        string.format(
+            "StateUpdate daysLeft (물 %d일, 식량 %d일), stallReason 빈 문자열",
+            sentState.daysLeft.water,
+            sentState.daysLeft.food
+        )
+    )
+end
 signalFor(tankPrompt, "Triggered"):Fire(bob)
 advance(0)
 check(
@@ -1727,7 +1764,16 @@ check(
     "재복제 후 Tank Attribute 반영"
 )
 check(lastSent("Notify").args[1] == "로버가 복구되었습니다", "복구 안내")
--- 뒤집힘: 무인 상태로 3초 이상이면 자동 복구
+check(
+    string.find(consolePrompt.ActionText, "초 뒤", 1, true) ~= nil,
+    "복구 직후 콘솔 프롬프트에 쿨다운 남은 초 (" .. consolePrompt.ActionText .. ")"
+)
+-- 뒤집힘: 무인 상태로 3초 이상이면 자동 복구 (쿨다운이 끝난 뒤)
+advance(Config.ROVER_RECOVERY.cooldownSeconds)
+check(
+    consolePrompt.ActionText == "로버 복구",
+    "쿨다운이 끝나면 프롬프트 문구 복귀"
+)
 newRover:PivotTo(roverHome * CFrame.new(0, 2, 0) * CFrame.Angles(0, 0, math.pi))
 advance(2)
 check(not roverAtHome(), "뒤집힌 지 3초 전에는 그대로")
@@ -1736,20 +1782,110 @@ check(
     roverAtHome() and newRover.DriverSeat.CFrame.UpVector.Y > 0.99,
     "뒤집힘 3초 뒤 자동 복구"
 )
--- 추락: Origin보다 20 studs 아래
+-- 추락: Origin보다 20 studs 아래. 방금 복구해서 쿨다운 중이면 기다렸다가 복구
 newRover:PivotTo(roverHome * CFrame.new(0, -30, 0))
 advance(Config.ROVER_RECOVERY.checkSeconds + 0.1)
-check(roverAtHome(), "추락 시 자동 복구")
--- 수동: 착륙선 콘솔 프롬프트
-newRover:PivotTo(roverHome * CFrame.new(40, 0, 0))
-signalFor(consolePrompt, "Triggered"):Fire(alice)
-advance(0)
-check(roverAtHome(), "콘솔 프롬프트로 수동 복구")
-check(
-    consolePrompt.ActionText == "로버 복구"
-        and consolePrompt.HoldDuration == Config.ROVER_RECOVERY.hold,
-    "복구 프롬프트 설정"
-)
+check(not roverAtHome(), "쿨다운 중에는 자동 복구도 기다림")
+advance(Config.ROVER_RECOVERY.cooldownSeconds)
+check(roverAtHome(), "추락 시 쿨다운 뒤 자동 복구")
+advance(Config.ROVER_RECOVERY.cooldownSeconds)
+-- 반례 (리뷰 I01): 만충 로버를 복구해도 물은 기지로 오지 않고 탱크의 물을 잃는다
+do
+    ResourceState.patch(function(st)
+        st.rover.tank = st.rover.tankMax
+    end)
+    newRover.DriverSeat:SetAttribute("Tank", 40)
+    local waterBefore = state().water
+    newRover:PivotTo(roverHome * CFrame.new(300, 0, 0)) -- 얼음 근처라고 가정한 먼 곳
+    signalFor(consolePrompt, "Triggered"):Fire(alice)
+    advance(0)
+    check(roverAtHome(), "콘솔 프롬프트로 수동 복구 (운전석 비어 있음)")
+    check(
+        state().rover.tank == 0
+            and newRover.DriverSeat:GetAttribute("Tank") == 0
+            and state().water == waterBefore,
+        string.format(
+            "만충 로버 복구: 탱크 0, 기지 물 그대로 (%d -> %d), 물 순간 운송 불가",
+            waterBefore,
+            state().water
+        )
+    )
+    local lostWarn = false
+    for _, entry in sent do
+        if
+            entry.name == "Notify"
+            and entry.args[1] == "복구 중 탱크의 물을 잃었습니다"
+        then
+            lostWarn = entry.args[2] == "warn"
+        end
+    end
+    check(lostWarn, "물 유실 안내 (warn)")
+    -- 쿨다운 중 재요청 거부
+    newRover:PivotTo(roverHome * CFrame.new(40, 0, 0))
+    signalFor(consolePrompt, "Triggered"):Fire(alice)
+    advance(0)
+    check(
+        not roverAtHome()
+            and string.find(
+                    lastSent("Notify").args[1],
+                    "초 뒤에 할 수 있습니다",
+                    1,
+                    true
+                )
+                ~= nil,
+        "쿨다운 중 수동 복구 거부 (" .. lastSent("Notify").args[1] .. ")"
+    )
+    -- 탑승 중 복구 거부 (쿨다운이 끝난 뒤)
+    advance(Config.ROVER_RECOVERY.cooldownSeconds + Config.ROVER_RECOVERY.checkSeconds + 0.1)
+    newRover.DriverSeat.Occupant = humanoid
+    signalFor(consolePrompt, "Triggered"):Fire(alice)
+    advance(0)
+    check(
+        not roverAtHome()
+            and lastSent("Notify").args[1] == "탑승 중에는 복구할 수 없습니다"
+            and lastSent("Notify").args[2] == "warn",
+        "탑승 중에는 수동 복구 거부"
+    )
+    check(
+        consolePrompt.ActionText == "로버 복구"
+            and consolePrompt.HoldDuration == Config.ROVER_RECOVERY.hold,
+        "복구 프롬프트 설정"
+    )
+    -- 다음 단계를 위해 빈 로버로 바꿔 둔다 (Lune은 Occupant에 nil을 넣을 수 없어 로버를 지워 재복제)
+    newRover:Destroy()
+    advance(Config.ROVER_RECOVERY.checkSeconds + 0.1)
+    newRover = base:FindFirstChild("Rover")
+    advance(Config.ROVER_RECOVERY.cooldownSeconds)
+end
+
+-- 캐릭터 초기화 (리뷰 I17): Reset Character로 죽으면 산소 구조와 같은 페널티 -------
+print("[초기화]")
+do
+    local before = state()
+    local foodBefore, waterBefore, deaths = before.food, before.water, before.oxygenDeaths
+    signalFor(humanoid, "Died"):Fire()
+    advance(0)
+    check(
+        state().food == math.max(0, foodBefore - Config.OXYGEN.deathPenalty.food)
+            and state().water == math.max(0, waterBefore - Config.OXYGEN.deathPenalty.water)
+            and state().oxygenDeaths == deaths + 1,
+        "초기화 사망: Food -1, Water -2, oxygenDeaths +1"
+    )
+    local selfWarn, otherWarn = false, false
+    for _, entry in sent do
+        if entry.name == "Notify" and entry.args[2] == "warn" then
+            if entry.target == alice and string.find(entry.args[1], "쓰러져서", 1, true) then
+                selfWarn = true
+            elseif
+                entry.target == bob
+                and string.find(entry.args[1], "Alice 대원이 쓰러져", 1, true)
+            then
+                otherWarn = true
+            end
+        end
+    end
+    check(selfWarn and otherWarn, "초기화 페널티 안내 (본인, 다른 대원 warn)")
+end
 
 -- 탑승 프롬프트 ----------------------------------------------------------
 print("[탑승]")
@@ -1778,13 +1914,21 @@ do
         "프롬프트로 seat:Sit 호출"
     )
     check(boardPrompt.Enabled == false, "누가 앉으면 탑승 프롬프트 꺼짐")
-    local note = lastSent("Notify")
+    -- 첫 탑승 안내는 물 원정에서 처음 앉았을 때 한 번만 (로버를 다시 만들어도 반복하지 않음)
+    local firstBoards, kind = 0, nil
+    for _, entry in sent do
+        if
+            entry.name == "Notify"
+            and entry.target == alice
+            and entry.args[1] == Config.TEXTS.firstBoard
+        then
+            firstBoards += 1
+            kind = entry.args[2]
+        end
+    end
     check(
-        note ~= nil
-            and note.target == alice
-            and note.args[1] == Config.TEXTS.firstBoard
-            and note.args[2] == "info",
-        "첫 탑승 안내: " .. tostring(note and note.args[1])
+        firstBoards == 1 and kind == "info",
+        "첫 탑승 안내는 한 번 (" .. firstBoards .. "회)"
     )
     -- 모든 프롬프트 스타일 Custom
     local count, custom = 0, 0
@@ -1885,21 +2029,44 @@ check(
 
 -- 배속 ------------------------------------------------------------------
 print("[배속]")
-signalFor(speedRemote, "OnServerEvent"):Fire(bob, 3)
-signalFor(speedRemote, "OnServerEvent"):Fire(bob, "2")
-advance(0)
-check(state().speed == 1, "잘못된 배속 무시")
-signalFor(speedRemote, "OnServerEvent"):Fire(bob, 2)
-advance(0)
-check(state().speed == 2, "2배속 적용")
-signalFor(speedRemote, "OnServerEvent"):Fire(bob, 1)
-advance(0)
-check(state().speed == 2, "1초 쿨다운 안의 재요청 무시")
-local d0 = state().day
-advance(Config.DAY_SECONDS)
-check(state().day == d0 + 2, "2배속에서 10초에 2일 진행 (" .. (state().day - d0) .. ")")
-signalFor(speedRemote, "OnServerEvent"):Fire(bob, 1)
-advance(0)
+-- 허용 배속은 Config.SPEEDS 기준 (2026-10-18: { 1 }만 허용, 2배속 제거)
+do
+    local base1 = Config.SPEEDS[1]
+    check(state().speed == base1, "기본 배속 " .. base1)
+    local rejected = { 3, "2", 0 }
+    if not table.find(Config.SPEEDS, 2) then
+        table.insert(rejected, 2)
+    end
+    for _, value in rejected do
+        signalFor(speedRemote, "OnServerEvent"):Fire(bob, value)
+    end
+    advance(0)
+    check(state().speed == base1, "SPEEDS에 없는 배속 요청 무시 (2 포함)")
+    local d0 = state().day
+    advance(Config.DAY_SECONDS)
+    check(
+        state().day == d0 + base1,
+        string.format(
+            "배속 %d에서 %d초에 %d일 진행",
+            base1,
+            Config.DAY_SECONDS,
+            state().day - d0
+        )
+    )
+    local other = Config.SPEEDS[2]
+    if other then
+        -- 배속이 다시 허용되면 적용과 쿨다운을 확인한다
+        signalFor(speedRemote, "OnServerEvent"):Fire(bob, other)
+        advance(0)
+        check(state().speed == other, other .. "배속 적용")
+        signalFor(speedRemote, "OnServerEvent"):Fire(bob, base1)
+        advance(0)
+        check(state().speed == other, "1초 쿨다운 안의 재요청 무시")
+        advance(Config.SPEED_COOLDOWN_SECONDS + 0.1)
+        signalFor(speedRemote, "OnServerEvent"):Fire(bob, base1)
+        advance(0)
+    end
+end
 
 -- 승리 ------------------------------------------------------------------
 print("[승리]")
@@ -1918,8 +2085,29 @@ check(countSent("GameOver") == overBefore + 1 and over.args[1].won == true, "Gam
 check(
     over.args[1].siteName == "Shackleton Rim"
         and over.args[1].waterTrips == 1
-        and over.args[1].oxygenDeaths == 1,
-    "결과 요약 수치"
+        and over.args[1].oxygenDeaths == 2,
+    "결과 요약 수치 (산소 고갈 1 + 초기화 1)"
+)
+do
+    -- GameOver는 마지막 DayTick 시각에 나갔으므로 지금 기준 남은 시간은 0 초과 10 이하
+    local remaining = over.args[1].restartAvailableAt - (1700000000 + now)
+    check(
+        over.args[1].chooserUserId == 1 and remaining > 0 and remaining <= Config.RESULT_MIN_SECONDS,
+        string.format(
+            "GameOver: chooserUserId(Alice), restartAvailableAt = 결과 시각 + 10초 (남은 %.1f초)",
+            remaining
+        )
+    )
+end
+-- 결과 화면 10초 전에는 권한자도 재시작 불가
+signalFor(restartRemote, "OnServerEvent"):Fire(alice)
+advance(0)
+check(
+    state().phase == "won"
+        and lastSent("Notify").target == alice
+        and lastSent("Notify").args[2] == "info"
+        and string.find(lastSent("Notify").args[1], "초 뒤에 다시 시작", 1, true) ~= nil,
+    "결과 10초 안 재시작 거부 (" .. lastSent("Notify").args[1] .. ")"
 )
 print("        GameOver: day " .. over.args[1].day .. ", reason " .. over.args[1].reason)
 local dayAtWin = state().day
@@ -1928,8 +2116,16 @@ check(state().day == dayAtWin, "승리 후 시계 정지")
 
 -- 재시작과 타임아웃 -------------------------------------------------------
 print("[재시작]")
-humanoid.Sit = true
 signalFor(restartRemote, "OnServerEvent"):Fire(bob)
+advance(0)
+check(
+    state().phase == "won"
+        and lastSent("Notify").target == bob
+        and lastSent("Notify").args[1] == "재시작은 Alice 대원이 할 수 있습니다",
+    "권한자가 아닌 Bob의 재시작 거부"
+)
+humanoid.Sit = true
+signalFor(restartRemote, "OnServerEvent"):Fire(alice)
 advance(0)
 check(humanoid.Sit == false, "재시작 전 전원 하차")
 check(
@@ -2081,13 +2277,19 @@ local function leave(player)
     advance(0)
     table.remove(players, table.find(players, player))
 end
-leave(bob)
+-- 결과 화면 중 권한자(Alice)가 나가면 남은 Bob이 권한자가 되고 결과 정보를 다시 받는다
+local gameOversBefore = countSent("GameOver")
+leave(alice)
 check(
     state().phase == "lost" and Workspace:FindFirstChild("Base") ~= nil,
     "한 명 남으면 그대로"
 )
+check(
+    countSent("GameOver") == gameOversBefore + 1 and lastSent("GameOver").args[1].chooserUserId == 2,
+    "권한자가 나가면 GameOver를 새 권한자(Bob)로 다시 보냄"
+)
 local opensBefore = countSent("SiteSelectionOpen")
-leave(alice)
+leave(bob)
 check(
     state().phase == "selecting" and Workspace:FindFirstChild("Base") == nil,
     "마지막 플레이어 퇴장 시 selecting으로 초기화"
@@ -3078,7 +3280,8 @@ local function runDecorScenario()
         bcOk,
         "대각선 통로 세그먼트가 B와 C 중심을 잇는 선 위, 두 건물 사이"
     )
-    -- 재시작하면 Base 아래 장식은 함께 사라지고 행성은 남는다
+    -- 재시작하면 Base 아래 장식은 함께 사라지고 행성은 남는다 (결과 화면 최소 시간 뒤)
+    advance(Config.RESULT_MIN_SECONDS + 0.1)
     signalFor(remotes2.RequestRestart, "OnServerEvent"):Fire(carol)
     advance(0)
     check(

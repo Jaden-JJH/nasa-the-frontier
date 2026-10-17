@@ -34,6 +34,8 @@ export type ModuleState = {
     status: ModuleStatus,
     progress: number,     -- 0..1, building일 때만 의미
     daysLeft: number,     -- building일 때 남은 일수, 아니면 0
+    unlocked: boolean,    -- 2026-10-18 추가. 선행 조건 충족 여부(비용과 무관)
+    shortfall: { energy: number, water: number },  -- 2026-10-18 추가. 착공에 부족한 양, 충분하면 0
 }
 export type GameState = {
     phase: "selecting" | "landing" | "playing" | "won" | "lost",
@@ -60,6 +62,9 @@ export type GameState = {
     oxygenDeaths: number,
     shortageDays: number,     -- Food 또는 Water가 0인 연속 일수 (0..3)
     modulesStalled: boolean,  -- 오늘 전력 부족으로 모듈이 정지했는지
+    missionStage: string,     -- 2026-10-18 추가. "panels" | "board_rover" | "find_ice" | "unload" | "build_A" | "build_B" | "build_C" | "done". 클라이언트가 목표 대상 Highlight에 사용
+    daysLeft: { water: number, food: number },  -- 2026-10-18 추가. 현재 소비율 기준 남은 일수(소비 0이면 999)
+    stallReason: string,      -- 2026-10-18 추가. 모듈 정지 사유 한국어 한 줄, 정지 아니면 ""
 }
 ```
 
@@ -99,6 +104,8 @@ export type GameOverInfo = {
     waterTrips: number,
     oxygenDeaths: number,
     siteName: string,
+    restartAvailableAt: number,  -- 2026-10-18 추가. workspace:GetServerTimeNow() 기준 재도전 가능 시각(결과 화면 후 RESULT_MIN_SECONDS)
+    chooserUserId: number,       -- 2026-10-18 추가. 재도전을 결정할 수 있는 플레이어
 }
 ```
 
@@ -108,7 +115,7 @@ export type GameOverInfo = {
 
 **SetSpeed** `(speed: number)` - 1 또는 2만 수락. 아무나 보낼 수 있음.
 
-**RequestRestart** `()` - phase가 won 또는 lost일 때만 수락. 서버가 상태 리셋 후 selecting으로.
+**RequestRestart** `()` - phase가 won 또는 lost이고 결과 화면이 뜬 지 Config.RESULT_MIN_SECONDS(10) 이상 지났을 때, 선택 권한자(chooser)만 수락(2026-10-18 리뷰 반영). 서버가 상태 리셋 후 selecting으로.
 
 ## 3. 서버 전용 모듈 경계 (src/server)
 

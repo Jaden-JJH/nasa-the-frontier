@@ -37,10 +37,11 @@ function ResourceState.reset()
     state = Simulation.newState(Config)
 end
 
--- 모든 플레이어에게 현재 상태 송신. 미션 문구는 송신 직전에 항상 다시 계산한다
+-- 모든 플레이어에게 현재 상태 송신. 파생 필드(missionStage, daysLeft, stallReason, 모듈 unlocked와
+-- shortfall, missionText)는 송신 직전에 항상 다시 계산한다
 function ResourceState.publish()
     ResourceState.patch(function(s)
-        s.missionText = Simulation.missionText(s, Config)
+        Simulation.refreshDerived(s, Config)
     end)
     Remotes.get("StateUpdate"):FireAllClients(state)
 end

@@ -1,9 +1,10 @@
 --!strict
 -- 로버 복구: 기지가 놓일 때 로버 홈 위치를 저장하고, 아래 경우 홈으로 되돌린다.
---   수동: 착륙선 콘솔(Lander.RoverConsole, 없으면 SpawnPoint)의 "로버 복구" 프롬프트
+--   수동: 착륙선 콘솔(Lander.RoverConsole, 없으면 SpawnPoint)의 "로버 복구" 프롬프트. 운전석이 비어 있을 때만
 --   자동: 무인 상태로 뒤집힌 채 Config.ROVER_RECOVERY.flipSeconds 이상, 또는 Origin보다 fallDepth 아래로 추락
 --   소실: DriverSeat가 사라졌으면(FallenPartsDestroyHeight 등) ServerStorage.BaseKit.Rover를 다시 복제
--- 탱크 값은 GameState에 있으므로 복구 뒤 Attribute만 다시 비춘다.
+-- 악용 차단 (리뷰 I01): 복구하면 탱크의 물은 잃고(물 순간 운송 금지), 복구 뒤 cooldownSeconds 동안은
+-- 수동과 자동 모두 다시 복구하지 않는다. 쿨다운 중 프롬프트 ActionText에 남은 초를 보인다.
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerStorage = game:GetService("ServerStorage")
@@ -21,7 +22,27 @@ local homePivot: CFrame? = nil
 local prompt: ProximityPrompt? = nil
 local connections: { RBXScriptConnection } = {}
 local flippedSince: number? = nil
+local cooldownUntil = 0 -- os.clock 기준 다음 복구 가능 시각 (수동, 자동 공용)
 local initialized = false
+
+local function cooldownRemaining(now: number): number
+    return math.max(0, cooldownUntil - now)
+end
+
+-- 프롬프트 문구: 쿨다운 중이면 남은 초
+local function updatePromptText(now: number)
+    local current = prompt
+    if not current then
+        return
+    end
+    local remaining = cooldownRemaining(now)
+    local text = if remaining > 0
+        then string.format(Config.PROMPT_TEXTS.recoverCooldown, math.ceil(remaining))
+        else Config.PROMPT_TEXTS.recoverRover
+    if current.ActionText ~= text then
+        current.ActionText = text
+    end
+end
 
 local function resetMotion(model: Model)
     for _, descendant in model:GetDescendants() do
@@ -41,7 +62,8 @@ local function referenceY(base: Model, home: CFrame): number
     return home.Position.Y
 end
 
--- 로버를 홈 위치로 되돌린다. 성공하면 true
+-- 로버를 홈 위치로 되돌린다. 탱크는 비우고 쿨다운을 시작한다. 성공하면 true.
+-- 운전석 검사와 쿨다운 검사는 호출하는 쪽(수동 프롬프트, 자동 검사)이 한다
 function RoverRecovery.recover(): boolean
     local base = currentBase
     local home = homePivot
@@ -70,28 +92,71 @@ function RoverRecovery.recover(): boolean
         fresh.Parent = base
         RoverDrive.attach(base)
     end
+    -- 물 유실: 복구는 물을 기지로 옮겨 주지 않는다
+    local lostWater = ResourceState.get().rover.tank > 0
+    if lostWater then
+        ResourceState.patch(function(s)
+            s.rover.tank = 0
+        end)
+    end
     WaterLoop.mirrorTank()
+    WaterLoop.refresh()
     flippedSince = nil
+    local now = os.clock()
+    cooldownUntil = now + Config.ROVER_RECOVERY.cooldownSeconds
+    updatePromptText(now)
     ResourceState.notifyAll(Config.TEXTS.roverRecovered, "info")
+    if lostWater then
+        ResourceState.notifyAll(Config.TEXTS.tankLostOnRecover, "warn")
+    end
+    ResourceState.publish()
     return true
 end
 
--- 1초 주기 자동 검사
+-- 수동 복구 요청 (콘솔 프롬프트)
+local function onManualRecover(player: Player)
+    if ResourceState.get().phase ~= "playing" then
+        return
+    end
+    local seat = ServerUtil.getRoverSeat()
+    if seat and seat.Occupant ~= nil then
+        ResourceState.notify(player, Config.TEXTS.roverOccupied, "warn")
+        return
+    end
+    local remaining = cooldownRemaining(os.clock())
+    if remaining > 0 then
+        ResourceState.notify(
+            player,
+            string.format(Config.TEXTS.recoverCooldown, math.ceil(remaining)),
+            "info"
+        )
+        return
+    end
+    RoverRecovery.recover()
+end
+
+-- 1초 주기 자동 검사. 쿨다운 중에는 자동 복구도 기다린다
 local function check(now: number)
+    updatePromptText(now)
     local base = currentBase
     local home = homePivot
     if not base or not home or not base:IsDescendantOf(workspace) then
         return
     end
+    local cooling = cooldownRemaining(now) > 0
     local seat = ServerUtil.getRoverSeat()
     if not seat then
-        RoverRecovery.recover()
+        if not cooling then
+            RoverRecovery.recover()
+        end
         return
     end
     local r = Config.ROVER_RECOVERY
     local position = seat.CFrame.Position
     if position.Y < referenceY(base, home) - r.fallDepth then
-        RoverRecovery.recover()
+        if not cooling then
+            RoverRecovery.recover()
+        end
         return
     end
     local flipped = seat.Occupant == nil and seat.CFrame.UpVector.Y < r.flipUpY
@@ -102,7 +167,7 @@ local function check(now: number)
     local since = flippedSince
     if since == nil then
         flippedSince = now
-    elseif now - since >= r.flipSeconds then
+    elseif now - since >= r.flipSeconds and not cooling then
         RoverRecovery.recover()
     end
 end
@@ -142,14 +207,7 @@ function RoverRecovery.attach(base: Model)
         enabled = false,
     })
     prompt = newPrompt
-    table.insert(
-        connections,
-        newPrompt.Triggered:Connect(function()
-            if ResourceState.get().phase == "playing" then
-                RoverRecovery.recover()
-            end
-        end)
-    )
+    table.insert(connections, newPrompt.Triggered:Connect(onManualRecover))
     RoverRecovery.refresh()
 end
 
@@ -165,6 +223,7 @@ function RoverRecovery.detach()
     currentBase = nil
     homePivot = nil
     flippedSince = nil
+    cooldownUntil = 0
 end
 
 -- 자동 검사 루프 시작 (한 번만)

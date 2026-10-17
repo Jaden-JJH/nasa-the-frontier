@@ -9,6 +9,7 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Config = require(ReplicatedStorage.Shared.Config)
+local Simulation = require(ReplicatedStorage.Shared.Simulation)
 local ResourceState = require(script.Parent.ResourceState)
 local ServerUtil = require(script.Parent.ServerUtil)
 
@@ -49,6 +50,15 @@ local function onOccupantChanged(seat: VehicleSeat)
     if player and not boardedOnce[player] then
         boardedOnce[player] = true
         ResourceState.notify(player, Config.TEXTS.firstBoard, "info")
+    end
+    -- 튜토리얼: 탑승하면 find_ice 단계로 (이미 지났으면 그대로)
+    local state = ResourceState.get()
+    if player and state.phase == "playing" then
+        local new = Simulation.markBoarded(state, Config)
+        if new.missionStage ~= state.missionStage then
+            ResourceState.set(new)
+            ResourceState.publish()
+        end
     end
 end
 
