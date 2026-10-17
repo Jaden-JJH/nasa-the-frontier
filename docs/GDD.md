@@ -135,7 +135,7 @@
 | 착륙지 | 패드 4개 Part. 선택 시 기지 키트 모델 Clone 후 PivotTo | 일조율은 패드 Attribute |
 | 인트로 | ScreenGui 2개(타이틀, 선택) + 카메라 Tween 5초 | 조종석 컷은 ImageLabel |
 | 결과 | ScreenGui. 승리와 실패 공용. 재도전은 서버 상태 리셋 | |
-| 달 환경 | Workspace.Gravity = 32.7 (Roblox 기본 196.2의 1/6), 하늘 어둡게, 지면은 밝게 | 밤 없음 |
+| 달 환경 | Workspace.Gravity = 32.7 (Roblox 기본 196.2의 1/6). 조명은 자정(ClockTime 0)으로 하늘을 검게 하고 OutdoorAmbient를 올려 지면을 밝게. Sky의 달 텍스처를 내장 태양 텍스처로 바꿔 태양이 보이게. 지구(Planet 메시)는 Neon 자체 발광. 지면은 평평한 Part(복셀 Terrain은 TERRAIN_ENABLED 플래그, 기본 꺼짐: 얇은 패드가 묻히는 문제로 2026-10-17 롤백) | 밤 없음 |
 
 ## 7. 개발 우선순위 (1016 회의 결정 반영)
 

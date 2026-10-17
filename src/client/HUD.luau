@@ -190,9 +190,18 @@ function HUD.init(ctx)
         Preset = "heading",
         TextSize = 28,
     })
+    refs.site = UI.create("TextLabel", {
+        Name = "SiteName",
+        LayoutOrder = 2,
+        Size = UDim2.new(1, 0, 0, 18),
+        Preset = "caption",
+        Text = "",
+        TextColor3 = Colors.water,
+        Visible = false,
+    })
     refs.mission = UI.create("TextLabel", {
         Name = "Mission",
-        LayoutOrder = 2,
+        LayoutOrder = 3,
         Size = UDim2.fromScale(1, 0),
         AutomaticSize = Enum.AutomaticSize.Y,
         Text = "",
@@ -223,6 +232,7 @@ function HUD.init(ctx)
             UI.padding({ 6, 8, 12, 12 }),
             UI.list(Enum.FillDirection.Vertical, 2),
             refs.day,
+            refs.site,
             refs.mission,
         }),
     })
@@ -312,6 +322,8 @@ function HUD.update(state)
 
     refs.day.Text = string.format("Day %d / %d", state.day, state.totalDays)
     refs.mission.Text = state.missionText or ""
+    refs.site.Text = state.siteName or ""
+    refs.site.Visible = state.siteName ~= nil
 
     refs.panels.Text = string.format(
         "%d/%d (오늘 %d/%d)",

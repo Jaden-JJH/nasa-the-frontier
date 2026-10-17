@@ -32,6 +32,10 @@ local ICE_LIGHT_BRIGHTNESS = 1.2
 local ICE_TRANSPARENCY = 0.1 -- 얼음 덩어리 (Part와 결정 메시 공통)
 
 -- 달 지형 (Roblox Terrain). Terrain이 없는 환경(Lune 스모크)에서는 평평한 지면 Part로 대신한다
+-- 꺼 둠(2026-10-17 플레이테스트): Terrain 복셀(4 studs)이 얇은 패드와 패널 슬롯(두께 0.2)을 덮어
+-- 바닥 안내가 묻혔다. false면 지형을 만들지 않고 평평한 지면 Part를 쓰며, 바위도 지형을 피하지 않아
+-- 지형 전 버전과 같은 자리에 놓인다. 아래 지형 코드는 다시 켤 때를 위해 남겨 둔다
+local TERRAIN_ENABLED = false
 local TERRAIN_THICKNESS = 24 -- 윗면은 GROUND_TOP
 local TERRAIN_SEED_OFFSET = 1 -- 바위 배치와 다른 난수 흐름 (같은 시드에서 결정적)
 local TERRAIN_EDGE_MARGIN = 10 -- 지형 특징을 맵 가장자리에서 띄우는 거리
@@ -201,6 +205,14 @@ local COLORS = {
     console = Color3.fromRGB(255, 140, 60),
 }
 
+-- 하늘 (Lighting에 Sky가 없을 때만 만든다). 자정에는 Roblox가 달 자리에 MoonTexture를 그리므로
+-- 내장 태양 텍스처를 달 자리에 써서 검은 하늘에 태양이 뜨게 한다
+local SKY = {
+    moonTextureId = "rbxasset://sky/sun.jpg",
+    moonAngularSize = 14,
+    starCount = 3000,
+}
+
 -- 조명 (그레이박스 맵을 만들 때만 적용)
 -- 자정(0시)으로 두어 하늘을 검게 하고, 주변광을 밝게 올려 지면이 보이게 한다
 local LIGHTING = {
@@ -273,25 +285,6 @@ local function makeFolder(name: string, parent: Instance): Folder
     folder.Name = name
     folder.Parent = parent
     return folder
-end
-
-local function makeSign(part: BasePart, text: string, offsetY: number)
-    local layout = Config.WORLD_LABEL
-    local gui = Instance.new("BillboardGui")
-    gui.Name = "Sign"
-    gui.Size = UDim2.fromOffset(layout.width, layout.height)
-    gui.StudsOffset = Vector3.new(0, offsetY, 0)
-    gui.MaxDistance = layout.maxDistance * 4
-    gui.Parent = part
-    local label = Instance.new("TextLabel")
-    label.Size = UDim2.fromScale(1, 1)
-    label.BackgroundTransparency = 1
-    label.TextColor3 = COLORS.spawn
-    label.TextStrokeTransparency = 0.4
-    label.Font = Enum.Font.GothamMedium
-    label.TextSize = layout.textSize
-    label.Text = text
-    label.Parent = gui
 end
 
 -- KitImports 장식 하나를 box에 맞춰 바닥 중심 bottomCenter에 놓는다 (메시가 없으면 nil)
@@ -467,6 +460,15 @@ local function buildLighting()
         atmosphere.Density = 0
         atmosphere.Haze = 0
         atmosphere.Glare = 0
+    end
+    -- 디자이너가 둔 Sky가 있으면 건드리지 않는다
+    if not Lighting:FindFirstChildOfClass("Sky") then
+        local sky = Instance.new("Sky")
+        sky.MoonTextureId = SKY.moonTextureId
+        sky.MoonAngularSize = SKY.moonAngularSize
+        sky.StarCount = SKY.starCount
+        sky.CelestialBodiesShown = true
+        sky.Parent = Lighting
     end
 end
 
@@ -728,7 +730,7 @@ end
 
 -- 지형 적용: Terrain이 있으면 표토를 채우고 언덕과 크레이터를 만든다. 없으면 평평한 지면 Part
 local function applyTerrain(plan: TerrainPlan, folder: Instance)
-    local terrain = workspace:FindFirstChildOfClass("Terrain")
+    local terrain = if TERRAIN_ENABLED then workspace:FindFirstChildOfClass("Terrain") else nil
     if not terrain then
         makePart({
             name = "MoonGround",
@@ -794,7 +796,9 @@ local function buildTerrainAndSites()
     for index in Config.SITES do
         table.insert(padPositions, sitePadPosition(index))
     end
-    local plan = planTerrain(padPositions)
+    local plan: TerrainPlan = if TERRAIN_ENABLED
+        then planTerrain(padPositions)
+        else { balls = {}, footprints = {} }
     applyTerrain(plan, terrain)
 
     local iceFolder = makeFolder("IceSites", workspace)
@@ -829,7 +833,6 @@ local function buildTerrainAndSites()
         pad:SetAttribute("IceDistanceLabel", site.iceDistanceLabel)
         pad:SetAttribute("HazardLabel", site.hazardLabel)
         pad:SetAttribute("Description", site.description)
-        makeSign(pad, string.format("%d. %s", index, site.name), Config.WORLD_LABEL.offsetY)
     end
 
     verifyDistances(padPositions)
@@ -1122,7 +1125,7 @@ local function buildLander(kit: Model)
     -- 로버 복구 콘솔 (RoverRecovery가 프롬프트를 붙인다)
     local consoleCFrame, consoleTotal =
         slabCFrame(CFrame.identity, ROVER_CONSOLE_POSITION, ROVER_CONSOLE_SIZE.Y)
-    local console = makePart({
+    makePart({
         name = "RoverConsole",
         size = Vector3.new(ROVER_CONSOLE_SIZE.X, consoleTotal, ROVER_CONSOLE_SIZE.Z),
         cframe = consoleCFrame,
@@ -1130,7 +1133,6 @@ local function buildLander(kit: Model)
         material = Enum.Material.Metal,
         parent = lander,
     })
-    makeSign(console, Config.PROMPT_TEXTS.recoverObject, ROVER_CONSOLE_SIZE.Y)
 
     -- KitImports 장식: 지붕 안테나와 레이더, 콘솔 위 안테나 (충돌 없음)
     ServerUtil.safeCall("DevMap LanderDecor", function()
@@ -1158,7 +1160,6 @@ local function buildSolarField(kit: Model)
         material = Enum.Material.Metal,
         parent = field,
     })
-    makeSign(installPad, Config.PROMPT_TEXTS.solarObject, Config.WORLD_LABEL.offsetY / 2)
     ServerUtil.safeCall("DevMap PadRing", addPadRing, installPad)
 
     local slots = makeFolder("Slots", field)
@@ -1314,7 +1315,6 @@ local function buildWaterTank(kit: Model)
         material = Enum.Material.Metal,
         parent = kit,
     })
-    makeSign(tank, Config.PROMPT_TEXTS.tankObject, WATER_TANK_SIZE.Y)
 
     -- KitImports 장식: 탱크 Part는 숨기고(프롬프트와 하역 거리 기준은 그대로) 메시를 같은 자리에
     ServerUtil.safeCall("DevMap WaterTank", function()

@@ -47,6 +47,9 @@ local PLANET_DISTANCE = 1500 -- 맵 원점에서 행성 중심까지
 local PLANET_ELEVATION = 25 -- 고도각
 local PLANET_AZIMUTH = 20 -- 방위각 (+Z에서 +X 쪽으로). 착륙 패드 대부분이 +Z를 바라본다
 local PLANET_DIAMETER = 400
+-- 자정 조명에는 직사광이 없어 행성이 어두우므로 Neon으로 스스로 빛나게 한다. TextureID는 그대로 두고,
+-- Neon이 텍스처를 덮어 단색으로 보이는 경우에 대비해 색은 지구 바다빛 계열로
+local PLANET_GLOW_COLOR = Color3.fromRGB(120, 170, 230)
 local CONNECTOR_WIDTH = 4 -- 통로 튜브 굵기. 길이 방향으로는 늘리지 않고 세그먼트를 이어 붙인다
 local CONNECTOR_PAIRS = { { "A", "B" }, { "B", "C" } } -- 둘 다 가동되면 잇는다
 local CROP_MODULE = "B" -- 작물을 심는 모듈 (Farm)
@@ -464,6 +467,8 @@ function KitImports.ensurePlanet()
         part.CanTouch = false
         part.CanQuery = false
         part.CastShadow = false
+        part.Material = Enum.Material.Neon
+        part.Color = PLANET_GLOW_COLOR
     end)
     planet.Name = "Planet"
     -- 멀리 있어도 클라이언트에 항상 스트리밍되게

@@ -345,7 +345,8 @@ function Random.new(seed)
 end
 
 -- DataModel마다 따로 모듈을 불러오는 로더 (warnSink에 warn 출력을 모은다)
-local function makeLoader(dataModel, warnSink)
+-- patch(key, source)가 있으면 모듈 소스를 바꿔 불러온다 (예: DevMap 상수 뒤집기)
+local function makeLoader(dataModel, warnSink, patch)
     local cache = {}
     local loadModule
     local function makeEnv(scriptInst)
@@ -414,8 +415,12 @@ local function makeLoader(dataModel, warnSink)
         if cache[key] ~= nil then
             return cache[key]
         end
+        local source = target.Source
+        if patch then
+            source = patch(key, source)
+        end
         local fn = luau.load(
-            target.Source,
+            source,
             { debugName = key, environment = makeEnv(target), injectGlobals = false }
         )
         local result = fn()
@@ -533,9 +538,107 @@ check(
 -- 달 지형 -----------------------------------------------------------------
 print("[지형]")
 do
+    -- 기본값 TERRAIN_ENABLED = false: Terrain 없이 평평한 지면 Part (Terrain 인스턴스가 있어도)
+    check(
+        Workspace.DevTerrain:FindFirstChild("MoonGround") ~= nil,
+        "TERRAIN_ENABLED false: 평평한 지면 Part"
+    )
+    check(#terrainCalls == 0, "TERRAIN_ENABLED false: Terrain 호출 0회")
+    check(
+        baseplate.Transparency == 0
+            and baseplate.CanCollide == true
+            and baseplateTexture.Transparency == 0,
+        "TERRAIN_ENABLED false: Baseplate는 그대로"
+    )
+    local labels = 0
+    for _, container in { Workspace, ServerStorage } do
+        for _, d in container:GetDescendants() do
+            if d:IsA("BillboardGui") then
+                labels += 1
+            end
+        end
+    end
+    check(labels == 0, "서버 월드 라벨 BillboardGui 0개 (" .. labels .. ")")
+    local sky = dm:GetService("Lighting"):FindFirstChildOfClass("Sky")
+    check(
+        sky ~= nil
+            and tostring(sky.MoonTextureId) == "rbxasset://sky/sun.jpg"
+            and sky.MoonAngularSize == 14
+            and sky.StarCount == 3000
+            and sky.CelestialBodiesShown == true,
+        "Sky 생성: 달 자리에 태양 텍스처(rbxasset://sky/sun.jpg), 크기 14, 별 3000"
+    )
+    local firstBoulder = Workspace.DevTerrain.Boulders:GetChildren()[1]
+    check(
+        firstBoulder.Color == roblox.Color3.fromRGB(90, 88, 86),
+        "그레이박스 바위 회색 (90, 88, 86)"
+    )
+    -- 얼음 지점 (그레이박스)
+    local ice1 = Workspace.IceSites.Ice1
+    local glow = ice1:FindFirstChild("IceGlow")
+    local light = glow and glow:FindFirstChildOfClass("PointLight")
+    check(
+        ice1.Material == roblox.Enum.Material.Ice
+            and ice1.Color == roblox.Color3.fromRGB(170, 225, 255)
+            and math.abs(ice1.Transparency - 0.1) < 1e-6,
+        "그레이박스 얼음: Ice 재질, 하늘색, 투명도 0.1"
+    )
+    check(
+        light ~= nil and light.Range == 18 and math.abs(light.Brightness - 1.2) < 1e-6,
+        "얼음 중심에 PointLight (Range 18, Brightness 1.2)"
+    )
+end
+
+-- 지형 경로: DevMap의 TERRAIN_ENABLED만 true로 바꾼 사본을 별도 place에서 돌린다
+local function runTerrainCase()
+    local dm3 = roblox.deserializePlace(fs.readFile(placePath))
+    local ws3 = dm3:GetService("Workspace")
+    local terrain3 = Instance.new("Terrain")
+    terrain3.Parent = ws3
+    local plate3 = Instance.new("Part")
+    plate3.Name = "Baseplate"
+    plate3.Size = Vector3.new(2048, 16, 2048)
+    plate3.CFrame = CFrame.new(0, -8, 0)
+    plate3.Parent = ws3
+    local plateTexture3 = Instance.new("Texture")
+    plateTexture3.Parent = plate3
+    local designerSky = Instance.new("Sky")
+    designerSky.MoonTextureId = "rbxassetid://123"
+    designerSky.Parent = dm3:GetService("Lighting")
+    local patched = 0
+    local loader3 = makeLoader(dm3, {}, function(key, source)
+        if string.sub(key, -6) == "DevMap" then
+            local out, n =
+                string.gsub(source, "local TERRAIN_ENABLED = false", "local TERRAIN_ENABLED = true")
+            patched += n
+            return out
+        end
+        return source
+    end)
+    local callsBefore = #terrainCalls
+    task.spawn(function()
+        loader3(dm3:GetService("ServerScriptService").Server.DevMap).ensure()
+    end)
+    advance(0)
+    check(patched == 1, "지형 경로: DevMap 플래그를 true로 바꿈")
+    local skies = 0
+    for _, child in dm3:GetService("Lighting"):GetChildren() do
+        if child:IsA("Sky") then
+            skies += 1
+        end
+    end
+    check(
+        skies == 1 and tostring(designerSky.MoonTextureId) == "rbxassetid://123",
+        "디자이너 Sky가 있으면 건드리지 않음"
+    )
+    -- 이 place에서 생긴 호출만 본다
+    local calls = {}
+    for i = callsBefore + 1, #terrainCalls do
+        table.insert(calls, terrainCalls[i])
+    end
     local GROUND_TOP = 0.5
     local blocks, balls = {}, {}
-    for _, call in terrainCalls do
+    for _, call in calls do
         table.insert(if call.kind == "block" then blocks else balls, call)
     end
     local block = blocks[1]
@@ -548,26 +651,23 @@ do
         "FillBlock 한 번: 두께 24, 윗면 y 0.5, 1400 x 1100"
     )
     check(
-        terrainInstance:GetMaterialColor(roblox.Enum.Material.Sand)
-            == roblox.Color3.fromRGB(128, 126, 122),
+        terrain3:GetMaterialColor(roblox.Enum.Material.Sand) == roblox.Color3.fromRGB(128, 126, 122),
         "Sand 재질 색 = 달 표토 회색 (128, 126, 122)"
     )
     check(
-        Workspace.DevTerrain:FindFirstChild("MoonGround") == nil,
+        ws3.DevTerrain:FindFirstChild("MoonGround") == nil,
         "Terrain이 있으면 지면 Part를 만들지 않음"
     )
     check(
-        baseplate.Transparency == 1
-            and baseplate.CanCollide == false
-            and baseplateTexture.Transparency == 1,
+        plate3.Transparency == 1 and plate3.CanCollide == false and plateTexture3.Transparency == 1,
         "기본 Baseplate는 플레이 중 숨김"
     )
     local craters, hills = 0, 0
     local pads, ices = {}, {}
     for i = 1, 4 do
-        table.insert(pads, Workspace.LandingPads["Pad" .. i].CFrame.Position)
+        table.insert(pads, ws3.LandingPads["Pad" .. i].CFrame.Position)
     end
-    for _, ice in Workspace.IceSites:GetChildren() do
+    for _, ice in ws3.IceSites:GetChildren() do
         table.insert(ices, ice.CFrame.Position)
     end
     local function flatDistance(a, b)
@@ -620,7 +720,7 @@ do
         )
     )
     local boulderInCrater = 0
-    for _, boulder in Workspace.DevTerrain.Boulders:GetChildren() do
+    for _, boulder in ws3.DevTerrain.Boulders:GetChildren() do
         for _, crater in craterCenters do
             if flatDistance(boulder.CFrame.Position, crater.center) < crater.footprint then
                 boulderInCrater += 1
@@ -628,26 +728,9 @@ do
         end
     end
     check(boulderInCrater == 0, "바위가 크레이터 안에 놓이지 않음")
-    local firstBoulder = Workspace.DevTerrain.Boulders:GetChildren()[1]
-    check(
-        firstBoulder.Color == roblox.Color3.fromRGB(90, 88, 86),
-        "그레이박스 바위 회색 (90, 88, 86)"
-    )
-    -- 얼음 지점 (그레이박스)
-    local ice1 = Workspace.IceSites.Ice1
-    local glow = ice1:FindFirstChild("IceGlow")
-    local light = glow and glow:FindFirstChildOfClass("PointLight")
-    check(
-        ice1.Material == roblox.Enum.Material.Ice
-            and ice1.Color == roblox.Color3.fromRGB(170, 225, 255)
-            and math.abs(ice1.Transparency - 0.1) < 1e-6,
-        "그레이박스 얼음: Ice 재질, 하늘색, 투명도 0.1"
-    )
-    check(
-        light ~= nil and light.Range == 18 and math.abs(light.Brightness - 1.2) < 1e-6,
-        "얼음 중심에 PointLight (Range 18, Brightness 1.2)"
-    )
 end
+runTerrainCase()
+
 check(state().phase == "selecting", "부팅 후 selecting")
 
 -- 플레이어 입장 ---------------------------------------------------------
@@ -1801,6 +1884,13 @@ local function runDecorScenario()
             planetCenter.Magnitude,
             elevation
         )
+    )
+    check(
+        allParts(planet, function(p)
+            return p.Material == roblox.Enum.Material.Neon
+                and p.Color == roblox.Color3.fromRGB(120, 170, 230)
+        end),
+        "Planet: Neon 재질로 자체 발광 (색 120, 170, 230)"
     )
     check(
         planet.ModelStreamingMode == roblox.Enum.ModelStreamingMode.Persistent,
