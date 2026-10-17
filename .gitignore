@@ -1,0 +1,10 @@
+*.rbxl
+*.rbxlx
+*.rbxm
+build/
+.DS_Store
+sourcemap.json
+globalTypes.d.luau
+*.swp
+*.swo
+.cache/

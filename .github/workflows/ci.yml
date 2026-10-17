@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: CompeyDev/setup-rokit@v0.2.1
+        with:
+          cache: true
+
+      - name: Lint (selene)
+        run: selene src tests
+
+      - name: Format check (stylua)
+        run: stylua --check src tests
+
+      - name: Build place (rojo)
+        run: rojo build default.project.json -o build.rbxl
+
+      - name: Unit tests (lune)
+        run: |
+          if [ -f tests/run.luau ]; then
+            lune run tests/run.luau
+          else
+            echo "tests/run.luau 없음, 건너뜀"
+          fi

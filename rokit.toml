@@ -1,0 +1,7 @@
+# Rokit 도구 버전 고정 (rokit install 로 설치)
+[tools]
+rojo = "rojo-rbx/rojo@7.7.1"
+selene = "Kampfkarren/selene@0.32.0"
+stylua = "JohnnyMorganz/StyLua@2.6.0"
+luau-lsp = "JohnnyMorganz/luau-lsp@1.70.1"
+lune = "lune-org/lune@0.11.0"
