@@ -12,6 +12,7 @@ local ObjectiveHighlight = {}
 local POLL_SECONDS = 0.5
 
 local stage = nil
+local lowBattery = false -- 마지막 상태 기준 배터리 25% 이하
 local highlight = nil
 local currentTarget = nil
 
@@ -45,7 +46,21 @@ local function nearestIce()
     return best
 end
 
+local function roverOutsideBase()
+    local rover = findPath("Base", "Rover")
+    local pad = findPath("Base", "ChargePad")
+    if not (rover and pad and rover:IsA("Model")) then
+        return false
+    end
+    local radius = math.max(pad.Size.X, pad.Size.Z) / 2 + 6
+    return (rover:GetPivot().Position - pad.Position).Magnitude > radius
+end
+
 local function resolveTarget()
+    -- 배터리가 낮고 로버가 기지 밖이면 임시로 충전 패드를 가리킨다
+    if lowBattery and roverOutsideBase() then
+        return findPath("Base", "ChargePad")
+    end
     if stage == "panels" then
         return findPath("Base", "SolarField", "InstallPad")
     elseif stage == "board_rover" then
@@ -106,6 +121,16 @@ function ObjectiveHighlight.update(state)
     local newStage = state and state.missionStage
     if newStage ~= stage then
         stage = newStage
+        clear()
+    end
+    local rover = state and state.rover
+    local low = rover ~= nil
+        and type(rover.battery) == "number"
+        and type(rover.batteryMax) == "number"
+        and rover.batteryMax > 0
+        and rover.battery / rover.batteryMax <= 0.25
+    if low ~= lowBattery then
+        lowBattery = low
         clear()
     end
     if stage then

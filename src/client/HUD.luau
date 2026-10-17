@@ -3,6 +3,8 @@
 -- 배치(1280x720 기준): 좌상단 자원, 상단 중앙 Day와 미션, 우상단 패널과 로버,
 -- 우측 모듈 3개(y=300부터, 토스트 영역 아래), 우하단 속도 버튼.
 
+local TweenService = game:GetService("TweenService")
+
 local UI = require(script.Parent.UI)
 local Colors = UI.Colors
 
@@ -13,6 +15,7 @@ local setSpeedRemote
 local gui
 local refs = {}
 local currentSpeed = 1
+local batteryTweens = nil
 
 local STATUS_TEXT = {
     locked = "잠김",
@@ -275,7 +278,36 @@ function HUD.init(ctx)
     }, { UI.corner(10), UI.padding(10), UI.list(Enum.FillDirection.Vertical, 2) })
     refs.panels = makeInfoRow(topRight, 1, "패널")
     refs.tank = makeInfoRow(topRight, 2, "로버 탱크")
-    refs.roverBadge = makeInfoRow(topRight, 3, "로버 상태")
+    refs.batteryText = makeInfoRow(topRight, 3, "배터리")
+    refs.batteryBar = UI.progressBar(Colors.energy, 8)
+    refs.batteryBar.root.AnchorPoint = Vector2.new(0, 0.5)
+    refs.batteryBar.root.Position = UDim2.fromScale(0, 0.5)
+    refs.batteryBar.root.Size = UDim2.new(1, -68, 0, 8)
+    refs.batteryBadgeText = UI.create("TextLabel", {
+        Size = UDim2.fromScale(1, 1),
+        Text = "",
+        TextColor3 = Colors.bg,
+        Preset = "badge",
+        TextSize = 12,
+    })
+    refs.batteryBadge = UI.create("Frame", {
+        Name = "BatteryBadge",
+        AnchorPoint = Vector2.new(1, 0.5),
+        Position = UDim2.fromScale(1, 0.5),
+        Size = UDim2.fromOffset(62, 18),
+        BackgroundColor3 = Colors.water,
+        Visible = false,
+    }, { UI.corner(6), refs.batteryBadgeText })
+    refs.batteryRow = UI.create("Frame", {
+        Name = "BatteryBarRow",
+        LayoutOrder = 4,
+        Size = UDim2.new(1, 0, 0, 20),
+        BackgroundTransparency = 1,
+        Parent = topRight,
+    }, { refs.batteryBar.root, refs.batteryBadge })
+    refs.batteryText.Parent.Visible = false
+    refs.batteryRow.Visible = false
+    refs.roverBadge = makeInfoRow(topRight, 5, "로버 상태")
     refs.roverBadge.Parent.Visible = false
 
     -- 우측: 모듈 3개 (y=300, 토스트 영역을 피한다)
@@ -342,6 +374,62 @@ local function updateModule(row, moduleState)
     end
 end
 
+-- 배터리 25% 이하 경고: 바와 글자를 천천히 깜빡인다
+local function setBatteryBlink(blink)
+    if blink then
+        if batteryTweens then
+            return
+        end
+        local info = TweenInfo.new(0.8, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true)
+        batteryTweens = {
+            TweenService:Create(refs.batteryBar.fill, info, { BackgroundTransparency = 0.7 }),
+            TweenService:Create(refs.batteryText, info, { TextTransparency = 0.6 }),
+        }
+        for _, tween in ipairs(batteryTweens) do
+            tween:Play()
+        end
+    elseif batteryTweens then
+        for _, tween in ipairs(batteryTweens) do
+            tween:Cancel()
+        end
+        batteryTweens = nil
+        refs.batteryBar.fill.BackgroundTransparency = 0
+        refs.batteryText.TextTransparency = 0
+    end
+end
+
+local function updateBattery(rover)
+    local battery, batteryMax = rover.battery, rover.batteryMax
+    local valid = type(battery) == "number" and type(batteryMax) == "number" and batteryMax > 0
+    refs.batteryText.Parent.Visible = valid
+    refs.batteryRow.Visible = valid
+    if not valid then
+        setBatteryBlink(false)
+        return
+    end
+    local ratio = battery / batteryMax
+    local low = ratio <= 0.25
+    refs.batteryText.Text = string.format("%d / %d", roundInt(battery), roundInt(batteryMax))
+    refs.batteryText.TextColor3 = if low then Colors.bad else Colors.text
+    refs.batteryBar.fill.BackgroundColor3 = if low then Colors.bad else Colors.energy
+    refs.batteryBar.setRatio(ratio)
+    setBatteryBlink(low)
+
+    if battery <= 0 then
+        refs.batteryBadge.Visible = true
+        refs.batteryBadge.BackgroundColor3 = Colors.bad
+        refs.batteryBadgeText.TextColor3 = Colors.text
+        refs.batteryBadgeText.Text = "방전"
+    elseif rover.charging then
+        refs.batteryBadge.Visible = true
+        refs.batteryBadge.BackgroundColor3 = Colors.water
+        refs.batteryBadgeText.TextColor3 = Colors.bg
+        refs.batteryBadgeText.Text = "충전 중"
+    else
+        refs.batteryBadge.Visible = false
+    end
+end
+
 function HUD.update(state)
     refs.energy.value.Text = tostring(math.floor(state.energy))
     refs.water.value.Text = tostring(math.floor(state.water))
@@ -377,6 +465,8 @@ function HUD.update(state)
     )
     refs.tank.Text =
         string.format("%d/%d", roundInt(state.rover.tank), roundInt(state.rover.tankMax))
+
+    updateBattery(state.rover)
 
     local damage = state.rover.damage
     local badge = refs.roverBadge

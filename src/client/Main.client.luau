@@ -106,6 +106,7 @@ remotes.StateUpdate.OnClientEvent:Connect(function(state)
     PadSignUI.update(state)
     RoverHint.onState(state)
     ObjectiveHighlight.update(state)
+    RadarUI.onState(state)
     applyScreens()
     -- GameOver를 놓친 늦은 입장자를 위한 대체 표시
     if (state.phase == "won" or state.phase == "lost") and not ResultUI.isVisible() then

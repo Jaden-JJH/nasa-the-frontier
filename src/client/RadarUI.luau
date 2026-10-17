@@ -24,6 +24,8 @@ local config
 local gui
 local dotsFrame
 local distanceLabel
+local batteryLabel
+local battery = nil -- 마지막 StateUpdate의 rover.battery
 local enabled = false
 local dots = {} -- { [BasePart] = Frame }
 
@@ -162,6 +164,28 @@ local function step()
         end
     end
 
+    -- 배터리 잔량과 가장 가까운 얼음까지 왕복 필요량(대략)
+    if type(battery) == "number" then
+        local roverConfig = config.ROVER or {}
+        local speed = roverConfig.maxSpeed or 18
+        local drain = roverConfig.batteryDrainPerSecond or 0.4
+        local text = string.format("배터리 %d E", math.floor(battery + 0.5))
+        local color = Colors.energy
+        if nearest ~= math.huge then
+            local need = nearest * 2 / speed * drain
+            text = text .. string.format(", 왕복 약 %d E", math.ceil(need))
+            if need > battery then
+                text = text .. " (왕복 불가 가능성)"
+                color = Colors.bad
+            end
+        end
+        batteryLabel.Text = text
+        batteryLabel.TextColor3 = color
+        batteryLabel.Visible = true
+    else
+        batteryLabel.Visible = false
+    end
+
     if nearest == math.huge then
         distanceLabel.Text = if hasSites
             then "남은 얼음 지점 없음"
@@ -197,16 +221,29 @@ function RadarUI.init(ctx)
         Preset = "caption",
     })
 
+    batteryLabel = UI.create("TextLabel", {
+        Name = "Battery",
+        Position = UDim2.fromOffset(0, 26 + RADAR_SIZE + 2),
+        Size = UDim2.new(1, 40, 0, 18),
+        Text = "",
+        TextColor3 = Colors.energy,
+        Preset = "caption",
+        TextSize = 13,
+        TextWrapped = true,
+        Visible = false,
+    })
+
     UI.create("Frame", {
         Name = "RadarRoot",
         AnchorPoint = if UI.isTouchOnly() then Vector2.new(0, 0) else Vector2.new(0, 1),
         -- 모바일은 좌상단 자원 패널(약 y 12~120) 아래, PC는 좌하단
         Position = if UI.isTouchOnly() then UDim2.fromOffset(12, 128) else UDim2.new(0, 16, 1, -16),
-        Size = UDim2.fromOffset(RADAR_SIZE, RADAR_SIZE + 26),
+        Size = UDim2.fromOffset(RADAR_SIZE, RADAR_SIZE + 46),
         BackgroundTransparency = 1,
         Parent = gui,
     }, {
         distanceLabel,
+        batteryLabel,
         UI.create("Frame", {
             Name = "Circle",
             Position = UDim2.fromOffset(0, 26),
@@ -255,6 +292,11 @@ function RadarUI.init(ctx)
             end
         end
     end)
+end
+
+function RadarUI.onState(state)
+    local rover = state and state.rover
+    battery = rover and rover.battery
 end
 
 -- Main이 phase에 따라 켜고 끈다. 실제 표시는 DriverSeat 착석 여부로 결정.
