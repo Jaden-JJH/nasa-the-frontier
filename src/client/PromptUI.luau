@@ -5,7 +5,6 @@
 local Players = game:GetService("Players")
 local ProximityPromptService = game:GetService("ProximityPromptService")
 local TweenService = game:GetService("TweenService")
-local UserInputService = game:GetService("UserInputService")
 
 local UI = require(script.Parent.UI)
 local Colors = UI.Colors
@@ -17,8 +16,11 @@ local PANEL_HEIGHT = 72
 local BAR_HEIGHT = 6
 local FADE_SECONDS = 0.15
 local ANCHOR_GAP = 4
+local STACK_STEP = 82 -- 같은 위치 프롬프트를 아래로 쌓는 픽셀 간격
+local MAX_VISIBLE = 2
 
 local active = {} -- { [ProximityPrompt] = entry }
+local order = {} -- PromptShown 순서의 프롬프트 목록
 
 local function getKeyText(prompt, inputType)
     if inputType == Enum.ProximityPromptInputType.Touch then
@@ -26,11 +28,75 @@ local function getKeyText(prompt, inputType)
     elseif inputType == Enum.ProximityPromptInputType.Gamepad then
         return "A"
     end
-    local text = UserInputService:GetStringForKeyCode(prompt.KeyboardKeyCode)
-    if text == "" then
-        text = prompt.KeyboardKeyCode.Name
+    -- 키보드 배열(한글 등)에 상관없이 키코드 이름을 그대로 표시한다 (예: "E", "Space")
+    return prompt.KeyboardKeyCode.Name
+end
+
+local function getWorldPosition(prompt)
+    local parent = prompt.Parent
+    if parent and parent:IsA("BasePart") then
+        return parent.Position
+    elseif parent and parent:IsA("Attachment") then
+        return parent.WorldPosition
     end
-    return text
+    return nil
+end
+
+-- 표시 순서대로 슬롯을 배정한다. MAX_VISIBLE 초과 시 카메라에 가까운 것만 남긴다.
+local function relayout()
+    local list = {}
+    for _, prompt in ipairs(order) do
+        if active[prompt] then
+            table.insert(list, prompt)
+        end
+    end
+    if #list > MAX_VISIBLE then
+        local camera = workspace.CurrentCamera
+        local camPos = camera and camera.CFrame.Position
+        local dist = {}
+        for _, prompt in ipairs(list) do
+            local pos = getWorldPosition(prompt)
+            dist[prompt] = (camPos and pos) and (pos - camPos).Magnitude or math.huge
+        end
+        local ranked = table.clone(list)
+        table.sort(ranked, function(a, b)
+            return dist[a] < dist[b]
+        end)
+        local keep = {}
+        for i = 1, MAX_VISIBLE do
+            keep[ranked[i]] = true
+        end
+        local filtered = {}
+        for _, prompt in ipairs(list) do
+            if keep[prompt] then
+                table.insert(filtered, prompt)
+            end
+        end
+        for _, prompt in ipairs(list) do
+            active[prompt].gui.Enabled = keep[prompt] == true
+        end
+        list = filtered
+    else
+        for _, prompt in ipairs(list) do
+            active[prompt].gui.Enabled = true
+        end
+    end
+    for slot, prompt in ipairs(list) do
+        local entry = active[prompt]
+        local target = UDim2.new(0.5, 0, 0.5, ANCHOR_GAP + (slot - 1) * STACK_STEP)
+        if entry.slot == nil then
+            entry.group.Position = target
+        else
+            TweenService
+                :Create(
+                    entry.group,
+                    TweenInfo.new(FADE_SECONDS, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+                    { Position = target }
+                )
+                :Play()
+        end
+        entry.slot = slot
+    end
 end
 
 -- 프롬프트 부모(Part 또는 Attachment)에 맞는 월드 오프셋
@@ -53,6 +119,11 @@ end
 
 local function destroyEntry(prompt, entry)
     active[prompt] = nil
+    local idx = table.find(order, prompt)
+    if idx then
+        table.remove(order, idx)
+    end
+    relayout()
     for _, conn in ipairs(entry.conns) do
         conn:Disconnect()
     end
@@ -153,7 +224,10 @@ local function show(prompt, inputType)
         AlwaysOnTop = true,
         LightInfluence = 0,
         ResetOnSpawn = false,
-        Size = UDim2.fromOffset(PANEL_WIDTH + 20, (PANEL_HEIGHT + 20) * 2),
+        Size = UDim2.fromOffset(
+            PANEL_WIDTH + 20,
+            2 * (ANCHOR_GAP + (MAX_VISIBLE - 1) * STACK_STEP + PANEL_HEIGHT + 4 + BAR_HEIGHT + 20)
+        ),
         StudsOffsetWorldSpace = Vector3.new(0, extra, 0),
         Active = true,
         Parent = Players.LocalPlayer:WaitForChild("PlayerGui"),
@@ -167,9 +241,12 @@ local function show(prompt, inputType)
         action = actionLabel,
         holdBar = holdBar,
         holdTween = nil,
+        slot = nil,
         conns = {},
     }
     active[prompt] = entry
+    table.insert(order, prompt)
+    relayout()
     refreshTexts(prompt, entry)
 
     table.insert(
