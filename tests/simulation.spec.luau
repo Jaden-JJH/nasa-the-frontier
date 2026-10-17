@@ -649,12 +649,18 @@ return function(t)
     end)
 
     t.test(
-        "로버 파손: 1당 속도 20% 감소, 3이면 고장(0), 수리는 전력 10",
+        "로버 파손: 1당 속도 10% 감소, 3이면 고장(0), 수리는 전력 10",
         function()
             local d = Config.ROVER_DAMAGE
             t.eq(Simulation.roverSpeedMultiplier(0, Config), 1)
-            t.near(Simulation.roverSpeedMultiplier(1, Config), 0.8)
-            t.near(Simulation.roverSpeedMultiplier(2, Config), 0.6)
+            t.near(Simulation.roverSpeedMultiplier(1, Config), 0.9)
+            t.near(Simulation.roverSpeedMultiplier(2, Config), 0.8)
+            -- 파손 2의 최고 속도도 임계값 이상이라 평지에서 세 번째 파손이 가능하다
+            t.truthy(
+                Config.ROVER.maxSpeed * Simulation.roverSpeedMultiplier(2, Config)
+                    >= Config.ROVER_DAMAGE.speedThreshold,
+                "파손 2 최고 속도 >= 임계값"
+            )
             t.eq(Simulation.roverSpeedMultiplier(3, Config), 0)
             local s = playingState(1)
             local hit1, changed1 = Simulation.applyRoverHit(s, Config)

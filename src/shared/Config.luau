@@ -162,10 +162,12 @@ local Config = {
     -- 파손당 최고 속도 speedPenaltyPerDamage 감소, maxDamage면 정지. 로버 섀시의 "수리" 프롬프트(R 홀드)로 복구
     ROVER_DAMAGE = {
         enabled = true,
-        speedThreshold = 15, -- studs/s, 충돌 순간 섀시 AssemblyLinearVelocity 크기
+        -- studs/s, 충돌 순간 섀시 AssemblyLinearVelocity 크기. 파손 2의 최고 속도(18 x 0.8 = 14.4)보다 낮아
+        -- 평지에서도 세 번째 파손(고장)까지 날 수 있다 (2026-10-18: 15 -> 12)
+        speedThreshold = 12,
         hitCooldown = 1, -- 초. 이 안의 연속 접촉은 한 번으로 센다
         maxDamage = 3,
-        speedPenaltyPerDamage = 0.2,
+        speedPenaltyPerDamage = 0.1, -- 파손 1: 16.2, 파손 2: 14.4 studs/s. 3이면 정지 (0.2 -> 0.1)
         repairHold = 4,
         repairEnergy = 10,
         promptDistance = 8,

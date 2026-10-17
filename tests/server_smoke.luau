@@ -2301,10 +2301,14 @@ do
         advance(0)
         rover.Chassis.AssemblyLinearVelocity = Vector3.zero
     end
-    hitWith(rover.Chassis, 10)
-    check(state().rover.damage == 0, "속도 10 충돌은 파손 없음")
-    hitWith(rover.Chassis, 16)
-    check(state().rover.damage == 1, "속도 16 충돌은 파손 1")
+    -- 최고 속도 = ROVER.maxSpeed x 파손 배율 (파손 0: 18, 1: 16.2, 2: 14.4). 임계값 12는 셋 모두보다 낮다
+    local function topSpeed(damage)
+        return Config.ROVER.maxSpeed * (1 - d.speedPenaltyPerDamage * damage)
+    end
+    hitWith(rover.Chassis, d.speedThreshold - 0.1)
+    check(state().rover.damage == 0, "임계값 12 바로 아래(11.9) 충돌은 파손 없음")
+    hitWith(rover.Chassis, d.speedThreshold)
+    check(state().rover.damage == 1, "임계값 12 충돌은 파손 1")
     do
         local toDriver, toOthers = false, false
         for i = #sent, math.max(1, #sent - 6), -1 do
@@ -2326,8 +2330,8 @@ do
         )
     end
     check(
-        math.abs(RoverDrive.getSpeedMultiplier() - (1 - d.speedPenaltyPerDamage)) < 1e-9,
-        "파손 1이면 최고 속도 0.8배"
+        math.abs(RoverDrive.getSpeedMultiplier() - 0.9) < 1e-9 and topSpeed(1) >= d.speedThreshold,
+        "파손 1이면 최고 속도 0.9배 (16.2, 임계값 이상)"
     )
     hitWith(rover.Chassis, 16)
     check(state().rover.damage == 1, "1초 안의 두 번째 충돌은 한 번으로 셈")
@@ -2345,10 +2349,15 @@ do
             break
         end
     end
-    hitWith(wheel, 16)
-    check(state().rover.damage == 2, "바퀴 충돌도 파손 2")
+    -- 파손 1의 평지 최고 속도(16.2)로 바퀴가 부딪혀도 센다
+    hitWith(wheel, topSpeed(1))
+    check(
+        state().rover.damage == 2 and math.abs(RoverDrive.getSpeedMultiplier() - 0.8) < 1e-9,
+        "바퀴 충돌(16.2)도 파손 2, 최고 속도 0.8배 (14.4)"
+    )
     advance(d.hitCooldown + 0.1)
-    hitWith(rover.Chassis, 16)
+    -- 파손 2의 평지 최고 속도(14.4)도 임계값 12 이상이라 세 번째 파손이 난다
+    hitWith(rover.Chassis, topSpeed(2))
     check(
         state().rover.damage == 3
             and state().rover.broken == true
