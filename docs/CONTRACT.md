@@ -53,7 +53,8 @@ export type GameState = {
     panelsTotal: number,      -- Config.PANELS_TOTAL
     panelsPerDay: number,     -- Config.PANELS_PER_DAY
     modules: { A: ModuleState, B: ModuleState, C: ModuleState },
-    rover: { tank: number, tankMax: number, damage: number, broken: boolean },  -- damage 0..3 (2026-10-18 추가), broken은 damage >= 3
+    rover: { tank: number, tankMax: number, damage: number, broken: boolean,
+             battery: number, batteryMax: number, charging: boolean, away: boolean },  -- damage 0..3, broken은 damage >= 3. battery(2026-10-18 추가): 주행 중 초당 ROVER.batteryDrainPerSecond(0.3) 소모, 0이면 정지. charging은 충전 패드 위에서 빈 좌석일 때 true. away는 로버가 기지에서 ROVER.awayDistance(60) 밖에 있을 때 true(미션 문구용)
     energyCap: number,        -- 2026-10-18 추가. 에너지 저장 상한 = ENERGY_CAP_BASE(150) + 가동 모듈 수 x ENERGY_CAP_PER_MODULE(100)
     energyWasted: number,     -- 2026-10-18 추가. 오늘 상한 때문에 버려진 전력
     siteId: number?,          -- 선택된 착륙 패드 1..4. selecting 중 nil
@@ -130,6 +131,7 @@ export type GameOverInfo = {
 | SolarPanels.lua | InstallPad 프롬프트, 하루 설치 제한, 슬롯에 패널 복제 |
 | Construction.lua | PadA/B/C 프롬프트, 비용 검증, 건설 타이머, 고스트/완성 모델 전환, 선행 조건 |
 | WaterLoop.lua | 로버 탱크(Attribute "Tank"), 얼음 지점 프롬프트(매장량만큼 채움, 고갈 처리), 물탱크 프롬프트(하역, 로버가 TANK_UNLOAD_DISTANCE 안에 있을 때만, 하역 1 W당 WATER_PROCESS_ENERGY_PER_W 에너지 소모, 에너지가 모자라면 처리 가능한 만큼만), 로버 복구(수동 프롬프트 + 자동) |
+| RoverBattery.lua | 2026-10-18 추가. 로버 배터리 소모(주행 중, 속도 > 1일 때만), 0이면 RoverDrive 속도 배율 0. 충전 패드 판정과 충전(기지 에너지 차감). 25% 이하 경고 Notify 1회(충전되면 리셋) |
 | RoverDamage.lua | 2026-10-18 추가. 바위(Attribute BoulderLayer)와 12 studs/s 이상 충돌 시 파손 +1(1초 중복 방지), 파손당 최고 속도 10% 감소(파손 1: 16.2, 파손 2: 14.4), 3이면 정지. 로버 섀시의 "수리" 프롬프트(키 R, 홀드 4초, 에너지 10, 좌석 비어 있을 때)로 복구. 탑승 프롬프트(E)와 같은 섀시라 키를 나눔. Config.ROVER_DAMAGE.enabled로 끌 수 있음 |
 | Oxygen.lua | 플레이어별 산소. 실내 판정(OxygenZone 파트 안 또는 VehicleSeat 착석). 0이면 리스폰과 페널티 |
 | GameFlow.lua | phase 전이, 승리/실패 판정, 재시작 |
@@ -176,6 +178,7 @@ ServerStorage
         Built (Model)               완공 모델. active 전에는 Parent를 ServerStorage로 빼두거나 투명
         OxygenZone (Part)           PadA에만 있음
     WaterTank (Part)                ProximityPrompt. ActionText "물 하역"
+    ChargePad (Part)                2026-10-18 추가. 로버 충전 패드. 로버 섀시가 패드 위(반경 ROVER.chargeRadius)에 있고 좌석이 비어 있으면 초당 ROVER.chargeRatePerSecond만큼 기지 에너지에서 로버 배터리로 이동. 기지 에너지가 0이면 충전 정지. 시작 시 로버는 이 패드 위에 주차
   PanelTemplate (Model)             태양광 패널 1장
 ```
 

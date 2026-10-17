@@ -37,7 +37,18 @@ export type ModuleState = {
 export type Modules = { [string]: ModuleState }
 
 -- damage 0..ROVER_DAMAGE.maxDamage, broken = damage >= maxDamage (CONTRACT 2026-10-18)
-export type RoverState = { tank: number, tankMax: number, damage: number, broken: boolean }
+-- battery 0..batteryMax, charging = 충전 패드 위 빈 좌석에서 충전 중 (CONTRACT 2026-10-18)
+-- away = 서버 추가 필드: 섀시가 충전 패드에서 ROVER.awayDistance보다 멀다 (미션 문구용)
+export type RoverState = {
+    tank: number,
+    tankMax: number,
+    damage: number,
+    broken: boolean,
+    battery: number,
+    batteryMax: number,
+    charging: boolean,
+    away: boolean,
+}
 
 export type GameState = {
     phase: Phase,
@@ -147,6 +158,10 @@ function Simulation.copy(state: GameState): GameState
             tankMax = state.rover.tankMax,
             damage = state.rover.damage,
             broken = state.rover.broken,
+            battery = state.rover.battery,
+            batteryMax = state.rover.batteryMax,
+            charging = state.rover.charging,
+            away = state.rover.away,
         },
         siteId = state.siteId,
         siteName = state.siteName,
@@ -256,7 +271,16 @@ function Simulation.newState(config: Config): GameState
         panelsTotal = config.PANELS_TOTAL,
         panelsPerDay = config.PANELS_PER_DAY,
         modules = modules,
-        rover = { tank = 0, tankMax = config.ROVER.tankMax, damage = 0, broken = false },
+        rover = {
+            tank = 0,
+            tankMax = config.ROVER.tankMax,
+            damage = 0,
+            broken = false,
+            battery = config.ROVER.batteryMax,
+            batteryMax = config.ROVER.batteryMax,
+            charging = false,
+            away = false,
+        },
         siteId = nil,
         siteName = nil,
         sunlight = nil,
@@ -542,6 +566,46 @@ function Simulation.unloadWater(
     return true, new, string.format(t.waterUnloaded, int(processed)), "good", warning
 end
 
+-- 로버 배터리 -------------------------------------------------------------
+
+-- 주행 seconds초 소모. 반환: 새 상태, 이번에 0이 되었는지
+function Simulation.drainBattery(
+    state: GameState,
+    config: Config,
+    seconds: number
+): (GameState, boolean)
+    local new = Simulation.copy(state)
+    local before = state.rover.battery
+    new.rover.battery = math.max(0, before - config.ROVER.batteryDrainPerSecond * seconds)
+    Simulation.refreshDerived(new, config)
+    return new, before > 0 and new.rover.battery <= 0
+end
+
+-- 충전 seconds초: 기지 에너지에서 배터리로 min(속도 x 초, 빈 용량, 기지 에너지)만큼 옮긴다. 반환: 새 상태, 옮긴 양
+function Simulation.chargeBattery(
+    state: GameState,
+    config: Config,
+    seconds: number
+): (GameState, number)
+    local new = Simulation.copy(state)
+    local amount = math.min(
+        config.ROVER.chargeRatePerSecond * seconds,
+        state.rover.batteryMax - state.rover.battery,
+        state.energy
+    )
+    amount = math.max(0, amount)
+    new.rover.battery += amount
+    new.energy = clampMin0(new.energy - amount)
+    Simulation.refreshDerived(new, config)
+    return new, amount
+end
+
+-- 배터리가 낮은지 (0보다 크고 lowBatteryRatio 이하)
+function Simulation.batteryLow(state: GameState, config: Config): boolean
+    local r = state.rover
+    return r.battery > 0 and r.battery <= r.batteryMax * config.ROVER.lowBatteryRatio
+end
+
 -- 로버 파손 -------------------------------------------------------------
 
 -- 파손 단계에 따른 최고 속도 배율 (maxDamage면 0)
@@ -755,9 +819,15 @@ function Simulation.missionText(state: GameState, config: Config): string
         local daysLeft = math.max(0, config.SHORTAGE_DAYS_TO_LOSE - state.shortageDays)
         return string.format(texts.shortage, Simulation.shortageName(state, config), int(daysLeft))
     end
-    -- 로버 고장은 단계 문구보다 먼저 (부족 경고 다음)
+    -- 로버 고장, 배터리 방전, 기지 밖 배터리 부족은 단계 문구보다 먼저 (부족 경고 다음)
     if state.rover.broken then
         return string.format(texts.roverBroken, int(config.ROVER_DAMAGE.repairEnergy))
+    end
+    if state.rover.battery <= 0 then
+        return texts.batteryEmpty
+    end
+    if state.rover.away and Simulation.batteryLow(state, config) then
+        return texts.batteryLow
     end
 
     local stage = state.missionStage

@@ -17,7 +17,9 @@ local RoverDrive = {}
 
 local connections: { RBXScriptConnection } = {}
 local boardPrompt: ProximityPrompt? = nil
-local speedMultiplier = 1 -- RoverDamage가 정하는 최고 속도 배율 (파손 3이면 0)
+-- 최고 속도 배율 요소: damage(RoverDamage, 파손 3이면 0) x battery(RoverBattery, 방전이면 0)
+local speedFactors: { [string]: number } = { damage = 1, battery = 1 }
+local speedMultiplier = 1 -- 위 요소의 곱
 local applyDrive: (() -> ())? = nil -- 현재 로버의 바퀴 갱신 함수
 -- 첫 탑승 안내를 이미 받은 플레이어 (서버 세션 동안 한 번, 나간 플레이어는 자동으로 빠진다)
 local boardedOnce: { [Player]: boolean } = setmetatable({}, { __mode = "k" }) :: any
@@ -141,13 +143,23 @@ function RoverDrive.attach(base: Model)
     update()
 end
 
--- 파손에 따른 최고 속도 배율. 스로틀을 그대로 누르고 있어도 바로 반영되게 바퀴를 다시 맞춘다
-function RoverDrive.setSpeedMultiplier(multiplier: number)
-    speedMultiplier = math.clamp(multiplier, 0, 1)
+-- 최고 속도 배율 요소 하나를 바꾼다. 스로틀을 그대로 누르고 있어도 바로 반영되게 바퀴를 다시 맞춘다
+function RoverDrive.setSpeedFactor(key: string, value: number)
+    speedFactors[key] = math.clamp(value, 0, 1)
+    local product = 1
+    for _, factor in speedFactors do
+        product *= factor
+    end
+    speedMultiplier = product
     local apply = applyDrive
     if apply then
         apply()
     end
+end
+
+-- 파손에 따른 최고 속도 배율 (RoverDamage)
+function RoverDrive.setSpeedMultiplier(multiplier: number)
+    RoverDrive.setSpeedFactor("damage", multiplier)
 end
 
 function RoverDrive.getSpeedMultiplier(): number

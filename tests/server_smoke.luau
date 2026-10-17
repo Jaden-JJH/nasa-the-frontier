@@ -598,7 +598,7 @@ do
         attrsOk,
         "Ice1..Ice8 위치와 Attribute Deposit, DepositMax, Difficulty = Config.ICE_SITES"
     )
-    check(total >= 390 and total <= 400, "매장량 합계 " .. total .. " W (390 ~ 400)")
+    check(total >= 510 and total <= 520, "매장량 합계 " .. total .. " W (510 ~ 520)")
     -- mid는 어느 착륙 패드에서도 350 이상, hard는 500 이상 (패드 최근접 얼음은 예외: 첫 원정 설계)
     local distOk = true
     for index, def in Config.ICE_SITES do
@@ -847,6 +847,8 @@ local function runTerrainChecks()
     local violations, corridorHits = 0, 0
     local craters, hills, smallCraters, badDepth, highRim, badHill = 0, 0, 0, 0, 0, 0
     local bigCraters, outerCraters = 0, 0
+    local mountainBalls, mountainIceHits = 0, 0 -- 산(Rock) 공: 얼음 반경 40 침범
+    local edgePeakCenters = {} -- 가장자리 200 띠 안의 봉우리 축 (x, z 키)
     local bigNearPad = { 0, 0, 0, 0 }
     local nearPad = { 0, 0, 0, 0 }
     local craterCircles = {}
@@ -869,6 +871,21 @@ local function runTerrainChecks()
             if segmentDistance(ball.center, c.pad, c.ice) < 12 + footprint - 1e-6 then
                 corridorHits += 1
             end
+        end
+        if ball.material == roblox.Enum.Material.Rock then
+            -- 산 (2026-10-18): 원뿔에 내접하는 공을 축 위로 쌓은 봉우리. 크레이터, 언덕 판정에서 뺀다
+            mountainBalls += 1
+            for _, ice in ices do
+                if flatDistance(ball.center, ice) < 40 + footprint - 1e-6 then
+                    mountainIceHits += 1
+                end
+            end
+            local fromEdge =
+                math.min(1300 - math.abs(ball.center.X), 1100 - math.abs(ball.center.Z))
+            if fromEdge <= 200 then
+                edgePeakCenters[string.format("%.1f,%.1f", ball.center.X, ball.center.Z)] = true
+            end
+            continue
         end
         local protrude = ball.center.Y + ball.radius - TERRAIN_TOP
         if ball.material == roblox.Enum.Material.Air then
@@ -963,6 +980,70 @@ local function runTerrainChecks()
         "크레이터 깊이 반지름의 20%, 테두리 둔덕 1.5 이하"
     )
     check(hills == 12 and badHill == 0, "언덕 " .. hills .. "개, 높이 2 ~ 4")
+    -- 산 (2026-10-18): 가장자리 산맥과 내부 능선
+    local DevMap = loadModule(Server:FindFirstChild("DevMap"))
+    local mountains = DevMap.getMountains()
+    local edgePeaks = 0
+    for _ in edgePeakCenters do
+        edgePeaks += 1
+    end
+    check(
+        mountains ~= nil
+            and mountains.edgePeaks >= 40
+            and edgePeaks == mountains.edgePeaks
+            and #mountains.ridges >= 4
+            and #mountains.ridges <= 6,
+        string.format(
+            "산: 가장자리 200 띠 봉우리 %d개, 내부 능선 %d개 (4 ~ 6), Rock 공 %d개",
+            edgePeaks,
+            mountains and #mountains.ridges or 0,
+            mountainBalls
+        )
+    )
+    check(
+        mountainIceHits == 0,
+        "산 바닥이 얼음 반경 40 밖 (침범 " .. mountainIceHits .. ")"
+    )
+    do
+        -- 능선 길이 120 ~ 250, 폭 40 ~ 70, 그리고 하나 이상이 패드 -> mid/hard 직선 경로를 가로지른다
+        local function crosses(a, b, c, d)
+            local function cross(o, p, q)
+                return (p.X - o.X) * (q.Z - o.Z) - (p.Z - o.Z) * (q.X - o.X)
+            end
+            return cross(a, b, c) * cross(a, b, d) < 0 and cross(c, d, a) * cross(c, d, b) < 0
+        end
+        local shapeOk, crossing = true, 0
+        for _, ridge in mountains.ridges do
+            local length = flatDistance(ridge.a, ridge.b)
+            if
+                length < 120 - 1e-3
+                or length > 250 + 1e-3
+                or ridge.width < 40
+                or ridge.width > 70
+            then
+                shapeOk = false
+            end
+            local hit = false
+            for i = 1, 4 do
+                local pad = Workspace.LandingPads["Pad" .. i].CFrame.Position
+                for index, def in Config.ICE_SITES do
+                    if def.difficulty ~= "easy" and Config.DEV_MAP.padLayout[i].ice ~= index then
+                        if crosses(ridge.a, ridge.b, pad, Vector3.new(def.x, 0, def.z)) then
+                            hit = true
+                        end
+                    end
+                end
+            end
+            if hit then
+                crossing += 1
+            end
+        end
+        check(shapeOk, "능선 길이 120 ~ 250, 바닥 폭 40 ~ 70")
+        check(
+            crossing >= 1,
+            "패드 -> mid/hard 직선 경로를 가로지르는 능선 " .. crossing .. "개"
+        )
+    end
     check(
         nearPad[1] >= 8 and nearPad[2] >= 8 and nearPad[3] >= 8 and nearPad[4] >= 8,
         string.format(
@@ -1252,6 +1333,20 @@ local function runTerrainChecks()
         )
     )
     check(inCrater == 0, "바위가 크레이터 안에 놓이지 않음")
+    do
+        local onMountain = 0
+        for _, boulder in boulders do
+            local p = if boulder:IsA("BasePart")
+                then boulder.CFrame.Position
+                else boulder:GetPivot().Position
+            for _, m in loadModule(Server:FindFirstChild("DevMap")).getMountains().footprints do
+                if Vector3.new(p.X - m.x, 0, p.Z - m.z).Magnitude < m.r then
+                    onMountain += 1
+                end
+            end
+        end
+        check(onMountain == 0, "산 바닥 위에 바위 없음 (" .. onMountain .. ")")
+    end
     check(
         big >= #boulders * 0.05 and big <= #boulders * 0.2,
         string.format("2배 크기 바위 %d개 (%.0f%%)", big, big / #boulders * 100)
@@ -2468,6 +2563,186 @@ do
     newRover = rover
 end
 
+-- 로버 배터리와 충전 (2026-10-18) -------------------------------------------
+print("[로버 배터리]")
+do
+    local RoverBattery = loadModule(Server:FindFirstChild("RoverBattery"))
+    local RoverDrive = loadModule(Server:FindFirstChild("RoverDrive"))
+    local rv = Config.ROVER
+    local rover = base.Rover
+    local chassis = rover.Chassis
+    local pad = base:FindFirstChild("ChargePad")
+    check(
+        pad ~= nil
+            and math.abs(pad.Size.X - 12) < 1e-3
+            and math.abs(pad.Size.Z - 12) < 1e-3
+            and #pad:GetChildren() >= 4,
+        "BaseKit ChargePad 12 x 12, 노란 테두리"
+    )
+    local kitPad = kit:FindFirstChild("ChargePad")
+    local kitChassis = kit.Rover.Chassis
+    check(
+        kitPad ~= nil
+            and Vector3.new(
+                    kitChassis.CFrame.Position.X - kitPad.CFrame.Position.X,
+                    0,
+                    kitChassis.CFrame.Position.Z - kitPad.CFrame.Position.Z
+                ).Magnitude
+                <= rv.chargeRadius,
+        "시작 시 로버가 충전 패드 위에 주차"
+    )
+    check(
+        state().rover.battery == rv.batteryMax
+            and state().rover.batteryMax == rv.batteryMax
+            and lastSent("StateUpdate").args[1].rover.batteryMax == rv.batteryMax
+            and lastSent("StateUpdate").args[1].rover.charging ~= nil,
+        "시작 배터리 만충, StateUpdate에 battery, batteryMax, charging"
+    )
+    local function notices(text)
+        local count = 0
+        for _, entry in sent do
+            if entry.name == "Notify" and entry.args[1] == text then
+                count += 1
+            end
+        end
+        return count
+    end
+    -- 기준 위치를 잡은 뒤 한 주기 동안 5 studs 이동 = 주행
+    local function driveStep(distance)
+        RoverBattery.step(0.25)
+        chassis.CFrame = chassis.CFrame + Vector3.new(distance, 0, 0)
+        RoverBattery.step(0.25)
+        advance(0)
+    end
+    local energyKeep = state().energy
+    local b0 = state().rover.battery
+    driveStep(5)
+    check(
+        math.abs(state().rover.battery - (b0 - rv.batteryDrainPerSecond * 0.25)) < 1e-6,
+        string.format("주행 중 소모 (%.2f -> %.2f)", b0, state().rover.battery)
+    )
+    local b1 = state().rover.battery
+    RoverBattery.step(0.25)
+    RoverBattery.step(0.25)
+    check(state().rover.battery == b1, "정지 중에는 소모 없음")
+    -- 25% 이하 경고 1회
+    local lowText = string.format(Config.TEXTS.batteryLow, 25)
+    ResourceState.patch(function(st)
+        st.rover.battery = rv.batteryMax * rv.lowBatteryRatio + 0.05
+    end)
+    driveStep(5)
+    driveStep(5)
+    check(notices(lowText) == 1, "25% 이하 경고 한 번 (" .. notices(lowText) .. "회)")
+    -- 기지 밖에서 배터리가 낮으면 미션 문구가 단계 문구보다 먼저
+    chassis.CFrame = pad.CFrame + Vector3.new(100, 0, 0)
+    RoverBattery.step(0.25)
+    RoverBattery.step(0.25)
+    check(
+        state().rover.away == true and state().missionText == Config.MISSION_TEXTS.batteryLow,
+        "기지 밖 배터리 부족 미션 '" .. state().missionText .. "'"
+    )
+    -- 방전: 0이면 정지, 경고 1회, 미션 문구
+    ResourceState.patch(function(st)
+        st.rover.battery = 0.05
+    end)
+    driveStep(5)
+    driveStep(5)
+    check(
+        state().rover.battery == 0
+            and RoverDrive.getSpeedMultiplier() == 0
+            and notices(Config.TEXTS.batteryEmpty) == 1
+            and state().missionText == Config.MISSION_TEXTS.batteryEmpty,
+        "방전: 배터리 0, 속도 배율 0, 경고 한 번, 미션 '"
+            .. state().missionText
+            .. "'"
+    )
+    -- 복구하면 배터리를 20%로 채워 돌아온다
+    RoverBattery.onRecovered()
+    check(
+        math.abs(state().rover.battery - rv.batteryMax * rv.recoverBatteryRatio) < 1e-6
+            and RoverDrive.getSpeedMultiplier() == 1,
+        "복구하면 배터리 20%, 다시 달릴 수 있음"
+    )
+    ResourceState.patch(function(st)
+        st.rover.battery = 0
+    end)
+    RoverBattery.onRecovered()
+    -- 빈 좌석 로버 (Lune은 Occupant에 nil을 넣을 수 없어 로버를 지워 재복제 경로로 복구). 앞 복구의 쿨다운을 기다린다
+    advance(Config.ROVER_RECOVERY.cooldownSeconds)
+    rover:Destroy()
+    advance(Config.ROVER_RECOVERY.checkSeconds + 0.1)
+    rover = base:FindFirstChild("Rover")
+    chassis = rover.Chassis
+    check(
+        state().rover.battery >= rv.batteryMax * rv.recoverBatteryRatio - 1e-6,
+        string.format("재복제 복구 뒤 배터리 %.1f (20%% 이상)", state().rover.battery)
+    )
+    -- 패드 위 빈 좌석: 초당 2씩 기지 에너지에서 충전
+    ResourceState.patch(function(st)
+        st.rover.battery = 20
+        st.energy = 100
+    end)
+    RoverBattery.step(0.25)
+    RoverBattery.step(1)
+    advance(0)
+    check(
+        math.abs(state().rover.battery - (20 + rv.chargeRatePerSecond * 1.25)) < 1e-6
+            and math.abs(state().energy - (100 - rv.chargeRatePerSecond * 1.25)) < 1e-6
+            and state().rover.charging == true
+            and lastSent("StateUpdate").args[1].rover.charging == true,
+        string.format(
+            "패드 위 빈 좌석 충전: 배터리 %.1f, 에너지 %.1f, charging",
+            state().rover.battery,
+            state().energy
+        )
+    )
+    -- 기지 에너지 0이면 충전 정지와 경고 (하루 한 번)
+    ResourceState.patch(function(st)
+        st.energy = 0
+    end)
+    local before = state().rover.battery
+    RoverBattery.step(1)
+    RoverBattery.step(1)
+    advance(0)
+    check(
+        state().rover.battery == before
+            and state().rover.charging == false
+            and notices(Config.TEXTS.chargeNoEnergy) == 1,
+        "기지 에너지 0이면 충전 정지, 경고 한 번"
+    )
+    -- 완충 알림 1회 (이번 충전에서. 앞 단계에서 로버를 옮긴 뒤 다시 찬 알림은 빼고 센다)
+    local fullBefore = notices(Config.TEXTS.batteryFull)
+    ResourceState.patch(function(st)
+        st.energy = 100
+        st.rover.battery = rv.batteryMax - 0.5
+    end)
+    RoverBattery.step(1)
+    RoverBattery.step(1)
+    advance(0)
+    check(
+        state().rover.battery == rv.batteryMax
+            and notices(Config.TEXTS.batteryFull) - fullBefore == 1,
+        "완충하면 '로버 충전 완료' 한 번"
+    )
+    -- 탑승하면 충전 정지
+    ResourceState.patch(function(st)
+        st.rover.battery = 30
+    end)
+    rover.DriverSeat:Sit(humanoid)
+    advance(0)
+    RoverBattery.step(1)
+    advance(0)
+    check(
+        state().rover.battery == 30 and state().rover.charging == false,
+        "탑승하면 충전하지 않음"
+    )
+    ResourceState.patch(function(st)
+        st.energy = energyKeep
+        st.rover.battery = rv.batteryMax
+    end)
+    newRover = rover
+end
+
 -- 건설 -----------------------------------------------------------------
 print("[건설]")
 local padAPrompt = base.ModulePads.PadA.Pad:FindFirstChildOfClass("ProximityPrompt")
@@ -2741,8 +3016,10 @@ do
             and light.Enabled == true
             and ice1r.Transparency < 1
             and math.abs(ice2r.Size.X - 14) < 1e-3
-            and state().rover.damage == 0,
-        "재시작: 매장량, 결정, 빛, 패치, 로버 파손 초기화"
+            and state().rover.damage == 0
+            and state().rover.battery == Config.ROVER.batteryMax
+            and state().rover.charging == false,
+        "재시작: 매장량, 결정, 빛, 패치, 로버 파손, 배터리 초기화"
     )
 end
 check(Workspace:FindFirstChild("Base") == nil, "재시작: Base 제거")

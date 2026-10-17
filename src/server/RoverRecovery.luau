@@ -12,6 +12,7 @@ local ServerStorage = game:GetService("ServerStorage")
 
 local Config = require(ReplicatedStorage.Shared.Config)
 local ResourceState = require(script.Parent.ResourceState)
+local RoverBattery = require(script.Parent.RoverBattery)
 local RoverDamage = require(script.Parent.RoverDamage)
 local RoverDrive = require(script.Parent.RoverDrive)
 local ServerUtil = require(script.Parent.ServerUtil)
@@ -103,6 +104,8 @@ function RoverRecovery.recover(): boolean
         s.rover.broken = false
     end)
     RoverDamage.sync()
+    -- 배터리: 방전된 로버를 끌어온 경우 최소 recoverBatteryRatio로 돌아와 바로 충전할 수 있게
+    RoverBattery.onRecovered()
     WaterLoop.mirrorTank()
     WaterLoop.refresh()
     flippedSince = nil

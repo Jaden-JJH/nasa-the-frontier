@@ -274,3 +274,4 @@ ServerStorage 에 BaseKit 이 있으면 코드는 그것을 그대로 쓰고 Kit
 - 기지 키트는 코드가 만드는 콘크리트 판(윗면 y 1.5, 지형 윗면 -1.5보다 3 높음, 4면 경사로) 위에 놓이고, 판 밖은 Terrain(크레이터 45, 언덕 12)입니다. 디자이너 BaseKit을 쓸 때도 판은 코드가 깔아 줍니다. Play 중 복사해 둔 옛 ServerStorage.BaseKit이 있으면 지워야 새 높이가 적용됩니다.
 - Lander와 HabitatA 메시는 걸어 들어가는 건물입니다. 코드가 정면에 문과 보이지 않는 충돌 벽, 내부 조명, 내부 산소 구역을 만듭니다. 메시는 속이 비어 보여야 하므로 가능하면 안쪽 면이 있는 모델을 고르거나, 코드가 DoubleSided를 켭니다.
 - Antenna는 Lander 꼭대기 중심, Radar는 Lander 왼쪽 바닥(지상 장비)입니다.
+- 2026-10-18: BaseKit에 ChargePad(로버 충전 패드)가 추가됩니다. 코드가 만들며, 디자이너 BaseKit에는 WaterTank 옆에 ChargePad(Part) 하나만 두면 됩니다. 지형에는 가장자리 산맥과 내부 능선(산)이 추가됩니다. 쉬운 얼음까지의 회랑은 막지 않습니다.

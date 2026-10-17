@@ -89,6 +89,8 @@ local Config = {
             displayName = "Farm B",
             cost = { energy = 80, water = 30 },
             buildDays = 5,
+            -- 물 유지 2 유지 (2026-10-18: 3이나 4로 올리면 Farm 뒤 하루 5 ~ 6 W를 8 ~ 10일 원정으로 메우지 못해
+            -- 봇이 Nobile에서 항상 32일에 진다. 후반 물 압박은 Lab 건설 물 50으로 준다)
             upkeep = { energy = 5, water = 2 },
             requires = { "A" },
             foodPerDay = 2,
@@ -96,9 +98,9 @@ local Config = {
         C = {
             name = "Research Lab",
             displayName = "Research Lab C",
-            cost = { energy = 150, water = 30 }, -- 물 40 -> 30: 최적 착륙지 승리를 45일 안으로 (후반 병목은 여전히 물)
+            cost = { energy = 150, water = 50 }, -- 물 30 -> 50 (2026-10-18 사용자 피드백: 너무 쉽다)
             buildDays = 7,
-            upkeep = { energy = 8, water = 1 },
+            upkeep = { energy = 8, water = 3 }, -- 물 1 -> 3 (완공 = 승리라 체감은 없지만 일관성)
             requires = { "A", "B" },
             foodPerDay = 0,
         },
@@ -108,13 +110,14 @@ local Config = {
     -- 건설 연출: building 동안 완성 모델이 지면 아래에서 진행률만큼 올라온다. DayTick마다 이 시간 동안 부드럽게
     BUILD_RISE_SECONDS = 1,
 
-    -- 얼음 매장지 8곳 (2026-10-18: 3곳 고정 무한에서 매장량과 고갈로). 합계 395 W.
+    -- 얼음 매장지 8곳 (2026-10-18: 3곳 고정 무한에서 매장량과 고갈로). 합계 520 W.
     -- Ice1 ~ Ice3은 착륙 패드별 최근접 얼음(DEV_MAP.iceDistanceBySite, 첫 원정 거리)이라 위치를 바꾸지 않는다.
     -- Ice1은 Pad1에서 450이라 어느 패드에서도 350 이상 떨어져 mid로 둔다. easy는 Ice2(Pad2, Pad4 공용), Ice3(Pad3)
     -- mid는 모든 패드에서 350 이상, hard는 500 이상이며 바위 고리와 크레이터 사이에 있다.
     -- 패드가 남, 동, 서로 흩어져 한 패드가 닿는 매장량이 합계보다 훨씬 적다. 처음 안(합계 275, 탱크 40)은
     -- Farm 뒤 하루 4 W 소비를 8 ~ 10일 원정으로 메우지 못해 봇이 네 곳 모두 졌다. 매장량 약 1.4배와 탱크 60으로
-    -- 네 곳 모두 41 ~ 50일 승리. Ice3(Malapert 첫 원정)은 30으로 올려 Farm 전 식량 여유 5 이상을 지킨다
+    -- 네 곳 모두 41 ~ 50일 승리. Ice3(Malapert 첫 원정)은 30으로 올려 Farm 전 식량 여유 5 이상을 지킨다.
+    -- 2차 (사용자: 너무 쉽다): Lab 건설 물 50과 로버 배터리를 넣고 hard 매장량을 110으로 올려 60 ~ 71일 승리
     -- (tests/simulation.spec.luau 현실적 봇)
     ICE_SITES = {
         { x = -75, z = 50, deposit = 40, difficulty = "mid" }, -- Ice1: Pad1 450, Pad2 500, Pad3 481
@@ -122,9 +125,9 @@ local Config = {
         { x = -525, z = 400, deposit = 30, difficulty = "easy" }, -- Ice3: Pad3 180
         { x = 80, z = 160, deposit = 50, difficulty = "mid" }, -- Ice4: Pad2 362, Pad4 484, Pad1 581, Pad3 608
         { x = -560, z = -200, deposit = 40, difficulty = "mid" }, -- Ice5: Pad3 421, Pad1 525
-        { x = -20, z = 290, deposit = 70, difficulty = "hard" }, -- Ice6: Pad2 506, Pad3 510, Pad4 548
-        { x = 380, z = -650, deposit = 70, difficulty = "hard" }, -- Ice7: Pad1 519, Pad2 701
-        { x = 950, z = 650, deposit = 65, difficulty = "hard" }, -- Ice8: Pad4 520, Pad2 797
+        { x = -20, z = 290, deposit = 110, difficulty = "hard" }, -- Ice6: Pad2 506, Pad3 510, Pad4 548
+        { x = 380, z = -650, deposit = 110, difficulty = "hard" }, -- Ice7: Pad1 519, Pad2 701
+        { x = 950, z = 650, deposit = 110, difficulty = "hard" }, -- Ice8: Pad4 520, Pad2 797
     } :: { IceSiteDef },
     ICE_DEFAULT_DEPOSIT = 30, -- 디자이너 맵 얼음에 Deposit Attribute도 없고 번호도 ICE_SITES 밖일 때
     -- 고갈 표시: 결정 크기 = 남은 / 처음 (하한 minScale). 0이면 결정과 빛을 없애고 어두운 패치를 깐다
@@ -151,6 +154,18 @@ local Config = {
         wheelRadius = 1.5, -- 그레이박스 바퀴 반지름(studs). 모터 각속도 = maxSpeed / 반지름
         wheelFriction = 1.5,
         chassisDensity = 2, -- 저중력에서 뒤집힘을 줄이려고 차체를 무겁게
+        -- 배터리 (2026-10-18, RoverBattery): 주행 중(섀시 속도 > movingSpeed)에만 닳고, 0이면 멈춘다.
+        -- 기지 충전 패드(ChargePad) 반경 chargeRadius 안에 빈 좌석으로 세우면 기지 에너지에서 1:1로 충전
+        batteryMax = 50,
+        batteryDrainPerSecond = 0.3, -- 0.4 -> 0.3: 0.4면 de Gerlache가 90일 안에 못 이긴다 (봇)
+        movingSpeed = 1, -- studs/s. 이보다 빠를 때만 배터리 소모
+        chargeRatePerSecond = 2,
+        chargeRadius = 10, -- 섀시에서 충전 패드 중심까지 수평 거리
+        lowBatteryRatio = 0.25,
+        recoverBatteryRatio = 0.2, -- 복구하면 배터리를 최소 이 비율로 채워 돌아온다
+        awayDistance = 60, -- 섀시가 충전 패드에서 이보다 멀면 "기지 밖" (미션 문구)
+        batteryTickSeconds = 0.25, -- 서버 배터리 계산 주기
+        batteryPublishSeconds = 0.5, -- 배터리 값만 바뀌었을 때 StateUpdate 최소 간격 (초당 최대 2회)
     },
     SPAWN_HEIGHT_OFFSET = 3, -- SpawnPoint 윗면에서 캐릭터 중심까지 높이(studs)
     CHARACTER_LOAD_TIMEOUT = 5, -- 리스폰 후 HumanoidRootPart를 기다리는 최대 시간(초)
@@ -354,6 +369,8 @@ local Config = {
         } :: { [string]: string },
         building = "%s 건설 중: %d일 남음. 패널과 물을 계속 모으세요",
         roverBroken = "로버를 수리하세요 (전력 %d)",
+        batteryEmpty = "로버 배터리 방전. 복구 콘솔을 사용하세요",
+        batteryLow = "배터리가 부족합니다. 기지로 돌아와 충전하세요",
         shortage = "경고: %s이 바닥났습니다. %d일 안에 보충하지 않으면 실패합니다",
         won = "임무 성공! 달 기지를 완성했습니다",
         lost = "임무 실패. 재도전으로 다시 시작하세요",
@@ -397,6 +414,10 @@ local Config = {
         repairDone = "로버 수리 완료",
         repairNotNeeded = "로버가 멀쩡합니다",
         repairOccupied = "탑승 중에는 수리할 수 없습니다",
+        batteryEmpty = "로버 배터리가 바닥났습니다. 복구 콘솔로 끌어오세요",
+        batteryLow = "로버 배터리가 %d%% 남았습니다. 기지로 돌아와 충전하세요",
+        batteryFull = "로버 충전 완료",
+        chargeNoEnergy = "기지 에너지가 없어 로버를 충전할 수 없습니다",
         tankAlreadyFull = "로버 탱크가 이미 가득 찼습니다",
         tankEmpty = "로버 탱크가 비어 있습니다",
         needDriver = "로버 운전석에 앉아 있어야 채취할 수 있습니다",

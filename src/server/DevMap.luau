@@ -75,6 +75,13 @@ local RAMP_WIDTH, RAMP_LENGTH = 10, 10 -- 판 가장자리 4면 중앙의 경사
 local RAMP_LANE_HALF = RAMP_WIDTH / 2 + 4 -- 경사로 앞 바위 금지 차선의 반폭
 local greyboxTerrainBuilt = false -- 이번 세션에 지형을 켠 그레이박스 맵을 만들었는지 (콘크리트 판 여부)
 local groundStats: GroundStats? = nil -- 이번 세션에 만든 그레이박스 지면 요약 (시작 로그용)
+-- 이번 세션에 계획한 산 (테스트와 디버그용, DevMap.getMountains)
+export type MountainPlan = {
+    edgePeaks: number,
+    ridges: { { a: Vector3, b: Vector3, width: number } },
+    footprints: { { x: number, z: number, r: number } },
+}
+local mountainPlan: MountainPlan? = nil
 
 -- 얼음 매장지 위치 (x, z). 왕복 시간이 게임 수치라 Config.ICE_SITES에서 온다 (2026-10-18: 8곳)
 local ICE_POSITIONS: { Vector3 } = {}
@@ -99,6 +106,30 @@ local ROUTE_T_MIN, ROUTE_T_MAX = 0.2, 0.85 -- 패드 -> 매장지 직선에서 �
 local ROUTE_LATERAL = 35 -- 직선에서 옆으로 벗어나는 최대 거리 (직선 위를 막아 돌아가게)
 local ROUTE_CRATER_RADIUS_MAX = 32
 local HARD_FLANK_DISTANCE = { 85, 115 } -- hard 매장지 중심에서 양옆 크레이터 중심까지 (바위 고리 바깥)
+
+-- 산 (2026-10-18): 가장자리 산맥이 지평선을 막고, 내부 능선이 패드 -> mid/hard 직선 경로를 가로막아 돌아가게 한다.
+-- 봉우리 = 원뿔에 내접하는 공을 축 위로 쌓은 것 (FillBall만으로 원뿔 모양). 재질 Rock, 표토보다 어두운 회색
+local MOUNTAIN_SEED_OFFSET = 4 -- 산 배치 난수 흐름 (크레이터와 언덕 흐름과 분리)
+local EDGE_BAND = 200 -- 지형 가장자리에서 이 띠 안에 봉우리를 잇는다
+local EDGE_PEAK_INSET = EDGE_BAND / 2 -- 봉우리 중심의 기본 위치 = 가장자리에서 띠 가운데
+local EDGE_PEAK_JITTER = 30 -- 위 위치에서 흔드는 폭
+local EDGE_PEAK_RADIUS = { 60, 120 } -- 바닥 반지름
+local EDGE_PEAK_HEIGHT = { 40, 90 }
+local EDGE_PEAK_STEP = 1.1 -- 다음 봉우리까지 거리 = 반지름 x 비율 (바닥 원이 서로 겹친다)
+local RIDGE_COUNT = 5 -- 내부 능선 수 (4 ~ 6)
+local RIDGE_LENGTH = { 120, 250 }
+local RIDGE_WIDTH = { 40, 70 } -- 바닥 폭 (봉우리 바닥 반지름의 2배)
+local RIDGE_HEIGHT = { 20, 45 }
+local RIDGE_ROUTE_T = { 0.35, 0.65 } -- 패드 -> 매장지 직선에서 능선 중심을 놓는 구간 (비율)
+local RIDGE_TILT = 20 -- 경로에 수직인 방향에서 흔드는 각도(도)
+local RIDGE_PEAK_STEP = 0.7 -- 능선 봉우리 간격 = 바닥 반지름 x 비율
+local MOUNTAIN_APRON_CLEARANCE = 60 -- 판 가장자리 + 25와 경사로 차선(판 + 55)을 모두 피한다
+local MOUNTAIN_ICE_CLEARANCE = 40 -- 얼음 중심에서 산 바닥까지 (로버가 지나갈 틈 30 이상)
+local MOUNTAIN_BASE_DEPTH = 0.5 -- 맨 아래 공 중심 깊이 = 바닥 반지름 x 비율
+local MOUNTAIN_BALL_STEP = 0.6 -- 다음 공 중심 = 지금 공 반지름 x 비율만큼 위
+local MOUNTAIN_MIN_BALL = 4 -- 이보다 작은 공은 쌓지 않는다 (복셀 4 studs)
+local MOUNTAIN_FEATURE_GAP = 4 -- 크레이터, 언덕, 바위가 산 바닥 원에서 띄우는 거리
+local MOUNTAIN_MATERIAL = Enum.Material.Rock
 
 -- 바위 3층: 기지 둘레 고리, 주행 회랑 양옆 무더기, 맵 전체 산포 (개수는 Config.DEV_MAP)
 local APRON_ROCK_GAP = 6 -- 콘크리트 판 가장자리에서 바위 가장자리까지 최소 거리
@@ -126,6 +157,10 @@ local LANDER_SIZE = Vector3.new(14, 10, 14) -- 폭, 높이, 깊이
 local ROVER_CENTER = Vector3.new(0, 0, -16)
 -- 로버 주차 위치 옆. 운전석에 앉은 채 하역 프롬프트(활성 거리 12)가 닿도록 로버에서 약 10 studs
 local WATER_TANK_POSITION = Vector3.new(-10, 0, -14)
+-- 로버 충전 패드 (2026-10-18): 로버 주차 자리 바로 아래, 물탱크 옆. 바닥보다 아주 조금만 올라와 바퀴를 들지 않는다
+local CHARGE_PAD_SIZE = Vector3.new(12, 0.05, 12) -- 바닥 위로 보이는 크기 (아래로 EMBED만큼 묻는다)
+local CHARGE_PAD_TRIM = 0.6 -- 노란 테두리 폭
+local CHARGE_PAD_TRIM_HEIGHT = 0.06 -- 테두리 윗면 = 바닥 + 이 값 (로버 바퀴 여유 0.1보다 낮게)
 local WATER_TANK_SIZE = Vector3.new(6, 8, 6)
 -- 로버 복구 콘솔: 착륙선 왼쪽 앞 판 위에 선 주황 기둥. 문 중심에서 14 studs 넘게 떨어뜨려
 -- 문 앞에서는 콘솔 프롬프트(활성 거리 Config.ROVER_RECOVERY.promptDistance)가 뜨지 않게 한다
@@ -223,6 +258,9 @@ local COLORS = {
     ice = Color3.fromRGB(170, 225, 255),
     boulder = Color3.fromRGB(90, 88, 86), -- 표토와 어울리는 회색 바위 (KitImports 바위 메시도 이 색)
     regolith = Color3.fromRGB(128, 126, 122), -- 달 표토 (Terrain 재질 색)
+    mountain = Color3.fromRGB(78, 77, 75), -- 산 (Terrain Rock 재질 색, 표토보다 어둡다)
+    chargePad = Color3.fromRGB(38, 40, 46), -- 로버 충전 패드 (어두운 판)
+    chargeTrim = Color3.fromRGB(245, 200, 40), -- 충전 패드 노란 테두리
     lander = Color3.fromRGB(210, 190, 130),
     landerTrim = Color3.fromRGB(90, 90, 95),
     spawn = Color3.fromRGB(255, 255, 255),
@@ -552,6 +590,8 @@ type Rect = { minX: number, maxX: number, minZ: number, maxZ: number }
 type Site = { position: Vector3, frame: CFrame, ice: Vector3 }
 type RockLayer = "ring" | "corridor" | "scatter" | "near" | "hardRing"
 type GroundStats = {
+    edgePeaks: number,
+    ridges: number,
     craters: number,
     routeCraters: number,
     hills: number,
@@ -944,13 +984,17 @@ local function buildBoulders(
 end
 
 -- 달 지형 계획 -----------------------------------------------------------
-type Ball = { center: Vector3, radius: number, air: boolean }
+type Ball = { center: Vector3, radius: number, air: boolean, rock: boolean? }
+type Ridge = { a: Vector3, b: Vector3, width: number }
 type TerrainPlan = {
     balls: { Ball },
     footprints: { Footprint },
+    mountainFootprints: { Footprint }, -- 봉우리 바닥 원 (크레이터, 언덕, 바위 금지)
     craters: number,
     routeCraters: number,
     hills: number,
+    edgePeaks: number,
+    ridges: { Ridge },
 }
 
 -- 공이 지표면(TERRAIN_TOP)과 만나는 원의 반지름 (안 만나면 0)
@@ -1022,15 +1066,195 @@ local function planHill(cx: number, cz: number, radius: number, height: number):
 end
 
 -- 언덕과 크레이터 배치 (결정적). Terrain이 없어도 계산해서 바위 배치가 두 환경에서 같게 한다
+-- 원뿔 봉우리 하나: 바닥 반지름 radius, 높이 height. 원뿔에 내접하는 공을 축 위로 쌓는다. 반환: 공들, 바닥 원 반지름
+local function planCone(cx: number, cz: number, radius: number, height: number): ({ Ball }, number)
+    local slope = height / radius
+    local k = math.sqrt(1 + slope * slope) -- 축 위 점에서 원뿔 옆면까지 거리 = (꼭대기 높이 - 점 높이) / k
+    local apex = TERRAIN_TOP + height
+    local y = TERRAIN_TOP - radius * MOUNTAIN_BASE_DEPTH
+    local balls: { Ball } = {}
+    local footprint = 0
+    while true do
+        local r = (apex - y) / k
+        if r < MOUNTAIN_MIN_BALL then
+            break
+        end
+        local ball: Ball = { center = Vector3.new(cx, y, cz), radius = r, air = false, rock = true }
+        table.insert(balls, ball)
+        footprint = math.max(footprint, surfaceRadius(ball))
+        y += r * MOUNTAIN_BALL_STEP
+    end
+    return balls, footprint
+end
+
+-- 산 바닥 원이 보호 구역(판 + 60, 얼음 40, 주행 회랑)을 침범하지 않는지
+local function mountainAllowed(
+    cx: number,
+    cz: number,
+    footprint: number,
+    sites: { Site },
+    rect: Rect
+): boolean
+    local flat = Vector3.new(cx, 0, cz)
+    for _, site in sites do
+        if apronDistance(flat, site, rect) < MOUNTAIN_APRON_CLEARANCE + footprint then
+            return false
+        end
+    end
+    for _, ice in ICE_POSITIONS do
+        if flatDistance(flat, ice) < MOUNTAIN_ICE_CLEARANCE + footprint then
+            return false
+        end
+    end
+    return corridorDistance(flat, sites) >= CORRIDOR_CLEARANCE + footprint
+end
+
+-- 직사각형 둘레(반폭 hx, hz) 위의 점. s는 (-hx, -hz)에서 시계 반대로 잰 거리
+local function perimeterPoint(s: number, hx: number, hz: number): (number, number)
+    local w, h = 2 * hx, 2 * hz
+    if s < w then
+        return -hx + s, -hz
+    elseif s < w + h then
+        return hx, -hz + (s - w)
+    elseif s < 2 * w + h then
+        return hx - (s - w - h), hz
+    end
+    return -hx, hz - (s - 2 * w - h)
+end
+
+-- 가장자리 산맥과 내부 능선 (결정적, 별도 난수). 크레이터와 언덕보다 먼저 계획해 그 바닥을 피하게 한다
+local function planMountains(plan: TerrainPlan, sites: { Site }, rect: Rect)
+    local dev = Config.DEV_MAP
+    local rng = Random.new(dev.seed + MOUNTAIN_SEED_OFFSET)
+    local function addCone(cx: number, cz: number, radius: number, height: number): boolean
+        local balls, footprint = planCone(cx, cz, radius, height)
+        if #balls == 0 or not mountainAllowed(cx, cz, footprint, sites, rect) then
+            return false
+        end
+        for _, ball in balls do
+            table.insert(plan.balls, ball)
+        end
+        local circle = { x = cx, z = cz, r = footprint }
+        table.insert(plan.mountainFootprints, circle)
+        table.insert(plan.footprints, circle)
+        return true
+    end
+    -- 1) 가장자리 산맥: 띠 가운데를 따라 둘레를 돌며 바닥이 겹치게 잇는다
+    local hx, hz = GROUND_SIZE.X / 2 - EDGE_PEAK_INSET, GROUND_SIZE.Z / 2 - EDGE_PEAK_INSET
+    local perimeter = 4 * (hx + hz)
+    local s = 0
+    while s < perimeter do
+        local radius = rng:NextNumber(EDGE_PEAK_RADIUS[1], EDGE_PEAK_RADIUS[2])
+        local height = rng:NextNumber(EDGE_PEAK_HEIGHT[1], EDGE_PEAK_HEIGHT[2])
+        local px, pz = perimeterPoint(s, hx, hz)
+        local jx = rng:NextNumber(-EDGE_PEAK_JITTER, EDGE_PEAK_JITTER)
+        local jz = rng:NextNumber(-EDGE_PEAK_JITTER, EDGE_PEAK_JITTER)
+        if addCone(px + jx, pz + jz, radius, height) then
+            plan.edgePeaks += 1
+        end
+        s += radius * EDGE_PEAK_STEP
+    end
+    -- 2) 내부 능선: 패드 -> mid(routeMidReach 안), hard(routeHardReach 안) 직선 경로를 가로지른다.
+    --    봉우리 하나라도 보호 구역을 침범하면 그 자리는 버리고 다시 뽑는다
+    local routes: { { from: Vector3, to: Vector3 } } = {}
+    for padIndex, site in sites do
+        for index, def in Config.ICE_SITES do
+            local reach = if def.difficulty == "mid"
+                then dev.routeMidReach
+                elseif def.difficulty == "hard" then dev.routeHardReach
+                else 0
+            local to = ICE_POSITIONS[index]
+            if
+                reach > 0
+                and PAD_LAYOUT[padIndex].ice ~= index
+                and flatDistance(site.position, to) <= reach
+            then
+                table.insert(routes, { from = site.position, to = to })
+            end
+        end
+    end
+    if #routes == 0 then
+        return
+    end
+    local offset = math.floor(rng:NextNumber(0, #routes))
+    for k = 1, #routes do
+        if #plan.ridges >= RIDGE_COUNT then
+            break
+        end
+        local route = routes[(offset + k * 3) % #routes + 1] -- 서로 다른 패드와 매장지로 흩어지게 건너뛴다
+        local dir = Vector3.new(route.to.X - route.from.X, 0, route.to.Z - route.from.Z)
+        for _ = 1, FEATURE_ATTEMPTS do
+            local center = route.from + dir * rng:NextNumber(RIDGE_ROUTE_T[1], RIDGE_ROUTE_T[2])
+            local angle = math.rad(90 + rng:NextNumber(-RIDGE_TILT, RIDGE_TILT))
+            local u = dir.Unit
+            local axis = Vector3.new(
+                u.X * math.cos(angle) - u.Z * math.sin(angle),
+                0,
+                u.X * math.sin(angle) + u.Z * math.cos(angle)
+            )
+            local length = rng:NextNumber(RIDGE_LENGTH[1], RIDGE_LENGTH[2])
+            local width = rng:NextNumber(RIDGE_WIDTH[1], RIDGE_WIDTH[2])
+            local height = rng:NextNumber(RIDGE_HEIGHT[1], RIDGE_HEIGHT[2])
+            local baseRadius = width / 2
+            local count = math.ceil(length / (baseRadius * RIDGE_PEAK_STEP)) + 1
+            local cones: { { balls: { Ball }, x: number, z: number, r: number } } = {}
+            local ok = true
+            for i = 0, count - 1 do
+                local p = center + axis * (-length / 2 + length * i / (count - 1))
+                local h = height * rng:NextNumber(0.85, 1.15)
+                local balls, footprint = planCone(p.X, p.Z, baseRadius, h)
+                if #balls == 0 or not mountainAllowed(p.X, p.Z, footprint, sites, rect) then
+                    ok = false
+                    break
+                end
+                table.insert(cones, { balls = balls, x = p.X, z = p.Z, r = footprint })
+            end
+            if ok then
+                for _, cone in cones do
+                    for _, ball in cone.balls do
+                        table.insert(plan.balls, ball)
+                    end
+                    local circle = { x = cone.x, z = cone.z, r = cone.r }
+                    table.insert(plan.mountainFootprints, circle)
+                    table.insert(plan.footprints, circle)
+                end
+                table.insert(plan.ridges, {
+                    a = center - axis * (length / 2),
+                    b = center + axis * (length / 2),
+                    width = width,
+                })
+                break
+            end
+        end
+    end
+end
+
 local function planTerrain(sites: { Site }, rect: Rect): TerrainPlan
     local rng = Random.new(Config.DEV_MAP.seed + TERRAIN_SEED_OFFSET)
-    local plan: TerrainPlan =
-        { balls = {}, footprints = {}, craters = 0, routeCraters = 0, hills = 0 }
+    local plan: TerrainPlan = {
+        balls = {},
+        footprints = {},
+        mountainFootprints = {},
+        craters = 0,
+        routeCraters = 0,
+        hills = 0,
+        edgePeaks = 0,
+        ridges = {},
+    }
+    planMountains(plan, sites, rect)
     local halfX, halfZ = GROUND_SIZE.X / 2, GROUND_SIZE.Z / 2
     local function tryAdd(balls: { Ball }, footprint: number, cx: number, cz: number): boolean
         for _, ball in balls do
             if not ballAllowed(ball, sites, rect) then
                 return false
+            end
+            -- 산 바닥 안에는 크레이터와 언덕을 두지 않는다
+            local r = surfaceRadius(ball)
+            for _, m in plan.mountainFootprints do
+                local d = Vector3.new(ball.center.X - m.x, 0, ball.center.Z - m.z).Magnitude
+                if d < m.r + r + MOUNTAIN_FEATURE_GAP then
+                    return false
+                end
             end
         end
         for _, ball in balls do
@@ -1214,8 +1438,13 @@ local function applyTerrain(plan: TerrainPlan, folder: Instance)
         material
     )
     terrain:SetMaterialColor(material, COLORS.regolith)
+    terrain:SetMaterialColor(MOUNTAIN_MATERIAL, COLORS.mountain)
     for _, ball in plan.balls do
-        terrain:FillBall(ball.center, ball.radius, if ball.air then Enum.Material.Air else material)
+        local fill = if ball.air
+            then Enum.Material.Air
+            elseif ball.rock then MOUNTAIN_MATERIAL
+            else material
+        terrain:FillBall(ball.center, ball.radius, fill)
     end
     -- 기본 Baseplate가 있으면 크레이터 바닥을 평평하게 가리므로 플레이 중에만 숨긴다
     local baseplate = workspace:FindFirstChild("Baseplate")
@@ -1276,7 +1505,18 @@ local function buildTerrainAndSites(rect: Rect): GroundStats
     end
     local plan: TerrainPlan = if TERRAIN_ENABLED
         then planTerrain(sites, rect)
-        else { balls = {}, footprints = {}, craters = 0, routeCraters = 0, hills = 0 }
+        else {
+            balls = {},
+            footprints = {},
+            mountainFootprints = {},
+            craters = 0,
+            routeCraters = 0,
+            hills = 0,
+            edgePeaks = 0,
+            ridges = {},
+        }
+    mountainPlan =
+        { edgePeaks = plan.edgePeaks, ridges = plan.ridges, footprints = plan.mountainFootprints }
     applyTerrain(plan, terrain)
 
     local iceFolder = makeFolder("IceSites", workspace)
@@ -1317,6 +1557,8 @@ local function buildTerrainAndSites(rect: Rect): GroundStats
 
     verifyDistances(padPositions)
     local stats: GroundStats = {
+        edgePeaks = plan.edgePeaks,
+        ridges = #plan.ridges,
         craters = plan.craters,
         routeCraters = plan.routeCraters,
         hills = plan.hills,
@@ -2019,6 +2261,40 @@ local function buildWaterTank(kit: Model)
     end)
 end
 
+-- 로버 충전 패드: 어두운 판 + 노란 테두리 4줄. 시작 시 로버가 이 위에 주차되어 있다
+local function buildChargePad(kit: Model)
+    local padCFrame, padTotal = slabCFrame(CFrame.identity, ROVER_CENTER, CHARGE_PAD_SIZE.Y)
+    local pad = makePart({
+        name = "ChargePad",
+        size = Vector3.new(CHARGE_PAD_SIZE.X, padTotal, CHARGE_PAD_SIZE.Z),
+        cframe = padCFrame,
+        color = COLORS.chargePad,
+        material = Enum.Material.SmoothPlastic,
+        parent = kit,
+    })
+    local half = CHARGE_PAD_SIZE.X / 2 - CHARGE_PAD_TRIM / 2
+    local trims = {
+        { Vector3.new(0, 0, -half), Vector3.new(CHARGE_PAD_SIZE.X, 0, CHARGE_PAD_TRIM) },
+        { Vector3.new(0, 0, half), Vector3.new(CHARGE_PAD_SIZE.X, 0, CHARGE_PAD_TRIM) },
+        { Vector3.new(-half, 0, 0), Vector3.new(CHARGE_PAD_TRIM, 0, CHARGE_PAD_SIZE.Z) },
+        { Vector3.new(half, 0, 0), Vector3.new(CHARGE_PAD_TRIM, 0, CHARGE_PAD_SIZE.Z) },
+    }
+    for _, trim in trims do
+        local offset, size = trim[1], trim[2]
+        local position = ROVER_CENTER + offset
+        local trimCFrame, trimTotal = slabCFrame(CFrame.identity, position, CHARGE_PAD_TRIM_HEIGHT)
+        local part = makePart({
+            name = "ChargePadTrim",
+            size = Vector3.new(size.X, trimTotal, size.Z),
+            cframe = trimCFrame,
+            color = COLORS.chargeTrim,
+            material = Enum.Material.Neon,
+            parent = pad,
+        })
+        part.CanCollide = false
+    end
+end
+
 -- KitImports 장식: 착륙선 뒤 바닥에 상자 2 x 2 (cratesStart = 첫 상자 바닥 중심)
 local function addCrates(kit: Model, cratesStart: Vector3)
     if not KitImports.has("Crate") then
@@ -2108,6 +2384,7 @@ local function buildBaseKit()
     buildSolarField(kit)
     buildModulePads(kit)
     buildWaterTank(kit)
+    buildChargePad(kit)
     ServerUtil.safeCall("DevMap Crates", addCrates, kit, cratesStart)
     if greyboxTerrainBuilt then
         buildApron(kit)
@@ -2162,6 +2439,11 @@ local function buildPanelTemplate()
     })
     template.PrimaryPart = panel
     template.Parent = ServerStorage
+end
+
+-- 이번 세션에 계획한 산 (그레이박스 지형을 만들지 않았으면 nil)
+function DevMap.getMountains(): MountainPlan?
+    return mountainPlan
 end
 
 -- 진입점: 없는 것만 만든다
@@ -2225,11 +2507,14 @@ function DevMap.ensure()
     if stats then
         print(
             string.format(
-                "[DevMap] 지면: 판 윗면 y %.1f, 지형 윗면 y %.1f, 범위 %d x %d, 크레이터 %d(위험 경로 %d), 언덕 %d, 바위 %d(기지 둘레 %d, 회랑 옆 %d, 산포 %d, 기지 근처 산포 %d, hard 고리 %d)",
+                "[DevMap] 지면: 판 윗면 y %.1f, 지형 윗면 y %.1f, 범위 %d x %d, 산 %d(가장자리 봉우리 %d, 내부 능선 %d), 크레이터 %d(위험 경로 %d), 언덕 %d, 바위 %d(기지 둘레 %d, 회랑 옆 %d, 산포 %d, 기지 근처 산포 %d, hard 고리 %d)",
                 GROUND_TOP,
                 SURFACE_Y,
                 GROUND_SIZE.X,
                 GROUND_SIZE.Z,
+                stats.edgePeaks + stats.ridges,
+                stats.edgePeaks,
+                stats.ridges,
                 stats.craters,
                 stats.routeCraters,
                 stats.hills,

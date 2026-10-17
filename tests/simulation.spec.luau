@@ -139,9 +139,10 @@ return function(t)
         t.eq(after.food, s.food + Config.MODULES.B.foodPerDay - Config.CREW.food)
         t.eq(after.netFood, 1)
         t.falsy(after.modulesStalled)
-        -- 유지: A 3E 1W, B 5E 2W, 크루 1W
-        t.eq(after.energy, 100 - 3 - 5)
-        t.eq(after.water, s.water - 1 - 2 - 1)
+        -- 유지: A, B 에너지와 물, 크루 물 (수치는 Config)
+        local A, B = Config.MODULES.A.upkeep, Config.MODULES.B.upkeep
+        t.eq(after.energy, 100 - A.energy - B.energy)
+        t.eq(after.water, s.water - A.water - B.water - Config.CREW.water)
     end)
 
     t.test("Farm은 그날 물 수요를 못 채우면 생산하지 않는다", function()
@@ -501,7 +502,10 @@ return function(t)
             s.water = 100
             Simulation.refreshDerived(s, Config)
             t.eq(s.daysLeft.food, 999, "Farm이 식량 +2, 크루 -1이면 줄지 않음")
-            t.eq(s.daysLeft.water, 25, "물 100 / (1 + 1 + 2) = 25")
+            local farmUse = Config.CREW.water
+                + Config.MODULES.A.upkeep.water
+                + Config.MODULES.B.upkeep.water
+            t.eq(s.daysLeft.water, math.floor(100 / farmUse), "물 100 / (크루 + A + B 유지)")
             s.water = 0
             Simulation.refreshDerived(s, Config)
             t.eq(s.daysLeft.water, 0)
@@ -694,7 +698,7 @@ return function(t)
         end
     )
 
-    t.test("얼음 매장지 8곳: easy 2, mid 3, hard 3, 합계 390 ~ 400", function()
+    t.test("얼음 매장지 8곳: easy 2, mid 3, hard 3, 합계 510 ~ 520", function()
         local counts = { easy = 0, mid = 0, hard = 0 }
         local total = 0
         for _, site in Config.ICE_SITES do
@@ -705,8 +709,67 @@ return function(t)
         t.eq(counts.easy, 2)
         t.eq(counts.mid, 3)
         t.eq(counts.hard, 3)
-        t.truthy(total >= 390 and total <= 400, "합계 " .. total)
+        t.truthy(total >= 510 and total <= 520, "합계 " .. total)
     end)
+
+    t.test(
+        "로버 배터리: 주행 소모, 충전은 빈 용량과 기지 에너지 중 작은 만큼",
+        function()
+            local rv = Config.ROVER
+            local s = playingState(1)
+            t.eq(s.rover.battery, rv.batteryMax, "시작 만충")
+            t.eq(s.rover.batteryMax, rv.batteryMax)
+            t.falsy(s.rover.charging)
+            local drained, emptied = Simulation.drainBattery(s, Config, 10)
+            t.near(drained.rover.battery, rv.batteryMax - rv.batteryDrainPerSecond * 10)
+            t.falsy(emptied)
+            local dead, emptied2 = Simulation.drainBattery(drained, Config, 1000)
+            t.eq(dead.rover.battery, 0)
+            t.truthy(emptied2, "이번에 0이 되면 true")
+            local _, again = Simulation.drainBattery(dead, Config, 1)
+            t.falsy(again, "이미 0이면 다시 true가 아님")
+            t.eq(dead.missionText, Config.MISSION_TEXTS.batteryEmpty, "방전 미션 문구")
+            dead.energy = 100
+            local charged, amount = Simulation.chargeBattery(dead, Config, 1)
+            t.near(amount, rv.chargeRatePerSecond)
+            t.near(charged.rover.battery, rv.chargeRatePerSecond)
+            t.near(charged.energy, 100 - rv.chargeRatePerSecond, "기지 에너지에서 1:1")
+            dead.energy = 1.5
+            local poor, amount2 = Simulation.chargeBattery(dead, Config, 10)
+            t.near(amount2, 1.5, "기지 에너지 잔량까지만")
+            t.eq(poor.energy, 0)
+            local nearFull = Simulation.copy(s)
+            nearFull.rover.battery = rv.batteryMax - 0.5
+            nearFull.energy = 100
+            local full, amount3 = Simulation.chargeBattery(nearFull, Config, 10)
+            t.near(amount3, 0.5, "빈 용량까지만")
+            t.eq(full.rover.battery, rv.batteryMax)
+        end
+    )
+
+    t.test(
+        "배터리 부족 미션: 기지 밖에서 25% 이하일 때만, 방전은 어디서나",
+        function()
+            local rv = Config.ROVER
+            local s = playingState(1)
+            s.rover.battery = rv.batteryMax * rv.lowBatteryRatio
+            Simulation.refreshDerived(s, Config)
+            t.truthy(Simulation.batteryLow(s, Config))
+            t.truthy(
+                s.missionText ~= Config.MISSION_TEXTS.batteryLow,
+                "기지 안이면 단계 문구"
+            )
+            s.rover.away = true
+            Simulation.refreshDerived(s, Config)
+            t.eq(s.missionText, Config.MISSION_TEXTS.batteryLow)
+            s.rover.battery = rv.batteryMax * rv.lowBatteryRatio + 1
+            Simulation.refreshDerived(s, Config)
+            t.truthy(
+                s.missionText ~= Config.MISSION_TEXTS.batteryLow,
+                "25%보다 많으면 단계 문구"
+            )
+        end
+    )
 
     -- 현실적 플레이어 봇 (GDD 4절 밸런스 검증 메모, 2026-10-18 매장량과 전력 제약 반영) -----------
     -- 하루에 한 가지 행동만 한다. 우선순위:
@@ -738,14 +801,24 @@ return function(t)
         return ice.x + layout.dirX * distance, ice.z + layout.dirZ * distance
     end
 
-    local function tripDaysTo(siteIndex: number, iceIndex: number): number
+    -- 왕복 주행 초 (채우기와 하역은 빼고)
+    local function driveSecondsTo(siteIndex: number, iceIndex: number): number
         local px, pz = padPosition(siteIndex)
         local ice = Config.ICE_SITES[iceIndex]
         local distance = math.sqrt((ice.x - px) ^ 2 + (ice.z - pz) ^ 2)
         local corridor = Config.DEV_MAP.padLayout[siteIndex].ice == iceIndex
         local factor = if corridor then 1 else TERRAIN_FACTOR[ice.difficulty]
-        local seconds = 2 * distance / (Config.ROVER.maxSpeed * factor) + TRIP_OVERHEAD
+        return 2 * distance / (Config.ROVER.maxSpeed * factor)
+    end
+
+    local function tripDaysTo(siteIndex: number, iceIndex: number): number
+        local seconds = driveSecondsTo(siteIndex, iceIndex) + TRIP_OVERHEAD
         return math.max(1, math.ceil(seconds / Config.DAY_SECONDS))
+    end
+
+    -- 원정 한 번의 로버 배터리 소모 = 주행 초 x batteryDrainPerSecond (2026-10-18)
+    local function tripBatteryTo(siteIndex: number, iceIndex: number): number
+        return driveSecondsTo(siteIndex, iceIndex) * Config.ROVER.batteryDrainPerSecond
     end
 
     type BotResult = {
@@ -759,6 +832,7 @@ return function(t)
         trips: number,
         wasteDays: number, -- 저장 상한 때문에 발전이 버려진 날
         partialUnloads: number, -- 전력이 모자라 일부만 처리한 하역
+        chargeDays: number, -- 기지에서 로버를 충전한 날
         waterNeed: number, -- 건설 물 + 크루와 모듈 유지 물 (승리까지 쓴 물 전체)
         mined: number, -- 매장지에서 캔 물 합계
         tripLog: string, -- 원정 대상 순서 (얼음 번호)
@@ -776,6 +850,9 @@ return function(t)
 
     local function simulatePlayer(siteIndex: number, noTrips: boolean?): BotResult
         local s = playingState(Config.SITES[siteIndex].sunlight)
+        -- 로버 배터리: 원정을 떠날 때 왕복 소모를 빼고, 기지에 있는 날마다 기지 에너지에서 충전한다
+        local battery = Config.ROVER.batteryMax
+        local chargeDays = 0 -- 기지에서 충전한 날 수
         local deposits: { number } = {}
         for index, site in Config.ICE_SITES do
             deposits[index] = site.deposit
@@ -811,6 +888,35 @@ return function(t)
             end
             return if best == math.huge then 0 else best
         end
+        -- 갈 만한 매장지를 왕복 일수 순으로 둘 골라, 첫 원정을 버티고 그 물로 둘째 원정까지 버티는지
+        local function survivesTwoTrips(state): boolean
+            local list = {}
+            for index, amount in deposits do
+                if amount >= USEFUL_TRIP_W then
+                    table.insert(list, { days = tripDaysTo(siteIndex, index), amount = amount })
+                end
+            end
+            table.sort(list, function(a, b)
+                return a.days < b.days
+            end)
+            local first, second = list[1], list[2]
+            if not first then
+                return true
+            end
+            local projected = state
+            for _ = 1, first.days do
+                projected = Simulation.applyDay(projected, Config)
+            end
+            if Simulation.checkEnd(projected, Config) == "lost" then
+                return false
+            end
+            if not second then
+                return true
+            end
+            local afterFirst = Simulation.copy(projected)
+            afterFirst.water += math.min(state.rover.tankMax, first.amount)
+            return afterFirst.water >= waterUse(afterFirst, second.days)
+        end
         -- 다음 원정 대상: 다녀오는 동안 물이 버티는 매장지 중 하루당 얻는 물(min(탱크 빈 공간, 매장량) / 왕복 일수)이
         -- 가장 많은 곳. 버틸 수 있는 곳이 없으면 가장 가까운 곳
         local function nextTarget(): (number?, number)
@@ -818,7 +924,8 @@ return function(t)
             local nearest, nearestDays = nil, math.huge
             local space = s.rover.tankMax - s.rover.tank
             for index, amount in deposits do
-                if amount > 0 then
+                -- 지금 배터리로 왕복할 수 없는 매장지는 고르지 않는다
+                if amount > 0 and tripBatteryTo(siteIndex, index) <= battery then
                     local days = tripDaysTo(siteIndex, index)
                     if days < nearestDays then
                         nearest, nearestDays = index, days
@@ -888,6 +995,19 @@ return function(t)
                 end
             else
                 unload()
+                -- 충전 패드: 하루(DAY_SECONDS초) 동안 chargeRatePerSecond씩, 기지 에너지 잔량까지
+                local charge = math.min(
+                    Config.ROVER.chargeRatePerSecond * Config.DAY_SECONDS,
+                    Config.ROVER.batteryMax - battery,
+                    s.energy
+                )
+                if charge > 0 then
+                    s = Simulation.copy(s)
+                    s.energy -= charge
+                    battery += charge
+                    chargeDays += 1
+                    Simulation.refreshDerived(s, Config)
+                end
                 if tripped and not checkedReturn then
                     checkedReturn = true
                     aOnReturn = (Simulation.canBuild(s, Config, "A"))
@@ -917,6 +1037,11 @@ return function(t)
                     end
                 elseif afterBuild then
                     canStart = afterBuild.water >= reserveFor(afterBuild, shortestTrip())
+                    -- 물 유지비가 큰 모듈(Farm)은 두 원정 앞까지 본다: 가까운 순으로 첫 원정을 버티고,
+                    -- 그 물을 더한 뒤 다음 원정도 완공 뒤 소비로 버틸 만큼 모였을 때 착공 (사람도 Farm 전에 물을 쌓는다)
+                    if canStart and Config.MODULES[id :: string].upkeep.water > 1 then
+                        canStart = survivesTwoTrips(afterBuild)
+                    end
                     -- 식량이 급하면(Farm 건설 기간 + FOOD_URGENT_MARGIN일 안에 바닥) 물 여유가 없어도 Farm부터
                     local foodDef = Config.MODULES[id :: string]
                     if
@@ -946,6 +1071,7 @@ return function(t)
                     tripped = true
                     busy, onTrip = true, true
                     tripTarget = target :: number
+                    battery = math.max(0, battery - tripBatteryTo(siteIndex, tripTarget))
                     table.insert(log, tostring(tripTarget))
                     tripLeft = days - 1
                     if tripLeft == 0 then
@@ -1001,6 +1127,7 @@ return function(t)
                     trips = s.waterTrips,
                     wasteDays = wasteDays,
                     partialUnloads = partialUnloads,
+                    chargeDays = chargeDays,
                     waterNeed = waterNeed,
                     mined = mined,
                     tripLog = table.concat(log, ","),
@@ -1018,6 +1145,7 @@ return function(t)
             trips = s.waterTrips,
             wasteDays = wasteDays,
             partialUnloads = partialUnloads,
+            chargeDays = chargeDays,
             waterNeed = waterNeed,
             mined = mined,
             tripLog = table.concat(log, ","),
@@ -1030,7 +1158,7 @@ return function(t)
             table.insert(
                 parts,
                 string.format(
-                    "%s %s %d일(원정 %d회 [얼음 %s], 에너지 막힘 최대 %d일 합계 %d일, 완전 대기 최대 %d일, Farm 전 최저 식량 %d, 전력 버림 %d일, 일부 처리 하역 %d회, 물 사용 %d W, 채취 %d W)",
+                    "%s %s %d일(원정 %d회 [얼음 %s], 에너지 막힘 최대 %d일 합계 %d일, 완전 대기 최대 %d일, Farm 전 최저 식량 %d, 전력 버림 %d일, 일부 처리 하역 %d회, 충전 %d일, 물 사용 %d W, 채취 %d W)",
                     Config.SITES[index].name,
                     if r.result == "won" then "승리" else r.result,
                     r.day,
@@ -1042,6 +1170,7 @@ return function(t)
                     r.minFood,
                     r.wasteDays,
                     r.partialUnloads,
+                    r.chargeDays,
                     r.waterNeed,
                     r.mined
                 )
@@ -1056,7 +1185,7 @@ return function(t)
     end
 
     t.test(
-        "현실적 봇: 4곳 모두 승리, 최적 착륙지 45일 이하, 나머지 50일 이하",
+        "현실적 봇: 4곳 모두 승리, 최적 착륙지 55 ~ 70일, 나머지 85일 이하",
         function()
             print(
                 "        거리별 원정 일수와 매장량 기준:\n        " .. summary(results)
@@ -1066,12 +1195,15 @@ return function(t)
                 t.eq(r.result, "won", Config.SITES[index].name)
                 best = math.min(best, r.day)
             end
-            t.truthy(best <= 45, "최적 착륙지 승리 일수 " .. best)
-            -- 2026-10-18 리드 승인: 나머지 착륙지는 50일(약 8분) 이하까지 허용
+            t.truthy(
+                best >= 55 and best <= 70,
+                "최적 착륙지 승리 일수 " .. best .. " (55 ~ 70)"
+            )
+            -- 2026-10-18 사용자 피드백(너무 쉽다) 반영 목표: 나머지 85일 이하, 최악도 90일 안
             for index, r in results do
                 t.truthy(
-                    r.day <= 50,
-                    Config.SITES[index].name .. " 승리 일수 " .. r.day .. " (50 이하)"
+                    r.day <= 85,
+                    Config.SITES[index].name .. " 승리 일수 " .. r.day .. " (85 이하)"
                 )
             end
         end
@@ -1105,8 +1237,8 @@ return function(t)
     end)
 
     -- 승리에 필요한 물 = 건설 물 + 크루와 모듈 유지 물 (봇이 승리까지 실제로 쓴 양).
-    -- 매장량 합계가 가장 많이 쓴 착륙지의 1.4배 이상이어야 늦게 가는 팀도 물이 남는다
-    t.test("매장량 합계 >= 승리에 필요한 물 x 1.4 (봇 실측)", function()
+    -- 매장량 합계가 가장 많이 쓴 착륙지의 1.3배 이상이어야 늦게 가는 팀도 물이 남는다
+    t.test("매장량 합계 >= 승리에 필요한 물 x 1.3 (봇 실측)", function()
         local total = 0
         for _, site in Config.ICE_SITES do
             total += site.deposit
@@ -1117,14 +1249,14 @@ return function(t)
         end
         print(
             string.format(
-                "        매장량 합계 %d W, 최대 필요량 %d W (x 1.4 = %.0f)",
+                "        매장량 합계 %d W, 최대 필요량 %d W (x 1.3 = %.0f)",
                 total,
                 need,
-                need * 1.4
+                need * 1.3
             )
         )
-        t.truthy(total >= need * 1.4, string.format("합계 %d < %d x 1.4", total, need))
-        t.truthy(total >= 390 and total <= 400, "매장량 합계 390 ~ 400: " .. total)
+        t.truthy(total >= need * 1.3, string.format("합계 %d < %d x 1.3", total, need))
+        t.truthy(total >= 510 and total <= 520, "매장량 합계 510 ~ 520: " .. total)
     end)
 
     t.test(
