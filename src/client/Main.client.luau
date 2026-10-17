@@ -20,6 +20,8 @@ local PromptUI = require(script.Parent.PromptUI)
 local PadSignUI = require(script.Parent.PadSignUI)
 local RoverHint = require(script.Parent.RoverHint)
 local ObjectiveHighlight = require(script.Parent.ObjectiveHighlight)
+local SoundFX = require(script.Parent.SoundFX)
+local DockSignUI = require(script.Parent.DockSignUI)
 
 -- 기본 체력바는 산소 바와 혼동되므로 끈다 (실패해도 무시)
 pcall(function()
@@ -99,6 +101,8 @@ PromptUI.init(ctx)
 PadSignUI.init(ctx)
 RoverHint.init(ctx)
 ObjectiveHighlight.init(ctx)
+SoundFX.init(ctx)
+DockSignUI.init(ctx)
 
 remotes.StateUpdate.OnClientEvent:Connect(function(state)
     lastState = state
@@ -107,6 +111,8 @@ remotes.StateUpdate.OnClientEvent:Connect(function(state)
     RoverHint.onState(state)
     ObjectiveHighlight.update(state)
     RadarUI.onState(state)
+    DockSignUI.update(state)
+    SoundFX.onState(state)
     applyScreens()
     -- GameOver를 놓친 늦은 입장자를 위한 대체 표시
     if (state.phase == "won" or state.phase == "lost") and not ResultUI.isVisible() then
@@ -121,12 +127,15 @@ end)
 
 remotes.OxygenUpdate.OnClientEvent:Connect(function(oxygen, max, inside)
     OxygenBar.update(oxygen, max, inside)
+    SoundFX.onOxygen(oxygen, max, inside)
 end)
 
 remotes.Notify.OnClientEvent:Connect(function(text, kind)
     ToastUI.push(text, kind)
+    SoundFX.onNotify(text, kind)
 end)
 
 remotes.GameOver.OnClientEvent:Connect(function(result)
     ResultUI.show(result)
+    SoundFX.onGameOver(result)
 end)

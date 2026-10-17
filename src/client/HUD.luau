@@ -16,6 +16,7 @@ local gui
 local refs = {}
 local currentSpeed = 1
 local batteryTweens = nil
+local batteryMode = nil -- "low" | "charging" | nil
 
 local STATUS_TEXT = {
     locked = "잠김",
@@ -375,26 +376,34 @@ local function updateModule(row, moduleState)
 end
 
 -- 배터리 25% 이하 경고: 바와 글자를 천천히 깜빡인다
-local function setBatteryBlink(blink)
-    if blink then
-        if batteryTweens then
-            return
-        end
-        local info = TweenInfo.new(0.8, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true)
-        batteryTweens = {
-            TweenService:Create(refs.batteryBar.fill, info, { BackgroundTransparency = 0.7 }),
-            TweenService:Create(refs.batteryText, info, { TextTransparency = 0.6 }),
-        }
-        for _, tween in ipairs(batteryTweens) do
-            tween:Play()
-        end
-    elseif batteryTweens then
+-- 충전 중에는 바만 은은하게 맥동한다
+local function setBatteryBlink(mode)
+    if mode == batteryMode then
+        return
+    end
+    batteryMode = mode
+    if batteryTweens then
         for _, tween in ipairs(batteryTweens) do
             tween:Cancel()
         end
         batteryTweens = nil
         refs.batteryBar.fill.BackgroundTransparency = 0
         refs.batteryText.TextTransparency = 0
+    end
+    if mode == "low" then
+        local info = TweenInfo.new(0.8, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true)
+        batteryTweens = {
+            TweenService:Create(refs.batteryBar.fill, info, { BackgroundTransparency = 0.7 }),
+            TweenService:Create(refs.batteryText, info, { TextTransparency = 0.6 }),
+        }
+    elseif mode == "charging" then
+        local info = TweenInfo.new(1.2, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true)
+        batteryTweens = {
+            TweenService:Create(refs.batteryBar.fill, info, { BackgroundTransparency = 0.45 }),
+        }
+    end
+    for _, tween in ipairs(batteryTweens or {}) do
+        tween:Play()
     end
 end
 
@@ -404,7 +413,7 @@ local function updateBattery(rover)
     refs.batteryText.Parent.Visible = valid
     refs.batteryRow.Visible = valid
     if not valid then
-        setBatteryBlink(false)
+        setBatteryBlink(nil)
         return
     end
     local ratio = battery / batteryMax
@@ -413,7 +422,7 @@ local function updateBattery(rover)
     refs.batteryText.TextColor3 = if low then Colors.bad else Colors.text
     refs.batteryBar.fill.BackgroundColor3 = if low then Colors.bad else Colors.energy
     refs.batteryBar.setRatio(ratio)
-    setBatteryBlink(low)
+    setBatteryBlink(if low then "low" elseif rover.charging then "charging" else nil)
 
     if battery <= 0 then
         refs.batteryBadge.Visible = true
