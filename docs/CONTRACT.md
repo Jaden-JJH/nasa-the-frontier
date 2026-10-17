@@ -171,7 +171,7 @@ ServerStorage
     SolarField (Model)
       InstallPad (Part)             ProximityPrompt 부착 대상. ActionText "패널 설치", HoldDuration Config.PANEL_INSTALL_HOLD
       Slots (Folder)
-        Slot1 .. Slot30 (Part)      패널이 놓일 자리. 설치되면 PanelTemplate 복제본이 위에 생김
+        Slot1 .. Slot25 (Part)      패널이 놓일 자리(2026-10-18: 30 -> 25, 5 x 5). 설치되면 PanelTemplate 복제본이 위에 생김
     ModulePads (Folder)
       PadA, PadB, PadC (Model)    Attribute ModuleId(string, A/B/C). 클라이언트 표지판이 이걸로 찾는다
         Pad (Part)                  ProximityPrompt 부착 대상. ActionText "건설 시작"
@@ -214,10 +214,10 @@ DAY_SECONDS = 10, TOTAL_DAYS = 90, SPEEDS = {1, 2},
 LANDING_SECONDS = 5, SITE_SELECT_TIMEOUT = 30, DEFAULT_SITE_ID = 2,
 START = { energy = 50, water = 25, food = 30 },  -- energy 50은 착륙선 잔여 배터리 (2026-10-17 플레이테스트 후 조정)
 CREW = { food = 1, water = 1 },
-PANELS_TOTAL = 30, PANELS_PER_DAY = 3, PANEL_OUTPUT = 1, PANEL_INSTALL_HOLD = 2,
+PANELS_TOTAL = 25, PANELS_PER_DAY = 3, PANEL_OUTPUT = 1, PANEL_INSTALL_HOLD = 2,  -- 2026-10-18: 패널 30 -> 25
 MODULES = {
   A = { name = "Habitat", cost = { energy = 60, water = 20 }, buildDays = 5, upkeep = { energy = 3, water = 1 }, requires = {} },
-  B = { name = "Farm", cost = { energy = 80, water = 30 }, buildDays = 5, upkeep = { energy = 5, water = 2 }, requires = {"A"}, foodPerDay = 2 },
+  B = { name = "Farm", cost = { energy = 80, water = 30 }, buildDays = 5, upkeep = { energy = 6, water = 2 }, requires = {"A"}, foodPerDay = 2 },  -- 2026-10-18: 전력 5 -> 6
   C = { name = "Research Lab", cost = { energy = 150, water = 30 }, buildDays = 7, upkeep = { energy = 8, water = 1 }, requires = {"A", "B"} },
 },
 MODULE_ORDER = {"A", "B", "C"},

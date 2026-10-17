@@ -56,7 +56,9 @@ local Config = {
     CREW = { food = 1, water = 1 },
 
     -- 태양광 패널
-    PANELS_TOTAL = 30,
+    -- 30 -> 25 (2026-10-18 사용자: 에너지가 넉넉하다). 봇 비교에서 하루 2장, 1장은 Habitat A가 늦어져 Malapert, Nobile이
+    -- 졌고(하루 2장 + 20장도), 하루 3장 + 25장이 목표(최적 55 ~ 75일)를 지키면서 버려지는 전력이 가장 적었다
+    PANELS_TOTAL = 25,
     PANELS_PER_DAY = 3,
     PANEL_OUTPUT = 1, -- E/일/장, 착륙지 일조율을 곱한다
     PANEL_INSTALL_HOLD = 2,
@@ -91,7 +93,9 @@ local Config = {
             buildDays = 5,
             -- 물 유지 2 유지 (2026-10-18: 3이나 4로 올리면 Farm 뒤 하루 5 ~ 6 W를 8 ~ 10일 원정으로 메우지 못해
             -- 봇이 Nobile에서 항상 32일에 진다. 후반 물 압박은 Lab 건설 물 50으로 준다)
-            upkeep = { energy = 5, water = 2 },
+            -- 에너지 5 -> 6 (2026-10-18 사용자: 에너지가 넉넉하다. 재배 조명과 난방). 7 이상이나 물 처리 전력 0.75 이상,
+            -- 저장 상한 120과의 조합은 일조 60%인 Nobile이 90일 안에 Lab 전력을 못 모아 봇이 졌다
+            upkeep = { energy = 6, water = 2 },
             requires = { "A" },
             foodPerDay = 2,
         },

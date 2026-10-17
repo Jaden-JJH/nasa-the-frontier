@@ -102,20 +102,23 @@ return function(t)
         t.eq(s.netEnergy, 2.55)
     end)
 
-    t.test("패널: 하루 3장 한도, 다음 날 초기화, 전체 30장 한도", function()
-        local s = installMany(playingState(1), 3)
-        local ok, _, reason = Simulation.installPanel(s, Config)
-        t.falsy(ok)
-        t.eq(reason, Config.TEXTS.panelLimit)
-        s = Simulation.applyDay(s, Config)
-        t.eq(s.panelsInstalledToday, 0)
-        local ok2 = Simulation.installPanel(s, Config)
-        t.truthy(ok2)
-        s.panelsInstalled = Config.PANELS_TOTAL
-        local ok3, _, reason3 = Simulation.installPanel(s, Config)
-        t.falsy(ok3)
-        t.eq(reason3, Config.TEXTS.panelsFull)
-    end)
+    t.test(
+        "패널: 하루 한도, 다음 날 초기화, 전체 한도 (Config.PANELS_TOTAL)",
+        function()
+            local s = installMany(playingState(1), 3)
+            local ok, _, reason = Simulation.installPanel(s, Config)
+            t.falsy(ok)
+            t.eq(reason, Config.TEXTS.panelLimit)
+            s = Simulation.applyDay(s, Config)
+            t.eq(s.panelsInstalledToday, 0)
+            local ok2 = Simulation.installPanel(s, Config)
+            t.truthy(ok2)
+            s.panelsInstalled = Config.PANELS_TOTAL
+            local ok3, _, reason3 = Simulation.installPanel(s, Config)
+            t.falsy(ok3)
+            t.eq(reason3, Config.TEXTS.panelsFull)
+        end
+    )
 
     t.test("Farm은 에너지가 0이면 생산하지 않는다", function()
         local s = playingState(1)
@@ -1185,7 +1188,7 @@ return function(t)
     end
 
     t.test(
-        "현실적 봇: 4곳 모두 승리, 최적 착륙지 55 ~ 70일, 나머지 85일 이하",
+        "현실적 봇: 4곳 모두 승리, 최적 착륙지 55 ~ 75일, 나머지 85일 이하",
         function()
             print(
                 "        거리별 원정 일수와 매장량 기준:\n        " .. summary(results)
@@ -1196,8 +1199,8 @@ return function(t)
                 best = math.min(best, r.day)
             end
             t.truthy(
-                best >= 55 and best <= 70,
-                "최적 착륙지 승리 일수 " .. best .. " (55 ~ 70)"
+                best >= 55 and best <= 75,
+                "최적 착륙지 승리 일수 " .. best .. " (55 ~ 75)"
             )
             -- 2026-10-18 사용자 피드백(너무 쉽다) 반영 목표: 나머지 85일 이하, 최악도 90일 안
             for index, r in results do

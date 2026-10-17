@@ -173,8 +173,10 @@ local CONSOLE_PANEL_SIZE = Vector3.new(1.2, 0.15, 1.2) -- 기둥 윗면의 어�
 local RADAR_SIDE_GAP = 2 -- 레이더(지상 장비)는 착륙선 왼쪽(-X) 충돌 벽 바깥
 
 local SOLAR_CENTER = Vector3.new(34, 0, 6)
-local SOLAR_COLUMNS, SOLAR_ROWS = 5, 6
--- 슬롯 한 칸 5 x 4, 간격 1 (필드 전체 약 29 x 29). 키트 패널 바닥 비율(약 1.29 : 1.67)에 맞춰
+-- 슬롯 수 = Config.PANELS_TOTAL (2026-10-18: 30 -> 25, 5 x 5). 열은 5로 두고 행은 패널 수에서 정한다
+local SOLAR_COLUMNS = 5
+local SOLAR_ROWS = math.ceil(Config.PANELS_TOTAL / SOLAR_COLUMNS)
+-- 슬롯 한 칸 5 x 4, 간격 1 (필드 전체 약 29 x 24). 키트 패널 바닥 비율(약 1.29 : 1.67)에 맞춰
 -- 정사각형 대신 5 x 4로 두어 균일 스케일해도 두 변이 모두 슬롯의 90% 이상을 채운다
 local SLOT_SIZE = Vector3.new(5, 0.2, 4)
 local SLOT_GAP_X, SLOT_GAP_Z = 1, 1

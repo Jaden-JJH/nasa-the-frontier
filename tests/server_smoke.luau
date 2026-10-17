@@ -671,7 +671,10 @@ check(
     kit.Rover:FindFirstChild("DriverSeat") and kit.Rover.DriverSeat.ClassName == "VehicleSeat",
     "Rover.DriverSeat VehicleSeat"
 )
-check(#kit.SolarField.Slots:GetChildren() == 30, "Slots 30개")
+check(
+    #kit.SolarField.Slots:GetChildren() == Config.PANELS_TOTAL and Config.PANELS_TOTAL == 25,
+    "Slots = PANELS_TOTAL 25개 (5 x 5)"
+)
 check(kit.ModulePads.PadA:FindFirstChild("OxygenZone") ~= nil, "PadA OxygenZone")
 for _, id in { "A", "B", "C" } do
     local pad = kit.ModulePads["Pad" .. id]
