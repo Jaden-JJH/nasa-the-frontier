@@ -81,3 +81,11 @@ rojo build default.project.json -o build.rbxl
 - main 에 직접 푸시하지 않고 Pull Request 로 병합합니다.
 - CI(selene, stylua, rojo build, lune)가 통과해야 병합합니다.
 - 비밀 값(API 키, 토큰)은 커밋하지 않습니다.
+
+## 문서
+
+- [GDD](docs/GDD.md): 게임 기획서. 규칙과 밸런스 수치를 담고 있습니다.
+- [CONTRACT](docs/CONTRACT.md): 서버와 클라이언트가 합의한 이름과 인터페이스입니다.
+- [SETUP](docs/SETUP.md): 개발 환경 설치, Studio 연결, 퍼블리시 방법입니다.
+- [MAP_SPEC](docs/MAP_SPEC.md): 디자이너가 Studio에서 맵을 만들 때 따르는 명세입니다.
+- [ASSETS](docs/ASSETS.md): Creator Store 무료 모델과 이미지 사용 가이드입니다.
