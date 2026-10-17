@@ -226,15 +226,17 @@ OxygenZone 은 플레이어가 "실내"에 있다고 판단하는 보이지 않�
 
 ### 폴더 안 이름 목록
 
+2026-10-17 기준으로 위 역할 이름 그대로 저장한 glTF 묶음이 준비되어 있습니다(원본 Quaternius Ultimate Space Kit, CC0, OpenGameArt 미러 GLB를 변환). 개발 Mac의 `~/Downloads/the-frontier-kit/` 폴더에 `Rover.gltf`, `Lander.gltf`, `HabitatA.gltf`, `HabitatB.gltf`, `HabitatC.gltf`, `Panel.gltf`, `Rock1.gltf`, `Rock2.gltf`, `Rock3.gltf`(각각 .bin과 _tex0.png 동반)와 `glb/` 단일 파일 버전, 미리보기 `preview_all_pieces.png`, 안내문 `README.txt`가 들어 있습니다. 파일 이름이 역할 이름이라 Import 3D로 가져오면 바로 표의 이름으로 들어옵니다.
+
 | 이름 | 역할 | 권장 조각 |
 |---|---|---|
-| `Rover` | 로버 외형. 기존 물리 리그(섀시, 바퀴 4개, 힌지, DriverSeat) 위에 얹고 섀시에 용접합니다. 충돌은 리그가 맡습니다. DriverSeat 는 메시 윗면 중앙에 놓입니다. | 로버 두 종류 중 큰 것 |
-| `Lander` | 착륙선 외형. 산소 구역이 메시를 덮도록 자동으로 커집니다. SpawnPoint 와 로버 복구 콘솔은 그대로 생깁니다. | 착륙선 또는 로켓 |
-| `HabitatA` | Habitat A 완공 모델(Built)과 고스트(Ghost, 같은 메시의 반투명 복제본). 산소 회복 구역이 건물을 덮습니다. | 구부러진 생활동 건물 |
-| `HabitatB` | Farm B 완공 모델과 고스트 | 검은 뚜껑 모양 재배 시설 |
-| `HabitatC` | Research Lab C 완공 모델과 고스트 | 큰 돔 |
-| `Panel` | 태양광 패널 원본(PanelTemplate). 슬롯 한 칸 크기에 맞춥니다. | 태양광 패널 |
-| `Rock1`, `Rock2`, ... | 지형 바위. 번호 순서로 돌려 쓰고 크기는 0.7 ~ 1.4배 사이에서 무작위입니다. 바위 위치는 그레이박스와 같습니다. | 바위 |
+| `Rover` | 로버 외형. 기존 물리 리그(섀시, 바퀴 4개, 힌지, DriverSeat) 위에 얹고 섀시에 용접합니다. 충돌은 리그가 맡습니다. DriverSeat 는 메시 윗면 중앙에 놓입니다. | 로버 두 종류 중 큰 것. 키트 파일 `Rover-WRd1piJOfh.glb` |
+| `Lander` | 착륙선 외형. 산소 구역이 메시를 덮도록 자동으로 커집니다. SpawnPoint 와 로버 복구 콘솔은 그대로 생깁니다. | 착륙선 또는 로켓. 키트 파일 `Spaceship-u105mYHLHU.glb` (노란 셔틀형) |
+| `HabitatA` | Habitat A 완공 모델(Built)과 고스트(Ghost, 같은 메시의 반투명 복제본). 산소 회복 구역이 건물을 덮습니다. | 튜브형 생활동 건물. 키트 파일 `House Long.glb` |
+| `HabitatB` | Farm B 완공 모델과 고스트 | 검은 뚜껑 모양 재배 시설. 키트 파일 `Base Large.glb` |
+| `HabitatC` | Research Lab C 완공 모델과 고스트 | 큰 돔. 키트 파일 `Geodesic Dome.glb` |
+| `Panel` | 태양광 패널 원본(PanelTemplate). 슬롯 한 칸 크기에 맞춥니다. | 지면형 태양광 패널 1장. 키트 파일 `Solar Panel Ground.glb` |
+| `Rock1`, `Rock2`, ... | 지형 바위. 번호 순서로 돌려 쓰고 크기는 0.7 ~ 1.4배 사이에서 무작위입니다. 바위 위치는 그레이박스와 같습니다. | 바위. 키트 파일 `Rock Large.glb`, `Rock Large-li0YBlBEMz.glb`, `Rock.glb` |
 
 - 각 항목은 Model 또는 MeshPart 하나입니다. MeshPart 하나만 넣어도 코드가 Model 로 감싸서 처리합니다.
 - 방향: Rover 는 긴 쪽이 앞뒤, Panel 은 긴 쪽이 좌우가 되도록 코드가 90도 돌려 맞춥니다. 앞뒤가 반대로 보이면 그 항목에 number Attribute `Yaw` 를 추가해 각도(도)를 넣습니다. 예: 180. `Yaw` 가 있으면 자동 방향 맞춤은 하지 않습니다.
