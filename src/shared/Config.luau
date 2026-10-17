@@ -115,6 +115,7 @@ local Config = {
         flipSeconds = 3, -- 무인 상태로 뒤집힌 채 이만큼 지나면 자동 복구
         fallDepth = 20, -- 기지 Origin보다 이만큼 아래로 떨어지면 자동 복구
         hold = 1, -- 수동 복구 프롬프트 홀드 시간(초)
+        promptDistance = 8, -- 콘솔 프롬프트 활성 거리 (에어락 문에서 14 studs 넘게 떨어져 있어 문 앞에서는 안 뜬다)
     },
     RADAR_RANGE = 150,
 
@@ -153,7 +154,7 @@ local Config = {
         doorWidth = 4.5,
         doorHeight = 5.5,
         doorThickness = 0.4,
-        doorColor = { 60, 62, 68 }, -- 어두운 회색 문 판 (열린 통로라 충돌 없음)
+        doorColor = { 60, 62, 68 }, -- 어두운 회색 문 판 (닫혀 있으면 충돌, 4차)
         frameColor = { 205, 208, 215 }, -- 문 둘레에 겹쳐 보이는 밝은 프레임
         frameBorder = 0.3,
         doorInset = 0.5, -- 건물 경계 상자 앞면에서 안쪽으로
@@ -168,6 +169,13 @@ local Config = {
         lightColor = { 255, 210, 160 }, -- 내부 따뜻한 빛
         lightRange = 18,
         lightBrightness = 1,
+        -- 문 여닫기 (Airlock 모듈, 4차): E로 열면 openSeconds 동안 열리고, 문 범위에 캐릭터가 있으면 닫지 않는다
+        openSeconds = 6,
+        openTransparency = 0.75,
+        openColor = { 160, 175, 190 }, -- 열린 문은 밝은 색
+        promptDistance = 8, -- 문 프롬프트 활성 거리
+        closeCheckDepth = 1.6, -- 닫기 전 캐릭터를 찾는 범위 = 문 두께 + 이 깊이 (문 앞뒤 1 stud. 문에서 2 안쪽 스폰은 닿지 않게)
+        closeRetrySeconds = 0.5, -- 문 범위에 캐릭터가 있으면 이 간격으로 다시 확인
     },
 
     -- 튜토리얼: 이 날이 되면 패널 설치 안내를 건너뛰고 로버 탑승 안내로 넘어간다
@@ -238,8 +246,12 @@ local Config = {
     -- 그레이박스 맵(DevMap) 게임 영향 수치. 레이아웃 좌표는 DevMap.luau 상단 상수에 있다
     DEV_MAP = {
         iceDistanceBySite = { 450, 300, 180, 100 }, -- 패드 중심에서 가장 가까운 얼음 지점까지 studs
-        boulderCountBySite = { 10, 22, 22, 46 }, -- 착륙지별 주행 회랑 양옆 바위 무더기 (지형 위험)
-        scatterBoulders = 70, -- 맵 전체에 흩뿌리는 바위 수 (합계 약 170)
+        -- 바위 3층 (합계 약 220, 4차): 기지 둘레 고리 + 주행 회랑 양옆 무더기 + 맵 전체 산포
+        baseRingBouldersBySite = { 8, 10, 10, 12 }, -- 착륙지별 기지 판 둘레 (판 가장자리 + 6 ~ + 45)
+        boulderCountBySite = { 16, 26, 26, 40 }, -- 착륙지별 주행 회랑 양옆 바위 무더기 (지형 위험)
+        scatterBoulders = 72, -- 맵 전체에 낮은 밀도로 흩뿌리는 바위 수
+        iceBoulderCap = 12, -- 얼음 지점 하나 주변 바위 상한 (얼음이 바위에 묻히지 않게)
+        iceBoulderCapRadius = 40, -- 위 상한을 세는 반지름
         seed = 20261017, -- 바위 배치 난수 시드 (항상 같은 맵)
     },
 
@@ -299,7 +311,8 @@ local Config = {
 
         oxygenDepleted = "산소 고갈. 착륙선에서 구조되었습니다",
         airlock = "에어락",
-        lowOxygen = "산소 부족. 가까운 에어락으로 이동하세요",
+        lowOxygen = "산소 부족. 가까운 에어락 문을 E로 열고 안으로 들어가세요",
+        airlockOpened = "에어락이 열렸습니다. 안으로 들어가면 산소가 회복됩니다",
         oxygenDepletedOther = "%s 대원의 산소가 고갈되었습니다. Food -%d, Water -%d",
 
         modulesStalled = "전력 부족으로 모듈이 정지했습니다",
@@ -326,6 +339,7 @@ local Config = {
         tankObject = "물탱크",
         recoverObject = "착륙선 콘솔",
         roverObject = "로버",
+        airlockObject = "에어락",
         -- ActionText: 동작
         installPanel = "패널 설치 (오늘 %d/%d)",
         installTomorrow = "내일 다시 (오늘 %d/%d)",
@@ -334,6 +348,7 @@ local Config = {
         unload = "물 하역",
         recoverRover = "로버 복구",
         board = "탑승",
+        openDoor = "열기",
     },
 }
 

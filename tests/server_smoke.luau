@@ -77,8 +77,8 @@ local function entryOk(building, expectedWalls)
     if not door or not frame or not sign then
         return false, "문, 프레임, 표지 중 없음"
     end
-    if door.CanCollide or frame.CanCollide then
-        return false, "문이 충돌함"
+    if not door.CanCollide or frame.CanCollide then
+        return false, "닫힌 문은 충돌하고 프레임은 충돌하지 않아야 함"
     end
     if
         math.abs(door.Size.X - 4.5) > 1e-3
@@ -384,6 +384,20 @@ end)
 roblox.implementMethod("Workspace", "Raycast", function()
     return nil -- 지면 탐색은 실패한 것으로 보고 코드의 대체 높이를 쓴다
 end)
+-- 박스 안에 중심이 있는 파트 목록 (에어락 닫기 판정용 근사. 실제 Roblox는 파트 경계로 판정)
+roblox.implementMethod("Workspace", "GetPartBoundsInBox", function(ws, cframe, size)
+    local result = {}
+    local half = size / 2
+    for _, d in ws:GetDescendants() do
+        if d:IsA("BasePart") then
+            local p = cframe:PointToObjectSpace(d.CFrame.Position)
+            if math.abs(p.X) <= half.X and math.abs(p.Y) <= half.Y and math.abs(p.Z) <= half.Z then
+                table.insert(result, d)
+            end
+        end
+    end
+    return result
+end)
 roblox.implementMethod("Workspace", "GetServerTimeNow", function()
     return 1700000000 + now
 end)
@@ -645,8 +659,91 @@ local function corridorsOf(ws)
     end
     return list
 end
+-- 파트의 회전된 박스 꼭짓점 중 가장 낮은 y
+local function partBottom(part)
+    local lowest = math.huge
+    local half = part.Size / 2
+    for _, sx in { -1, 1 } do
+        for _, sy in { -1, 1 } do
+            for _, sz in { -1, 1 } do
+                local corner = part.CFrame * Vector3.new(sx * half.X, sy * half.Y, sz * half.Z)
+                lowest = math.min(lowest, corner.Y)
+            end
+        end
+    end
+    return lowest
+end
+-- 기지 키트(키트 좌표, 판 윗면 y -1) 높이 검사: 판과 경사로를 뺀 모든 파트 바닥이 판 윗면 - 0.1 이상,
+-- 로버 복구 콘솔은 판 위에 선 기둥이고 에어락 문 중심에서 14 이상 떨어짐
+local function kitHeightChecks(kitModel, label)
+    local APRON_TOP = -1
+    local ramps = kitModel:FindFirstChild("Ramps")
+    local lowestName, lowest = "", math.huge
+    for _, d in kitModel:GetDescendants() do
+        if d:IsA("BasePart") and d.Name ~= "Apron" and not (ramps and d:IsDescendantOf(ramps)) then
+            local bottom = partBottom(d)
+            if bottom < lowest then
+                lowestName, lowest = d:GetFullName(), bottom
+            end
+        end
+    end
+    check(
+        lowest >= APRON_TOP - 0.1,
+        string.format(
+            "%s: 판과 경사로를 뺀 모든 파트 바닥이 판 윗면 - 0.1 이상 (최저 %.2f, %s)",
+            label,
+            lowest,
+            lowestName
+        )
+    )
+    local lander = kitModel.Lander
+    local door = lander.Entry.Door
+    local console = lander.RoverConsole
+    local panel = lander:FindFirstChild("ConsolePanel")
+    local consoleBottom = console.CFrame.Position.Y - console.Size.Y / 2
+    local consoleTop = console.CFrame.Position.Y + console.Size.Y / 2
+    local doorDistance = flatDistance(door.CFrame.Position, console.CFrame.Position)
+    check(
+        math.abs(console.Size.X - 1.4) < 1e-3
+            and math.abs(console.Size.Z - 1.4) < 1e-3
+            and math.abs(consoleTop - (-0.5 + 3.2)) < 1e-3
+            and math.abs(consoleBottom - APRON_TOP) < 1e-3
+            and console.Color == roblox.Color3.fromRGB(255, 140, 60),
+        string.format(
+            "%s: 복구 콘솔은 판 윗면에 선 주황 기둥 (1.4 x 3.2 x 1.4, 바닥 %.2f)",
+            label,
+            consoleBottom
+        )
+    )
+    check(
+        panel ~= nil
+            and panel.Color == roblox.Color3.fromRGB(40, 42, 48)
+            and math.abs(panel.CFrame.Position.Y - panel.Size.Y / 2 - consoleTop) < 1e-3,
+        label .. ": 콘솔 윗면에 어두운 조작판"
+    )
+    check(
+        doorDistance >= 14
+            and console.CFrame.Position.X < door.CFrame.Position.X
+            and console.CFrame.Position.Z < door.CFrame.Position.Z,
+        string.format(
+            "%s: 콘솔은 착륙선 왼쪽 앞, 문 중심에서 %.1f (14 이상)",
+            label,
+            doorDistance
+        )
+    )
+end
+-- 착륙지 i에 놓일 기지 판까지 xz 거리 (판 안이면 0). apron = ServerStorage.BaseKit.Apron
+local function apronDistanceAt(apron, i, point, ws)
+    local pad = (ws or Workspace).LandingPads["Pad" .. i]
+    local apronWorld = pad.CFrame * CFrame.new(0, pad.Size.Y / 2 + 0.5, 0) * apron.CFrame
+    local p = apronWorld:PointToObjectSpace(point)
+    local half = apron.Size / 2
+    local dx = math.max(math.abs(p.X) - half.X, 0)
+    local dz = math.max(math.abs(p.Z) - half.Z, 0)
+    return math.sqrt(dx * dx + dz * dz)
+end
 local function runTerrainChecks()
-    local TERRAIN_TOP = -0.5
+    local TERRAIN_TOP = -1.5
     local blocks, balls = {}, {}
     for _, call in terrainCalls do
         table.insert(if call.kind == "block" then blocks else balls, call)
@@ -658,7 +755,7 @@ local function runTerrainChecks()
             and block.size.Y == 24
             and block.size.X >= 1400
             and block.size.Z >= 1100,
-        "FillBlock 한 번: 두께 24, 지형 윗면 y -0.5 (콘크리트 판보다 1 아래)"
+        "FillBlock 한 번: 두께 24, 지형 윗면 y -1.5 (콘크리트 판보다 3 아래)"
     )
     check(
         terrainInstance:GetMaterialColor(roblox.Enum.Material.Sand)
@@ -685,17 +782,16 @@ local function runTerrainChecks()
     end
     check(labels == 0, "서버 월드 라벨 BillboardGui 0개 (" .. labels .. ")")
 
-    -- 보호 구역: 패드 80, 얼음 30, 주행 회랑 반폭 12 (지표면 원 기준)
-    local pads, ices = {}, {}
-    for i = 1, 4 do
-        table.insert(pads, Workspace.LandingPads["Pad" .. i].CFrame.Position)
-    end
+    -- 보호 구역: 기지 판 가장자리 + 25, 얼음 30, 주행 회랑 반폭 12 (지표면 원 기준)
+    local apron = kit:FindFirstChild("Apron")
+    local ices = {}
     for _, ice in Workspace.IceSites:GetChildren() do
         table.insert(ices, ice.CFrame.Position)
     end
     local corridors = corridorsOf(Workspace)
     local violations, corridorHits = 0, 0
     local craters, hills, smallCraters, badDepth, highRim, badHill = 0, 0, 0, 0, 0, 0
+    local bigCraters = 0
     local nearPad = { 0, 0, 0, 0 }
     local craterCircles = {}
     for _, ball in balls do
@@ -703,8 +799,8 @@ local function runTerrainChecks()
         local footprint = if math.abs(dy) < ball.radius
             then math.sqrt(ball.radius ^ 2 - dy ^ 2)
             else 0
-        for _, pad in pads do
-            if flatDistance(ball.center, pad) < 80 + footprint - 1e-6 then
+        for i = 1, 4 do
+            if apronDistanceAt(apron, i, ball.center) < 25 + footprint - 1e-6 then
                 violations += 1
             end
         end
@@ -724,13 +820,16 @@ local function runTerrainChecks()
             if ball.radius < 12 then
                 smallCraters += 1
             end
-            -- 깊이 = 반지름의 20%: 중심이 지형 위 (반지름 - 깊이)
-            if math.abs(dy - ball.radius * 0.8) > 1e-6 then
+            if ball.radius > 50 then
+                bigCraters += 1
+            end
+            -- 깊이 = 반지름의 20%: 중심이 지형 위 (반지름 - 깊이). Vector3는 float32라 오차 1e-4 허용
+            if math.abs(dy - ball.radius * 0.8) > 1e-4 then
                 badDepth += 1
             end
             table.insert(craterCircles, { center = ball.center, footprint = footprint })
-            for i, pad in pads do
-                if flatDistance(ball.center, pad) <= 80 + 220 then
+            for i = 1, 4 do
+                if apronDistanceAt(apron, i, ball.center) <= 120 then
                     nearPad[i] += 1
                 end
             end
@@ -745,7 +844,7 @@ local function runTerrainChecks()
     end
     check(
         violations == 0,
-        "모든 FillBall의 지표면 원이 패드 반지름 80, 얼음 반지름 30 밖 (침범 "
+        "모든 FillBall의 지표면 원이 기지 판 가장자리 + 25, 얼음 반지름 30 밖 (침범 "
             .. violations
             .. ")"
     )
@@ -754,14 +853,30 @@ local function runTerrainChecks()
         "폭 24 주행 회랑에 크레이터와 언덕 없음 (침범 " .. corridorHits .. ")"
     )
     check(
-        craters == 20 and smallCraters == 0,
-        "크레이터 " .. craters .. "개, 반지름 12 미만 " .. smallCraters .. "개"
+        craters == 45 and smallCraters == 0 and bigCraters == 0,
+        "크레이터 "
+            .. craters
+            .. "개 (약 45), 반지름 12 미만 "
+            .. smallCraters
+            .. "개, 50 초과 "
+            .. bigCraters
+            .. "개"
     )
     check(
         badDepth == 0 and highRim == 0,
         "크레이터 깊이 반지름의 20%, 테두리 둔덕 1.5 이하"
     )
-    check(hills == 7 and badHill == 0, "언덕 " .. hills .. "개, 높이 2 ~ 4")
+    check(hills == 12 and badHill == 0, "언덕 " .. hills .. "개, 높이 2 ~ 4")
+    check(
+        nearPad[1] >= 8 and nearPad[2] >= 8 and nearPad[3] >= 8 and nearPad[4] >= 8,
+        string.format(
+            "네 착륙지 모두 기지 판 가장자리 120 안에 크레이터 중심 8개 이상 (%d, %d, %d, %d)",
+            nearPad[1],
+            nearPad[2],
+            nearPad[3],
+            nearPad[4]
+        )
+    )
     check(
         nearPad[4] > nearPad[1],
         string.format(
@@ -777,7 +892,7 @@ local function runTerrainChecks()
         local pad = Workspace.LandingPads["Pad" .. i]
         local top = pad.CFrame.Position.Y + pad.Size.Y / 2
         local bottom = pad.CFrame.Position.Y - pad.Size.Y / 2
-        if math.abs(top - 1) > 1e-6 or bottom > TERRAIN_TOP + 1e-6 then
+        if math.abs(top - 2) > 1e-6 or bottom > TERRAIN_TOP + 1e-6 then
             padsOk = false
         end
     end
@@ -786,28 +901,42 @@ local function runTerrainChecks()
             icesOk = false
         end
     end
-    check(padsOk, "착륙 패드 윗면 y 1.0, 지형까지 묻힘")
-    check(icesOk, "얼음 지점이 지형(y -0.5) 위")
+    check(padsOk, "착륙 패드 윗면 y 2.0, 지형까지 묻힘")
+    check(icesOk, "얼음 지점 바닥이 지형 윗면(y -1.5)")
 
     -- 기지 콘크리트 판과 경사로 (키트 좌표: Origin 아래 0.5 = 판 윗면 -1.0)
-    local apron = kit:FindFirstChild("Apron")
     check(
         apron ~= nil
             and apron.Material == roblox.Enum.Material.Concrete
             and apron.Color == roblox.Color3.fromRGB(105, 105, 108)
             and math.abs(apron.CFrame.Position.Y + apron.Size.Y / 2 - -1) < 1e-6,
-        "기지 키트에 콘크리트 판 (윗면 = 착륙 패드 윗면 - 0.5 = 월드 y 0.5)"
+        "기지 키트에 콘크리트 판 (윗면 = 착륙 패드 윗면 - 0.5 = 월드 y 1.5)"
     )
     local ramps = kit:FindFirstChild("Ramps")
     local rampOk = ramps ~= nil and #ramps:GetChildren() == 4
     if ramps then
         for _, ramp in ramps:GetChildren() do
-            if not ramp:IsA("WedgePart") or ramp.Size ~= Vector3.new(10, 1, 4) then
+            if not ramp:IsA("WedgePart") or ramp.Size ~= Vector3.new(10, 3, 10) then
                 rampOk = false
             end
         end
     end
-    check(rampOk, "판 가장자리 경사로 WedgePart 4개 (폭 10, 길이 4, 높이 1)")
+    check(rampOk, "판 가장자리 경사로 WedgePart 4개 (폭 10, 길이 10, 높이 3)")
+    -- 판 윗면(월드)이 지형보다 3 이상 높다 (어느 착륙지든 같다)
+    local apronTopWorld = (Workspace.LandingPads.Pad1.CFrame * CFrame.new(
+        0,
+        Workspace.LandingPads.Pad1.Size.Y / 2 + 0.5,
+        0
+    ) * apron.CFrame * CFrame.new(0, apron.Size.Y / 2, 0)).Position.Y
+    check(
+        math.abs(apronTopWorld - 1.5) < 1e-6 and apronTopWorld - TERRAIN_TOP >= 3 - 1e-6,
+        string.format(
+            "판 윗면 y %.1f가 지형 윗면 y %.1f보다 3 이상 높음",
+            apronTopWorld,
+            TERRAIN_TOP
+        )
+    )
+    kitHeightChecks(kit, "그레이박스 키트")
     -- 어느 착륙지에 놓여도 판 위에 크레이터가 없다
     local onApron = 0
     for i = 1, 4 do
@@ -825,19 +954,44 @@ local function runTerrainChecks()
     end
     check(onApron == 0, "네 착륙지 어디서도 콘크리트 판 위에 크레이터 없음")
 
-    -- 바위: 약 170개, 회랑과 판(패드 80) 밖, 크레이터 밖, 약 10%는 2배 크기
+    -- 바위 3층 (약 220): 기지 둘레, 회랑 옆, 산포. 회랑 안과 판 + 6 안에 없음, 크레이터 밖, 약 10%는 2배 크기
     local boulders = Workspace.DevTerrain.Boulders:GetChildren()
-    local inCorridor, nearBase, inCrater, big = 0, 0, 0, 0
+    local dev = Config.DEV_MAP
+    local layers = { ring = 0, corridor = 0, scatter = 0 }
+    local inCorridor, blocked, inCrater, big, badRing = 0, 0, 0, 0, 0
+    local nearIce = {}
+    for index = 1, #ices do
+        nearIce[index] = 0
+    end
     for _, boulder in boulders do
-        local p = boulder.CFrame.Position
+        local p = if boulder:IsA("BasePart")
+            then boulder.CFrame.Position
+            else boulder:GetPivot().Position
+        local layer = boulder:GetAttribute("BoulderLayer")
+        if layers[layer] then
+            layers[layer] += 1
+        end
         for _, c in corridors do
             if segmentDistance(p, c.pad, c.ice) < 12 then
                 inCorridor += 1
             end
         end
-        for _, pad in pads do
-            if flatDistance(p, pad) < 80 then
-                nearBase += 1
+        local nearestApron = math.huge
+        for i = 1, 4 do
+            nearestApron = math.min(nearestApron, apronDistanceAt(apron, i, p))
+        end
+        if nearestApron < 6 then
+            blocked += 1
+        end
+        if layer == "ring" and (nearestApron < 6 or nearestApron > 45 + 1e-6) then
+            badRing += 1
+        end
+        for index, ice in ices do
+            if flatDistance(p, ice) < 15 then
+                blocked += 1
+            end
+            if flatDistance(p, ice) < dev.iceBoulderCapRadius then
+                nearIce[index] += 1
             end
         end
         for _, crater in craterCircles do
@@ -849,10 +1003,45 @@ local function runTerrainChecks()
             big += 1
         end
     end
-    check(#boulders >= 160 and #boulders <= 170, "바위 " .. #boulders .. "개 (약 170)")
+    local function sum(list)
+        local total = 0
+        for _, v in list do
+            total += v
+        end
+        return total
+    end
     check(
-        inCorridor == 0 and nearBase == 0,
-        "바위가 회랑 안과 기지 판(패드 80) 안에 없음"
+        layers.ring == sum(dev.baseRingBouldersBySite)
+            and layers.corridor >= sum(dev.boulderCountBySite) * 0.9
+            and layers.scatter >= dev.scatterBoulders * 0.9
+            and #boulders == layers.ring + layers.corridor + layers.scatter
+            and #boulders >= 200
+            and #boulders <= 230,
+        string.format(
+            "바위 %d개 (약 220): 기지 둘레 %d, 회랑 옆 %d, 산포 %d",
+            #boulders,
+            layers.ring,
+            layers.corridor,
+            layers.scatter
+        )
+    )
+    check(
+        inCorridor == 0 and blocked == 0,
+        "바위가 회랑 안, 기지 판 + 6 안, 얼음 반지름 15 안에 없음"
+    )
+    check(badRing == 0, "기지 둘레 바위는 판 가장자리 + 6 ~ + 45 사이")
+    local maxNearIce = 0
+    for _, n in nearIce do
+        maxNearIce = math.max(maxNearIce, n)
+    end
+    check(
+        maxNearIce <= dev.iceBoulderCap,
+        string.format(
+            "얼음 지점 반지름 %d 안 바위 최대 %d개 (상한 %d)",
+            dev.iceBoulderCapRadius,
+            maxNearIce,
+            dev.iceBoulderCap
+        )
     )
     check(inCrater == 0, "바위가 크레이터 안에 놓이지 않음")
     check(
@@ -958,8 +1147,8 @@ local function runFlatCase()
     check(patched == 1, "지형 꺼짐 경로: DevMap 플래그를 false로 바꿈")
     local ground = ws3.DevTerrain:FindFirstChild("MoonGround")
     check(
-        ground ~= nil and math.abs(ground.CFrame.Position.Y + ground.Size.Y / 2 - 0.5) < 1e-6,
-        "TERRAIN_ENABLED false: 평평한 지면 Part (윗면 y 0.5)"
+        ground ~= nil and math.abs(ground.CFrame.Position.Y + ground.Size.Y / 2 - 1.5) < 1e-6,
+        "TERRAIN_ENABLED false: 평평한 지면 Part (윗면 y 1.5)"
     )
     check(#terrainCalls == callsBefore, "TERRAIN_ENABLED false: Terrain 호출 0회")
     check(
@@ -1570,6 +1759,17 @@ check(
 root.CFrame = base.ModulePads.PadA.OxygenZone.CFrame
 advance(1)
 check(lastSent("OxygenUpdate").args[3] == true, "Habitat A 안은 실내")
+do
+    local doorA = base.ModulePads.PadA.Built.Entry.Door
+    local promptA = doorA:FindFirstChildOfClass("ProximityPrompt")
+    check(
+        doorA.CanCollide == true
+            and promptA ~= nil
+            and promptA.Enabled == true
+            and promptA.ActionText == "열기",
+        "완공된 Habitat A 문: 닫혀 있고 열기 프롬프트"
+    )
+end
 
 signalFor(padBPrompt, "Triggered"):Fire(alice)
 advance(Config.DAY_SECONDS * Config.MODULES.B.buildDays)
@@ -1685,6 +1885,89 @@ do
     local ok, why = suitOk(reborn)
     check(ok, "리스폰 후 우주복 재적용: " .. why)
 end
+
+-- 에어락 문 (재시작 후 새 기지 base2) -------------------------------------
+print("[에어락]")
+local function runAirlockChecks()
+    local Airlock = loadModule(Server:FindFirstChild("Airlock"))
+    local aliceRoot = alice.Character.HumanoidRootPart
+    root.CFrame = CFrame.new(0, 500, 0) -- 이전 캐릭터는 멀리
+    aliceRoot.CFrame = base2.Lander.OxygenZone.CFrame
+    local door = base2.Lander.Entry.Door
+    local prompt = door:FindFirstChildOfClass("ProximityPrompt")
+    check(
+        prompt ~= nil
+            and prompt.ObjectText == "에어락"
+            and prompt.ActionText == "열기"
+            and prompt.HoldDuration == 0
+            and prompt.MaxActivationDistance == 8
+            and prompt.RequiresLineOfSight == false
+            and prompt.Style == roblox.Enum.ProximityPromptStyle.Custom
+            and prompt.Enabled == true,
+        "착륙선 문 프롬프트: 에어락 / 열기, 즉시, 거리 8, Custom"
+    )
+    check(door.CanCollide == true and door.Transparency == 0, "닫힌 문은 막혀 있음")
+    local total, openCount = Airlock.counts()
+    check(total == 2 and openCount == 0, "에어락 문 2개 (착륙선, Habitat A), 모두 닫힘")
+    local closedColor = door.Color
+    local function isOpen()
+        return door.CanCollide == false
+            and math.abs(door.Transparency - 0.75) < 1e-6
+            and door.Color ~= closedColor
+            and prompt.Enabled == false
+    end
+    local function isClosed()
+        return door.CanCollide == true
+            and door.Transparency == 0
+            and door.Color == closedColor
+            and prompt.Enabled == true
+    end
+    local function toasts()
+        local count, kind = 0, nil
+        for _, entry in sent do
+            if
+                entry.name == "Notify"
+                and entry.target == alice
+                and entry.args[1] == Config.TEXTS.airlockOpened
+            then
+                count += 1
+                kind = entry.args[2]
+            end
+        end
+        return count, kind
+    end
+    signalFor(prompt, "Triggered"):Fire(alice)
+    local n1, kind = toasts()
+    check(isOpen(), "열기: 반투명 0.75, 충돌 꺼짐, 밝은 색, 프롬프트 숨김")
+    check(n1 == 1 and kind == "info", "처음 문을 열면 안내 토스트(info) 한 번")
+    advance(Config.AIRLOCK.openSeconds + 0.1)
+    check(isClosed(), "6초 뒤 다시 닫힘")
+    -- 문 범위에 캐릭터가 있으면 닫지 않는다
+    signalFor(prompt, "Triggered"):Fire(alice)
+    aliceRoot.CFrame = door.CFrame
+    advance(Config.AIRLOCK.openSeconds + 2)
+    check(isOpen(), "문 범위에 캐릭터가 있으면 열린 채 기다림")
+    aliceRoot.CFrame = base2.Lander.OxygenZone.CFrame
+    advance(Config.AIRLOCK.closeRetrySeconds + 0.1)
+    check(isClosed(), "캐릭터가 비키면 닫힘")
+    -- 착륙선 스폰 지점(문에서 2 안쪽)에 서 있는 캐릭터는 문을 붙잡지 않는다
+    local spawnPart = base2.Lander.SpawnPoint
+    aliceRoot.CFrame = spawnPart.CFrame * CFrame.new(0, spawnPart.Size.Y / 2 + 3, 0)
+    signalFor(prompt, "Triggered"):Fire(alice)
+    advance(Config.AIRLOCK.openSeconds + 0.1)
+    check(isClosed(), "스폰 지점에 서 있어도 6초 뒤 닫힘")
+    check(toasts() == 1, "두 번째부터는 안내 토스트 없음")
+    -- 문과 콘솔 사이 거리: 문 앞에서는 콘솔 프롬프트(거리 8)가 닿지 않는다
+    local console = base2.Lander.RoverConsole
+    local consolePrompt2 = console:FindFirstChildOfClass("ProximityPrompt")
+    check(
+        consolePrompt2 ~= nil
+            and consolePrompt2.MaxActivationDistance == 8
+            and (console.CFrame.Position - door.CFrame.Position).Magnitude >= 14,
+        "복구 콘솔 프롬프트 거리 8, 문 중심에서 14 이상"
+    )
+end
+runAirlockChecks()
 
 -- 마지막 플레이어 퇴장 ---------------------------------------------------
 print("[퇴장]")
@@ -2131,7 +2414,7 @@ do
             size.Z
         )
     )
-    -- 콘솔은 오른쪽 바깥, 상자는 그 뒤: 착륙선 충돌 벽 밖
+    -- 콘솔은 왼쪽 앞 바깥, 상자는 착륙선 뒤: 착륙선 충돌 벽 밖
     local wallOut = 0.5
     local function outsideLander(lo, hi)
         return lo.X > lHi.X + wallOut
@@ -2145,11 +2428,12 @@ do
     local crLo, crHi = boundsOf(kitImport.Crates)
     check(
         outsideLander(cLo3, cHi3)
-            and cLo3.X > lHi.X
+            and cHi3.X < lLo.X
             and outsideLander(crLo, crHi)
-            and crLo.Z > console.CFrame.Position.Z,
-        "복구 콘솔은 착륙선 오른쪽 바깥, 상자는 그 뒤"
+            and crLo.Z > lHi.Z + wallOut,
+        "복구 콘솔은 착륙선 왼쪽 바깥, 상자는 착륙선 뒤"
     )
+    kitHeightChecks(kitImport, "메시 키트")
 end
 -- 스폰은 착륙선 내부 (문에서 2 안쪽)
 local spawnPart = lander2.SpawnPoint
@@ -2277,15 +2561,26 @@ check(
 -- 바위
 local greyRocks = Workspace.DevTerrain.Boulders:GetChildren()
 local importRocks = Workspace2.DevTerrain.Boulders:GetChildren()
-check(#greyRocks == #importRocks, "바위 수 동일 (" .. #importRocks .. ")")
-check(importRocks[1]:IsA("Model") and importRocks[1].Name == "Boulder", "바위가 Rock 메시")
-local firstLo, firstHi = boundsOf(importRocks[1])
-local firstCenter = (firstLo + firstHi) / 2
-local greyFirst = greyRocks[1].CFrame.Position
+-- 바위 위치는 기지 판 크기(메시 키트면 달라짐)를 피해 정해지므로 개수와 규칙만 비교한다
 check(
-    math.abs(firstCenter.X - greyFirst.X) < EPS and math.abs(firstCenter.Z - greyFirst.Z) < EPS,
-    "바위 배치 위치가 그레이박스와 같음"
+    math.abs(#greyRocks - #importRocks) <= 10 and #importRocks >= 200,
+    string.format("바위 수 비슷함 (그레이박스 %d, 메시 %d)", #greyRocks, #importRocks)
 )
+check(importRocks[1]:IsA("Model") and importRocks[1].Name == "Boulder", "바위가 Rock 메시")
+do
+    local importApron = kitImport:FindFirstChild("Apron")
+    local nearest = math.huge
+    for _, rock in importRocks do
+        local lo, hi = boundsOf(rock)
+        for i = 1, 4 do
+            nearest = math.min(nearest, apronDistanceAt(importApron, i, (lo + hi) / 2, Workspace2))
+        end
+    end
+    check(
+        importApron ~= nil and nearest >= 6,
+        string.format("메시 바위도 메시 키트 판 + 6 밖 (최소 %.1f)", nearest)
+    )
+end
 check(
     importRocks[1]:FindFirstChild("Rock1Part1") ~= nil
         and importRocks[2]:FindFirstChild("Rock2Part1") ~= nil,
@@ -2374,6 +2669,20 @@ local function runDecorScenario()
         cHi.X - cLo.X < iceB.Size.X and cHi.Z - cLo.Z < iceB.Size.Z,
         "결정 메시 바닥 넓이가 Part보다 작음"
     )
+    local iceBottom = iceB.CFrame.Position.Y - iceB.Size.Y / 2
+    check(
+        math.abs(cLo.Y - iceBottom) < 1e-3 and math.abs(iceBottom - -1.5) < 1e-3,
+        string.format(
+            "결정 메시와 Ice Part 바닥이 지형 윗면 y -1.5 (결정 %.2f, Part %.2f)",
+            cLo.Y,
+            iceBottom
+        )
+    )
+    -- 얼음 프롬프트는 Part 중심(지형 위 1.5)에 그대로라 로버 운전석에서 닿는다
+    check(
+        iceB.CFrame.Position.Y - iceBottom <= 2,
+        "얼음 프롬프트 기준점이 지면 가까이 (로버 운전석에서 도달)"
+    )
     check(
         allParts(crystal, function(p)
             return p.Anchored and p.CanCollide
@@ -2447,11 +2756,12 @@ local function runDecorScenario()
         math.abs(aLo2.Y - landerTop.Y) < EPS and aHi2.Y - aLo2.Y <= 2.5 + EPS,
         "안테나가 착륙선 위, 높이 2.5 이하"
     )
-    local consoleTop = landerB.RoverConsole.CFrame.Position.Y + landerB.RoverConsole.Size.Y / 2
+    local consolePanel = landerB.ConsolePanel
+    local consoleTop = consolePanel.CFrame.Position.Y + consolePanel.Size.Y / 2
     local caLo, caHi = boundsOf(landerB.ConsoleAntenna)
     check(
         math.abs(caLo.Y - consoleTop) < EPS and caHi.Y - caLo.Y <= 1.5 + EPS,
-        "콘솔 안테나가 콘솔 윗면 위, 높이 1.5 이하"
+        "콘솔 안테나가 콘솔 조작판 위, 높이 1.5 이하"
     )
     local roofDecor = 0
     for _, id in { "B", "C" } do

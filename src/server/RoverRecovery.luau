@@ -138,6 +138,7 @@ function RoverRecovery.attach(base: Model)
         actionText = Config.PROMPT_TEXTS.recoverRover,
         objectText = Config.PROMPT_TEXTS.recoverObject,
         holdDuration = Config.ROVER_RECOVERY.hold,
+        maxDistance = Config.ROVER_RECOVERY.promptDistance,
         enabled = false,
     })
     prompt = newPrompt

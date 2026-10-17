@@ -8,6 +8,7 @@ local Config = require(ReplicatedStorage.Shared.Config)
 local Remotes = require(ReplicatedStorage.Shared.Remotes)
 local Simulation = require(ReplicatedStorage.Shared.Simulation)
 local Types = require(ReplicatedStorage.Shared.Types)
+local Airlock = require(script.Parent.Airlock)
 local Construction = require(script.Parent.Construction)
 local GameClock = require(script.Parent.GameClock)
 local KitImports = require(script.Parent.KitImports)
@@ -27,10 +28,11 @@ local started = false
 local lastSpeedRequest: { [Player]: number } = {} -- 플레이어별 마지막 SetSpeed 수락 시각 (os.clock)
 
 -- 기지가 놓이면 각 시스템을 연결한다.
--- Oxygen은 Construction이 Ghost/Built를 빼기 전에 구역을 모아야 하고,
+-- Oxygen과 Airlock은 Construction이 Ghost/Built를 빼기 전에 구역과 문을 모아야 하고,
 -- RoverRecovery는 물리가 시작되기 전에 로버 홈 위치를 저장해야 한다.
 local function onBasePlaced(base: Model)
     Oxygen.attach(base)
+    Airlock.attach(base)
     RoverRecovery.attach(base)
     SolarPanels.attach(base)
     Construction.attach(base)
@@ -123,6 +125,7 @@ local function restart(leaving: Player?)
     for _, player in Players:GetPlayers() do
         ServerUtil.unseatPlayer(player)
     end
+    Airlock.detach()
     RoverRecovery.detach()
     SolarPanels.detach()
     Construction.detach()
