@@ -1018,9 +1018,53 @@ check(
 
 -- 산소: 야외에 세워 두면 고갈 ---------------------------------------------
 print("[산소]")
+do
+    -- 그레이박스 착륙선: 통로 안은 실내, 오두막 안쪽과 옆은 실외 (메시 경로와 같은 판정)
+    local airlock = base.Lander:FindFirstChild("Airlock")
+    check(
+        airlock ~= nil
+            and airlock:FindFirstChild("TubeFloor") ~= nil
+            and airlock:FindFirstChild("TubeWallLeft") ~= nil
+            and airlock:FindFirstChild("TubeWallRight") ~= nil
+            and airlock:FindFirstChild("TubeRoof") ~= nil
+            and airlock:FindFirstChild("Door") ~= nil
+            and airlock:FindFirstChild("OxygenRing") ~= nil,
+        "그레이박스 착륙선 에어락: 바닥, 양 벽, 윗판, 문, 범위 링"
+    )
+    check(
+        kit.ModulePads.PadA.Built:FindFirstChild("Airlock") ~= nil,
+        "그레이박스 Habitat A 에어락은 Built 안"
+    )
+    local originCFrame = base.PrimaryPart.CFrame
+    local function insideAt(position)
+        root.CFrame = CFrame.new(position)
+        advance(0.5)
+        return lastSent("OxygenUpdate").args[3]
+    end
+    check(insideAt(base.Lander.OxygenZone.CFrame.Position) == true, "통로 안: inside true")
+    check(
+        insideAt(originCFrame * Vector3.new(0, 4, 8)) == false,
+        "착륙선 오두막 안쪽(통로 밖): inside false"
+    )
+    check(insideAt(originCFrame * Vector3.new(8.5, 3, 6)) == false, "착륙선 옆: inside false")
+end
+local function lowWarnings()
+    local total = 0
+    for _, s2 in sent do
+        if s2.name == "Notify" and s2.target == alice and s2.args[1] == Config.TEXTS.lowOxygen then
+            total += 1
+        end
+    end
+    return total
+end
+local lowBefore = lowWarnings()
 root.CFrame = CFrame.new(pad1.CFrame.Position + Vector3.new(0, 3, 200))
 local deathsBefore = state().oxygenDeaths
 advance(61)
+check(
+    lowWarnings() == lowBefore + 1,
+    "산소 20 이하로 떨어지면 경고 한 번 (" .. (lowWarnings() - lowBefore) .. ")"
+)
 check(state().oxygenDeaths == deathsBefore + 1, "60초 야외에서 산소 고갈 1회")
 check(
     (root.CFrame.Position - spawnPoint.CFrame.Position).Magnitude < 6,
@@ -1742,7 +1786,36 @@ check(
     "착륙선 메시: 고정, CanCollide"
 )
 local lLo, lHi = boundsOf(landerVisual)
-check(boxContains(lander2.OxygenZone, lLo, lHi), "착륙선 OxygenZone이 메시를 덮음")
+do
+    local airlock = lander2:FindFirstChild("Airlock")
+    check(
+        airlock ~= nil
+            and airlock:FindFirstChild("Tube") ~= nil
+            and airlock:FindFirstChild("Door") ~= nil
+            and airlock:FindFirstChild("OxygenRing") ~= nil,
+        "메시 착륙선 에어락: Connector 튜브, 문, 범위 링"
+    )
+    local zone = lander2.OxygenZone
+    local tLo, tHi = boundsOf(airlock.Tube)
+    local inTube = (tLo + tHi) / 2
+    local besideDome = Vector3.new(lHi.X + 2, lLo.Y + 3, (lLo.Z + lHi.Z) / 2)
+    check(boxContains(zone, inTube, inTube), "메시 착륙선: 통로 안은 산소 구역")
+    check(
+        not boxContains(zone, besideDome, besideDome),
+        "메시 착륙선: 돔 옆(통로 밖)은 산소 구역 아님"
+    )
+    check(
+        tHi.Z <= lLo.Z + EPS and math.abs((tHi - tLo).Z - 7) < 0.01,
+        "통로가 돔 앞면(스폰 쪽)에서 길이 7로 뻗음"
+    )
+    local ring = airlock.OxygenRing
+    check(
+        math.abs(ring.Transparency - 0.6) < EPS
+            and ring.Material ~= roblox.Enum.Material.Neon
+            and not ring.CanCollide,
+        "범위 링: 투명도 0.6, Neon 아님, 충돌 없음"
+    )
+end
 do
     local size = lHi - lLo
     check(
@@ -1778,30 +1851,88 @@ check(
     "착륙선 OxygenZone이 스폰된 캐릭터 위치를 덮음"
 )
 
--- Habitat A 외형
-local padA2 = kitImport.ModulePads.PadA
-local builtA = padA2.Built
-local aLo, aHi = boundsOf(builtA)
-local padPart = padA2.Pad
-local padTop = padPart.CFrame.Position.Y + padPart.Size.Y / 2
-check(math.abs(aLo.Y - padTop) < EPS, "Habitat A 바닥이 Pad 윗면")
-check(
-    aHi.X - aLo.X <= padPart.Size.X + EPS and aHi.Z - aLo.Z <= padPart.Size.Z + EPS,
-    string.format("Habitat A 폭이 패드 안 (%.1f x %.1f)", aHi.X - aLo.X, aHi.Z - aLo.Z)
-)
-check(
-    allParts(builtA, function(p)
-        return p.Anchored and p.CanCollide
-    end),
-    "Built 메시: 고정, CanCollide"
-)
-check(
-    allParts(padA2.Ghost, function(p)
-        return math.abs(p.Transparency - Config.GHOST_TRANSPARENCY) < EPS and p.CanCollide == false
-    end),
-    "Ghost: 같은 메시, 투명도 0.7, CanCollide 꺼짐"
-)
-check(boxContains(padA2.OxygenZone, aLo, aHi), "PadA OxygenZone이 Built를 덮음")
+-- Habitat A 외형 (Built 안의 에어락은 따로 본다)
+do
+    local padA2 = kitImport.ModulePads.PadA
+    local builtA = padA2.Built
+    local airlock = builtA:FindFirstChild("Airlock")
+    local function habitatOnly(fn)
+        for _, d in builtA:GetDescendants() do
+            if d:IsA("BasePart") and not (airlock and d:IsDescendantOf(airlock)) then
+                fn(d)
+            end
+        end
+    end
+    local aLo = Vector3.new(math.huge, math.huge, math.huge)
+    local aHi = -aLo
+    local allStatic, count = true, 0
+    habitatOnly(function(part)
+        count += 1
+        local h = part.Size / 2
+        for _, sx in { -1, 1 } do
+            for _, sy in { -1, 1 } do
+                for _, sz in { -1, 1 } do
+                    local p = part.CFrame * Vector3.new(sx * h.X, sy * h.Y, sz * h.Z)
+                    aLo = Vector3.new(
+                        math.min(aLo.X, p.X),
+                        math.min(aLo.Y, p.Y),
+                        math.min(aLo.Z, p.Z)
+                    )
+                    aHi = Vector3.new(
+                        math.max(aHi.X, p.X),
+                        math.max(aHi.Y, p.Y),
+                        math.max(aHi.Z, p.Z)
+                    )
+                end
+            end
+        end
+        if not (part.Anchored and part.CanCollide) then
+            allStatic = false
+        end
+    end)
+    local padPart = padA2.Pad
+    local padTop = padPart.CFrame.Position.Y + padPart.Size.Y / 2
+    check(math.abs(aLo.Y - padTop) < EPS, "Habitat A 바닥이 Pad 윗면")
+    check(
+        aHi.X - aLo.X <= padPart.Size.X + EPS and aHi.Z - aLo.Z <= padPart.Size.Z + EPS,
+        string.format("Habitat A 폭이 패드 안 (%.1f x %.1f)", aHi.X - aLo.X, aHi.Z - aLo.Z)
+    )
+    check(count > 0 and allStatic, "Built 메시: 고정, CanCollide")
+    check(
+        allParts(padA2.Ghost, function(p)
+            return math.abs(p.Transparency - Config.GHOST_TRANSPARENCY) < EPS
+                and p.CanCollide == false
+        end),
+        "Ghost: 같은 메시, 투명도 0.7, CanCollide 꺼짐"
+    )
+    check(
+        airlock ~= nil
+            and airlock:FindFirstChild("Tube") ~= nil
+            and airlock:FindFirstChild("Door") ~= nil
+            and airlock:FindFirstChild("OxygenRing") ~= nil
+            and padA2.Ghost:FindFirstChild("Airlock") == nil,
+        "Habitat A 에어락은 Built 안 (완공 때 함께 나타남, Ghost에는 없음)"
+    )
+    local tLo, tHi = boundsOf(airlock.Tube)
+    local inTube = (tLo + tHi) / 2
+    local besideHabitat = Vector3.new(aHi.X + 2, aLo.Y + 3, (aLo.Z + aHi.Z) / 2)
+    check(boxContains(padA2.OxygenZone, inTube, inTube), "Habitat A: 통로 안은 산소 구역")
+    check(
+        not boxContains(padA2.OxygenZone, besideHabitat, besideHabitat),
+        "Habitat A: 건물 옆(통로 밖)은 산소 구역 아님"
+    )
+    -- 통로는 패드 앞(-Z), Farm B는 +Z 쪽이라 A-B 연결 통로와 겹치지 않는다
+    local padB = kitImport.ModulePads.PadB.Pad.CFrame.Position
+    check(
+        tHi.Z <= aLo.Z + EPS and padB.Z > aHi.Z,
+        string.format(
+            "Habitat A 에어락은 앞쪽(z %.1f ~ %.1f), Farm B는 뒤쪽(z %.1f): A-B 통로와 겹치지 않음",
+            tLo.Z,
+            tHi.Z,
+            padB.Z
+        )
+    )
+end
 check(
     kitImport.ModulePads.PadB.Built:FindFirstChild("Greenhouse") ~= nil,
     "빈 HabitatB는 그레이박스"

@@ -15,6 +15,7 @@ local group
 local fill
 local label
 local insideTag
+local hintLabel
 local flashTween = nil
 
 local function setFlashing(flashing)
@@ -63,14 +64,26 @@ function OxygenBar.init(_ctx)
         Name = "InsideTag",
         AnchorPoint = Vector2.new(1, 1),
         Position = UDim2.new(0.5, 170, 1, -54),
-        Size = UDim2.fromOffset(52, 22),
+        Size = UDim2.fromOffset(68, 22),
         BackgroundTransparency = 0,
-        BackgroundColor3 = Colors.accent,
-        Text = "실내",
-        Preset = "caption",
+        BackgroundColor3 = Colors.water,
+        TextColor3 = Colors.bg,
+        Text = "에어락",
+        Preset = "badge",
         Visible = false,
         Parent = gui,
     }, { UI.corner(6) })
+    hintLabel = UI.create("TextLabel", {
+        Name = "AirlockHint",
+        AnchorPoint = Vector2.new(0.5, 1),
+        Position = UDim2.fromScale(0.5, 1),
+        Size = UDim2.fromOffset(340, 18),
+        Preset = "caption",
+        Text = "가까운 에어락으로 이동하세요",
+        TextColor3 = Colors.oxygen,
+        Visible = false,
+        Parent = gui,
+    })
 end
 
 function OxygenBar.update(oxygen, max, inside)
@@ -78,6 +91,7 @@ function OxygenBar.update(oxygen, max, inside)
     fill.Size = UDim2.fromScale(ratio, 1)
     label.Text = string.format("산소 %d", math.floor(oxygen + 0.5))
     insideTag.Visible = inside
+    hintLabel.Visible = not inside and oxygen <= WARN_BELOW
     group.GroupTransparency = if inside then 0.5 else 0
     setFlashing(oxygen <= WARN_BELOW)
 end

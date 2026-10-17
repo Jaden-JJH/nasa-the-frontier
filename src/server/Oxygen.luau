@@ -21,6 +21,7 @@ type Record = {
     lastSentAt: number,
     lastSentOxygen: number,
     lastSentInside: boolean,
+    lowWarned: boolean, -- 산소 부족 경고를 이번 하락에서 이미 보냈는지
 }
 type Zone = { part: BasePart, moduleId: string? }
 
@@ -40,6 +41,7 @@ local function newRecord(): Record
         lastSentAt = 0,
         lastSentOxygen = -1,
         lastSentInside = false,
+        lowWarned = false,
     }
 end
 
@@ -134,6 +136,15 @@ local function step(dt: number, now: number)
             local rate = if inside then o.refillPerSecond else -o.drainPerSecond
             record.oxygen = math.clamp(record.oxygen + rate * dt, 0, o.max)
             record.inside = inside
+            -- 산소 부족 경고: 하락할 때 한 번, lowWarning 위로 회복하면 다시 경고할 수 있다
+            if record.oxygen <= o.lowWarning then
+                if not record.lowWarned then
+                    record.lowWarned = true
+                    ResourceState.notify(player, Config.TEXTS.lowOxygen, "warn")
+                end
+            else
+                record.lowWarned = false
+            end
             if record.oxygen <= 0 then
                 onDepleted(player, record, now)
                 -- 페널티로 상태가 바뀌었으므로 남은 플레이어는 새 상태로 계산

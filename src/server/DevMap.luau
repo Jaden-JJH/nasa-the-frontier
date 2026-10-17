@@ -87,7 +87,6 @@ local EMBED = 1 -- 패드 밖 지면(패드 윗면보다 0.5 낮음)까지 닿�
 
 local LANDER_CENTER = Vector3.new(0, 0, 6)
 local LANDER_SIZE = Vector3.new(14, 10, 14) -- 폭, 높이, 깊이
-local SPAWN_POSITION = Vector3.new(0, 0, -5)
 local ROVER_CENTER = Vector3.new(0, 0, -16)
 -- 로버 주차 위치 옆. 운전석에 앉은 채 하역 프롬프트(활성 거리 12)가 닿도록 로버에서 약 10 studs
 local WATER_TANK_POSITION = Vector3.new(-10, 0, -14)
@@ -151,13 +150,11 @@ local ROVER_SEAT_MAX_HEIGHT = 4.5 -- 좌석 중심 높이 상한 (메시 바닥 
 local ROVER_SEAT_FROM_FRONT_RATIO = 0.35 -- 좌석 중심 = 메시 앞쪽 끝에서 메시 길이의 이 비율만큼 뒤
 local ROVER_SHOW_RIG_WHEELS = false -- 메시를 쓸 때 물리 바퀴 원기둥을 보일지 (메시 바퀴와 겹치므로 기본은 숨김)
 local LANDER_VISUAL_BOX = Vector3.new(14, 40, 14) -- 폭 약 14, 높이는 원본 비율대로 (높이 상한은 사실상 없음)
-local LANDER_ZONE_MARGIN = 4 -- 착륙선 메시 경계 상자 바깥으로 산소 구역을 넓히는 거리
 local MODULE_VISUAL_BOX = {
     A = Vector3.new(17, 12, 17),
     B = Vector3.new(17, 10, 17),
     C = Vector3.new(20, 16, 20),
 }
-local HABITAT_ZONE_MARGIN = 4 -- Habitat 메시 경계 상자 바깥으로 산소 구역을 넓히는 거리
 local PANEL_FILL = 0.95 -- 패널 바닥이 슬롯 x, z의 이 비율을 채운다 (메시와 그레이박스 공통)
 local PANEL_MAX_HEIGHT = 20 -- 메시 패널 높이 상한 (사실상 없음, 높이는 원본 비율대로)
 local PANEL_FRAME_HEIGHT, PANEL_GLASS_HEIGHT = 0.2, 0.3 -- 그레이박스 패널 틀과 판 두께
@@ -203,6 +200,9 @@ local COLORS = {
     panel = Color3.fromRGB(25, 40, 95),
     panelFrame = Color3.fromRGB(150, 150, 155),
     console = Color3.fromRGB(255, 140, 60),
+    airlockTube = Color3.fromRGB(table.unpack(Config.AIRLOCK.tubeColor)),
+    airlockDoor = Color3.fromRGB(table.unpack(Config.AIRLOCK.doorColor)),
+    airlockRing = Color3.fromRGB(table.unpack(Config.AIRLOCK.ringColor)),
 }
 
 -- 하늘 (Lighting에 Sky가 없을 때만 만든다). 자정에는 Roblox가 달 자리에 MoonTexture를 그리므로
@@ -1064,11 +1064,115 @@ end
 
 -- 기지 키트 -------------------------------------------------------------
 
+-- 에어락 통로 -------------------------------------------------------------
+-- 돔 앞면(faceZ)에서 -Z(앞쪽)로 뻗는 통로. KitImports.Connector 메시가 있으면 길이에 맞춰 스케일한 튜브,
+-- 없으면 바닥, 양 벽, 윗판의 ㄷ자 통로. 돔 쪽 끝에 어두운 문 판, 바닥에 하늘색 범위 링.
+-- 반환: 산소 구역 최소점, 최대점 (통로 내부 + 문 지나 zoneDoorDepth), 통로 안 걷는 바닥 높이
+local function buildAirlock(
+    parent: Instance,
+    centerX: number,
+    faceZ: number,
+    floorY: number
+): (Vector3, Vector3, number)
+    local a = Config.AIRLOCK
+    local model = makeModel("Airlock", parent)
+    local midZ = faceZ - a.length / 2
+    local walkY = floorY
+    local tube, yawSet = KitImports.take("Connector")
+    if tube then
+        if not yawSet then
+            KitImports.alignLongAxis(tube, "Z")
+        end
+        KitImports.fitLength(tube, a.length, Vector3.new(centerX, floorY, midZ))
+        -- 열린 튜브: 플레이어가 안으로 들어갈 수 있게 충돌 없음
+        KitImports.setStatic(tube, false)
+        tube.Name = "Tube"
+        tube.Parent = model
+    else
+        local t = a.wallThickness
+        -- 바닥은 지면까지 내려 묻는다 (패드 밖에서도 뜨지 않게)
+        local floorBottom = FLOOR_Y - EMBED
+        local floorTop = floorY + t
+        makePart({
+            name = "TubeFloor",
+            size = Vector3.new(a.width, floorTop - floorBottom, a.length),
+            cframe = CFrame.new(centerX, (floorTop + floorBottom) / 2, midZ),
+            color = COLORS.airlockTube,
+            material = Enum.Material.DiamondPlate,
+            parent = model,
+        })
+        for _, side in { -1, 1 } do
+            makePart({
+                name = if side < 0 then "TubeWallLeft" else "TubeWallRight",
+                size = Vector3.new(t, a.height, a.length),
+                cframe = CFrame.new(
+                    centerX + side * (a.width / 2 - t / 2),
+                    floorY + a.height / 2,
+                    midZ
+                ),
+                color = COLORS.airlockTube,
+                material = Enum.Material.Metal,
+                canCollide = false,
+                parent = model,
+            })
+        end
+        makePart({
+            name = "TubeRoof",
+            size = Vector3.new(a.width, t, a.length),
+            cframe = CFrame.new(centerX, floorY + a.height - t / 2, midZ),
+            color = COLORS.airlockTube,
+            material = Enum.Material.Metal,
+            canCollide = false,
+            parent = model,
+        })
+        walkY = floorTop
+    end
+    -- 돔 쪽 끝의 문
+    local door = makePart({
+        name = "Door",
+        size = Vector3.new(
+            a.width - 2 * a.wallThickness,
+            a.height - a.wallThickness,
+            a.doorThickness
+        ),
+        cframe = CFrame.new(
+            centerX,
+            floorY + (a.height - a.wallThickness) / 2,
+            faceZ - a.doorThickness / 2
+        ),
+        color = COLORS.airlockDoor,
+        material = Enum.Material.SmoothPlastic,
+        transparency = a.doorTransparency,
+        canCollide = false,
+        parent = model,
+    })
+    door.CanQuery = false
+    -- 바닥 범위 링 (얇은 원통을 눕힌다)
+    local diameter = a.length + 2 * a.ringMargin
+    local ring = makePart({
+        name = "OxygenRing",
+        shape = Enum.PartType.Cylinder,
+        size = Vector3.new(a.ringThickness, diameter, diameter),
+        cframe = CFrame.new(centerX, floorY + a.ringThickness / 2, midZ)
+            * CFrame.Angles(0, 0, math.rad(90)),
+        color = COLORS.airlockRing,
+        material = Enum.Material.SmoothPlastic,
+        transparency = a.ringTransparency,
+        canCollide = false,
+        parent = model,
+    })
+    ring.CanQuery = false
+    ring.CanTouch = false
+    ring.CastShadow = false
+    local zoneMin = Vector3.new(centerX - a.width / 2, floorY, faceZ - a.length)
+    local zoneMax = Vector3.new(centerX + a.width / 2, floorY + a.height, faceZ + a.zoneDoorDepth)
+    return zoneMin, zoneMax, walkY
+end
+
 local function buildLander(kit: Model)
     local lander = makeModel("Lander", kit)
-    local zoneFront = SPAWN_POSITION.Z - 3 -- 산소 구역은 문 앞 스폰 위치까지 덮는다
-    local zoneMin: Vector3
-    local zoneMax: Vector3
+    local faceZ: number -- 착륙선 앞면 (에어락이 붙는 자리, 스폰 쪽 = -Z)
+    local centerX: number
     local roofCenter: Vector3 -- 지붕 장식 기준 (윗면 중심)
     local roofHalfWidth: number
     local visual = KitImports.take("Lander")
@@ -1086,34 +1190,28 @@ local function buildLander(kit: Model)
             part.CanCollide = true
         end)
         visual.Parent = lander
-        -- 메시 경계 상자를 덮고 바깥으로 여유를 둔 산소 구역
         local lo, hi = KitImports.bounds(visual)
-        local m = LANDER_ZONE_MARGIN
-        zoneMin = Vector3.new(lo.X - m, floorTop, math.min(lo.Z - m, zoneFront))
-        zoneMax = Vector3.new(hi.X + m, math.max(hi.Y, floorTop + LANDER_SIZE.Y), hi.Z + m)
+        faceZ = lo.Z
+        centerX = (lo.X + hi.X) / 2
         roofCenter = Vector3.new((lo.X + hi.X) / 2, hi.Y, (lo.Z + hi.Z) / 2)
         roofHalfWidth = (hi.X - lo.X) / 2
     else
         local floorTop =
             buildHut(lander, LANDER_CENTER, LANDER_SIZE, COLORS.lander, Enum.Material.Metal)
-        -- 실내와 문 앞(스폰 위치 포함)을 덮는 산소 구역
-        local halfInside = LANDER_SIZE.X / 2 - WALL
-        zoneMin = Vector3.new(LANDER_CENTER.X - halfInside, floorTop, zoneFront)
-        zoneMax = Vector3.new(
-            LANDER_CENTER.X + halfInside,
-            floorTop + LANDER_SIZE.Y,
-            LANDER_CENTER.Z + LANDER_SIZE.Z / 2 - WALL
-        )
+        faceZ = LANDER_CENTER.Z - LANDER_SIZE.Z / 2
+        centerX = LANDER_CENTER.X
         roofCenter = Vector3.new(LANDER_CENTER.X, floorTop + LANDER_SIZE.Y + WALL, LANDER_CENTER.Z)
         roofHalfWidth = LANDER_SIZE.X / 2
     end
     lander.PrimaryPart = lander:FindFirstChild("Floor") :: BasePart
+    -- 에어락 통로 (스폰 쪽 앞면). 산소 구역은 통로 안만이고, 스폰 지점은 통로 가운데라 스폰하면 실내다
+    local zoneMin, zoneMax, walkY = buildAirlock(lander, centerX, faceZ, FLOOR_Y)
     makeMarker("OxygenZone", zoneMax - zoneMin, CFrame.new((zoneMin + zoneMax) / 2), lander)
 
     local spawnPoint = makePart({
         name = "SpawnPoint",
         size = Vector3.new(4, 0.2, 4),
-        cframe = CFrame.new(SPAWN_POSITION.X, FLOOR_Y + 0.1, SPAWN_POSITION.Z),
+        cframe = CFrame.new(centerX, walkY + 0.1, faceZ - Config.AIRLOCK.length / 2),
         color = COLORS.spawn,
         material = Enum.Material.Neon,
         transparency = 0.6,
@@ -1237,11 +1335,9 @@ local function buildModulePads(kit: Model)
             visual.Name = "Built"
             visual.Parent = padModel
             if id == Config.OXYGEN.habitatModule then
-                -- Built 경계 상자를 덮고 바깥으로 여유를 둔 산소 구역
+                -- 패드 앞(-Z, A-B 통로 반대편)에 에어락. 산소 구역은 통로 안만 (완공 전에는 Built와 함께 숨음)
                 local lo, hi = KitImports.bounds(visual)
-                local m = HABITAT_ZONE_MARGIN
-                local zoneMin = Vector3.new(lo.X - m, top, lo.Z - m)
-                local zoneMax = Vector3.new(hi.X + m, hi.Y + m, hi.Z + m)
+                local zoneMin, zoneMax = buildAirlock(visual, (lo.X + hi.X) / 2, lo.Z, top)
                 makeMarker(
                     "OxygenZone",
                     zoneMax - zoneMin,
@@ -1255,18 +1351,14 @@ local function buildModulePads(kit: Model)
         buildGhost(padModel, layout.center, top, layout.body)
         local built = makeModel("Built", padModel)
         if id == Config.OXYGEN.habitatModule then
-            -- Habitat A: 안에 들어갈 수 있는 건물 + 산소 구역
-            local hutTop = buildHut(
-                built,
-                layout.center,
-                layout.body,
-                COLORS.habitat,
-                Enum.Material.SmoothPlastic
-            )
+            -- Habitat A: 건물 + 앞면 에어락 (메시 경로와 같은 판정). 산소 구역은 통로 안만
+            buildHut(built, layout.center, layout.body, COLORS.habitat, Enum.Material.SmoothPlastic)
+            local zoneMin, zoneMax =
+                buildAirlock(built, layout.center.X, layout.center.Z - layout.body.Z / 2, top)
             makeMarker(
                 "OxygenZone",
-                Vector3.new(layout.body.X - 2 * WALL, layout.body.Y, layout.body.Z - 2 * WALL),
-                CFrame.new(layout.center.X, hutTop + layout.body.Y / 2, layout.center.Z),
+                zoneMax - zoneMin,
+                CFrame.new((zoneMin + zoneMax) / 2),
                 padModel
             )
         elseif id == "B" then

@@ -127,6 +127,7 @@ local Config = {
         tickSeconds = 0.2, -- 서버 산소 계산 주기
         maxUpdatesPerSecond = 5, -- OxygenUpdate 송신 상한
         habitatModule = "A", -- 산소 회복 구역이 있어야 하는 모듈
+        lowWarning = 20, -- 이 값 이하로 떨어지면 한 번 경고 (이 값 위로 회복하면 다시 경고 가능)
     },
 
     -- 실패와 승리
@@ -146,6 +147,23 @@ local Config = {
 
     -- 고스트 모델 투명도 (GDD 6절)
     GHOST_TRANSPARENCY = 0.7,
+
+    -- 에어락 통로: 착륙선과 Habitat A 앞면에 붙는 통로. 산소 구역 = 통로 내부 + 문 앞 zoneDoorDepth
+    AIRLOCK = {
+        length = 7, -- 돔 앞면에서 바깥으로 뻗는 길이
+        width = 5,
+        height = 5,
+        wallThickness = 0.4, -- 그레이박스 바닥, 벽, 윗판 두께
+        zoneDoorDepth = 1, -- 산소 구역이 문을 지나 돔 쪽으로 더 들어가는 깊이
+        tubeColor = { 225, 225, 230 },
+        doorColor = { 40, 44, 52 }, -- 돔 쪽 끝의 어두운 문 판
+        doorThickness = 0.3,
+        doorTransparency = 0.3,
+        ringColor = { 150, 215, 255 }, -- 바닥의 하늘색 범위 표시
+        ringTransparency = 0.6,
+        ringThickness = 0.1,
+        ringMargin = 1.5, -- 링 지름 = 통로 길이 + 2 x 여백
+    },
 
     -- 튜토리얼: 이 날이 되면 패널 설치 안내를 건너뛰고 로버 탑승 안내로 넘어간다
     TUTORIAL_BOARD_DAY = 2,
@@ -275,6 +293,8 @@ local Config = {
         roverRecovered = "로버가 복구되었습니다",
 
         oxygenDepleted = "산소 고갈. 착륙선에서 구조되었습니다",
+        airlock = "에어락",
+        lowOxygen = "산소 부족. 가까운 에어락으로 이동하세요",
         oxygenDepletedOther = "%s 대원의 산소가 고갈되었습니다. Food -%d, Water -%d",
 
         modulesStalled = "전력 부족으로 모듈이 정지했습니다",
