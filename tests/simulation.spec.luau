@@ -761,9 +761,11 @@ return function(t)
         end
     )
 
-    t.test("현실적 봇: Farm 가동 전에 식량이 바닥나지 않는다", function()
+    -- START.food 35 (2026-10-18 사용자 결정): Farm 전 최저 식량 8 ~ 11 (원정 6일 기준).
+    -- 산소 고갈이나 캐릭터 초기화(식량 -1)를 5번 겪어도 Farm 전에 바닥나지 않는 여유를 요구한다
+    t.test("현실적 봇: Farm 가동 전 식량 여유 5 이상", function()
         for index, r in flat do
-            t.truthy(r.minFood > 0, Config.SITES[index].name .. " 최저 식량 " .. r.minFood)
+            t.truthy(r.minFood >= 5, Config.SITES[index].name .. " 최저 식량 " .. r.minFood)
         end
     end)
 
