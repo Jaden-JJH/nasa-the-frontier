@@ -5,12 +5,18 @@
 --   ServerStorage.BaseKit이 없으면: 착륙선, 로버, 솔라 필드, 모듈 패드 3개, 물탱크
 --   ServerStorage.PanelTemplate이 없으면: 태양광 패널 1장
 -- 게임 수치(얼음 거리, 바위 수, 로버 성능)는 Config에서 오고, 아래 상수는 배치와 모양만 정한다.
+--
+-- 간편 경로 (KitImports): 편집 중 Workspace.KitImports에 Rover, Lander, HabitatA/B/C, Panel, Rock1.. 메시를
+-- 넣어 두면 해당 부분의 외형만 그 메시로 바꾼다. 판정과 물리 파트(Origin, DriverSeat, 바퀴 힌지, SpawnPoint,
+-- OxygenZone, Pad, Ghost, Built, 속성, 프롬프트 대상)의 이름과 구조는 그레이박스와 똑같다.
+-- KitImports 폴더는 서버 시작 시 ServerStorage로 옮겨져 플레이 중에는 보이지 않는다 (KitImports.luau).
 
 local Lighting = game:GetService("Lighting")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerStorage = game:GetService("ServerStorage")
 
 local Config = require(ReplicatedStorage.Shared.Config)
+local KitImports = require(script.Parent.KitImports)
 
 local DevMap = {}
 
@@ -44,6 +50,7 @@ local CORRIDOR_HALF_WIDTH = 45 -- 패드와 얼음 사이 통로 반폭
 local CORRIDOR_START, CORRIDOR_END = 0.12, 0.92 -- 통로 구간 (패드 0 -> 얼음 1)
 local BOULDER_MIN, BOULDER_MAX = 3, 8
 local BOULDER_ATTEMPTS = 20
+local BOULDER_EMBED_RATIO = 0.2 -- 바위 높이의 이 비율만큼 지면에 묻는다
 
 -- 기지 키트 배치 상수 (Origin 기준 로컬 좌표, 앞쪽 = -Z = 얼음 방향) -------
 
@@ -103,6 +110,22 @@ local WHEEL_CORNERS: { { x: number, z: number, tag: string } } = {
     { x = -1, z = 1, tag = "RL" },
     { x = 1, z = 1, tag = "RR" },
 }
+
+-- KitImports 외형 목표 크기 (studs, 폭 X, 높이 Y, 깊이 Z). 메시는 이 상자 안에 들어가게 균일 스케일한다
+local ROVER_SEAT_SIZE = Vector3.new(2, 1, 2)
+local ROVER_VISUAL_BOX = Vector3.new(8.8, 3.5, 11) -- 바퀴 포함 리그 크기. 높이를 낮게 두어 좌석 높이를 제한
+local ROVER_SHOW_RIG_WHEELS = false -- 메시를 쓸 때 물리 바퀴 원기둥을 보일지 (메시 바퀴와 겹치므로 기본은 숨김)
+local LANDER_VISUAL_BOX = Vector3.new(14, 18, 14) -- 그레이박스 착륙선 바닥 넓이 안
+local LANDER_ZONE_MARGIN = 4 -- 착륙선 메시 경계 상자 바깥으로 산소 구역을 넓히는 거리
+local MODULE_VISUAL_BOX = {
+    A = Vector3.new(17, 12, 17),
+    B = Vector3.new(17, 10, 17),
+    C = Vector3.new(20, 16, 20),
+}
+local HABITAT_ZONE_MARGIN = 4 -- Habitat 메시 경계 상자 바깥으로 산소 구역을 넓히는 거리
+local PANEL_VISUAL_BOX = Vector3.new(4.8, 1.5, 3.4) -- 슬롯(5 x 3.5) 안
+local ROCK_BASE_SIZE = 5.5 -- 바위 메시의 기준 크기 (가장 긴 변)
+local ROCK_SCALE_MIN, ROCK_SCALE_MAX = 0.7, 1.4 -- 기준 크기에 곱하는 무작위 배율
 
 -- 색상
 local COLORS = {
@@ -227,16 +250,9 @@ local function slabCFrame(base: CFrame, position: Vector3, height: number): (CFr
     return base * CFrame.new(position.X, FLOOR_Y + height - total / 2, position.Z), total
 end
 
--- 문이 앞쪽(-Z)에 난 상자형 건물 (바닥, 지붕, 벽 4면). 반환: 바닥 윗면 높이
-local function buildHut(
-    parent: Instance,
-    center: Vector3,
-    size: Vector3,
-    color: Color3,
-    material: Enum.Material
-): number
-    local floorHeight = WALL
-    local floorCFrame, floorTotal = slabCFrame(CFrame.identity, center, floorHeight)
+-- 건물 바닥 슬래브 "Floor". 반환: 바닥 윗면 높이
+local function buildFloor(parent: Instance, center: Vector3, size: Vector3): number
+    local floorCFrame, floorTotal = slabCFrame(CFrame.identity, center, WALL)
     makePart({
         name = "Floor",
         size = Vector3.new(size.X, floorTotal, size.Z),
@@ -245,7 +261,18 @@ local function buildHut(
         material = Enum.Material.DiamondPlate,
         parent = parent,
     })
-    local floorTop = FLOOR_Y + floorHeight
+    return FLOOR_Y + WALL
+end
+
+-- 문이 앞쪽(-Z)에 난 상자형 건물 (바닥, 지붕, 벽 4면). 반환: 바닥 윗면 높이
+local function buildHut(
+    parent: Instance,
+    center: Vector3,
+    size: Vector3,
+    color: Color3,
+    material: Enum.Material
+): number
+    local floorTop = buildFloor(parent, center, size)
     local wallY = floorTop + size.Y / 2
     local half = size / 2
 
@@ -327,7 +354,10 @@ local function isClear(position: Vector3, padPositions: { Vector3 }): boolean
     return math.abs(position.X) < halfX - BOULDER_MAX and math.abs(position.Z) < halfZ - BOULDER_MAX
 end
 
-local function makeBoulder(rng: Random, position: Vector3, parent: Instance)
+type RockSet = { templates: { Model }, used: number }
+
+-- 바위 1개. 난수는 메시 여부와 관계없이 같은 순서로 6개를 써서 바위 위치 배치가 항상 같다
+local function makeBoulder(rng: Random, position: Vector3, parent: Instance, rocks: RockSet)
     local s = rng:NextNumber(BOULDER_MIN, BOULDER_MAX)
     local size = Vector3.new(s, s * rng:NextNumber(0.5, 0.9), s * rng:NextNumber(0.7, 1.2))
     local rotation = CFrame.Angles(
@@ -335,19 +365,54 @@ local function makeBoulder(rng: Random, position: Vector3, parent: Instance)
         math.rad(rng:NextNumber(0, 360)),
         math.rad(rng:NextNumber(-15, 15))
     )
+    if #rocks.templates > 0 then
+        -- Rock1, Rock2 ... 순환, 기준 크기의 0.7 ~ 1.4배
+        rocks.used += 1
+        local rock = rocks.templates[(rocks.used - 1) % #rocks.templates + 1]:Clone()
+        local t = (s - BOULDER_MIN) / (BOULDER_MAX - BOULDER_MIN)
+        KitImports.scaleBy(rock, ROCK_SCALE_MIN + t * (ROCK_SCALE_MAX - ROCK_SCALE_MIN))
+        KitImports.rotateAboutCenter(rock, rotation)
+        local lo, hi = KitImports.bounds(rock)
+        local height = hi.Y - lo.Y
+        KitImports.placeBottom(
+            rock,
+            Vector3.new(position.X, GROUND_TOP - height * BOULDER_EMBED_RATIO, position.Z)
+        )
+        rock.Name = "Boulder"
+        rock.Parent = parent
+        return
+    end
     makePart({
         name = "Boulder",
         size = size,
-        cframe = CFrame.new(position.X, GROUND_TOP + size.Y * 0.3, position.Z) * rotation,
+        cframe = CFrame.new(
+            position.X,
+            GROUND_TOP + size.Y * (0.5 - BOULDER_EMBED_RATIO),
+            position.Z
+        ) * rotation,
         color = COLORS.boulder,
         material = Enum.Material.Basalt,
         parent = parent,
     })
 end
 
+-- KitImports의 바위 메시를 기준 크기로 맞춘 원본 목록
+local function prepareRocks(): RockSet
+    local templates = KitImports.takeRocks()
+    for _, rock in templates do
+        KitImports.fitInto(rock, Vector3.one * ROCK_BASE_SIZE, Vector3.zero)
+        KitImports.forEachPart(rock, function(part)
+            part.Anchored = true
+            part.CanCollide = true
+        end)
+    end
+    return { templates = templates, used = 0 }
+end
+
 local function buildBoulders(terrain: Instance, padPositions: { Vector3 })
     local rng = Random.new(Config.DEV_MAP.seed)
     local folder = makeFolder("Boulders", terrain)
+    local rocks = prepareRocks()
     -- 패드와 얼음 사이 통로 (지형 위험)
     for index, padPosition in padPositions do
         local ice = ICE_POSITIONS[PAD_LAYOUT[index].ice]
@@ -359,7 +424,7 @@ local function buildBoulders(terrain: Instance, padPositions: { Vector3 })
                 local lateral = rng:NextNumber(-CORRIDOR_HALF_WIDTH, CORRIDOR_HALF_WIDTH)
                 local position = padPosition + along * t + side * lateral
                 if isClear(position, padPositions) then
-                    makeBoulder(rng, position, folder)
+                    makeBoulder(rng, position, folder, rocks)
                     break
                 end
             end
@@ -374,7 +439,7 @@ local function buildBoulders(terrain: Instance, padPositions: { Vector3 })
                 rng:NextNumber(-GROUND_SIZE.Z / 2, GROUND_SIZE.Z / 2)
             )
             if isClear(position, padPositions) then
-                makeBoulder(rng, position, folder)
+                makeBoulder(rng, position, folder, rocks)
                 break
             end
         end
@@ -537,19 +602,6 @@ local function buildRover(kit: Model)
     chassis.CustomPhysicalProperties = PhysicalProperties.new(rv.chassisDensity, 0.3, 0, 1, 1)
     rover.PrimaryPart = chassis
 
-    local seat = Instance.new("VehicleSeat")
-    seat.Name = "DriverSeat"
-    seat.Size = Vector3.new(2, 1, 2)
-    seat.CFrame = chassisCFrame * CFrame.new(0, CHASSIS_SIZE.Y / 2 + 0.5, 1.5)
-    seat.Color = COLORS.landerTrim
-    seat.Anchored = false
-    seat.MaxSpeed = rv.maxSpeed
-    seat.Torque = rv.torque
-    seat.TurnSpeed = rv.turnSpeed
-    seat:SetAttribute("Tank", 0)
-    seat.Parent = rover
-    weld(chassis, seat)
-
     local tankBox = makePart({
         name = "WaterTankBox",
         size = Vector3.new(4, 2, 2),
@@ -563,6 +615,7 @@ local function buildRover(kit: Model)
 
     local wheelProps = PhysicalProperties.new(0.7, rv.wheelFriction, 0, 100, 1)
     local upAxis = CFrame.fromMatrix(Vector3.zero, Vector3.yAxis, Vector3.xAxis)
+    local wheels: { BasePart } = {}
 
     for _, corner in WHEEL_CORNERS do
         local sx, sz, tag = corner.x, corner.z, corner.tag
@@ -581,6 +634,7 @@ local function buildRover(kit: Model)
         })
         wheel.CustomPhysicalProperties = wheelProps
         noCollide(chassis, wheel, wheel)
+        table.insert(wheels, wheel)
 
         local isFront = sz < 0 -- 앞쪽 = -Z
         if isFront then
@@ -624,26 +678,99 @@ local function buildRover(kit: Model)
             )
         end
     end
+
+    -- 외형 메시 (KitImports.Rover). 물리 리그는 그대로 두고 메시를 얹어 섀시에 용접한다
+    local seatCFrame = chassisCFrame
+        * CFrame.new(0, CHASSIS_SIZE.Y / 2 + ROVER_SEAT_SIZE.Y / 2, 1.5)
+    local visual, yawSet = KitImports.take("Rover")
+    if visual then
+        if not yawSet then
+            KitImports.alignLongAxis(visual, "Z")
+        end
+        KitImports.fitInto(
+            visual,
+            ROVER_VISUAL_BOX,
+            Vector3.new(chassisCFrame.X, FLOOR_Y + WHEEL_CLEARANCE, chassisCFrame.Z)
+        )
+        visual.Name = "Visual"
+        KitImports.forEachPart(visual, function(part)
+            part.Anchored = false
+            part.Massless = true
+            part.CanCollide = false
+            part.CanQuery = false
+            part.CanTouch = false
+            weld(chassis, part)
+        end)
+        visual.Parent = rover
+        -- 리그는 판정과 물리만 맡고 보이지 않게 (메시가 외형)
+        chassis.Transparency = 1
+        tankBox.Transparency = 1
+        if not ROVER_SHOW_RIG_WHEELS then
+            for _, wheel in wheels do
+                wheel.Transparency = 1
+            end
+        end
+        -- 좌석은 메시 윗면 중앙에 올려 보이고 탈 수 있게 한다
+        local _, top = KitImports.bounds(visual)
+        seatCFrame = CFrame.new(chassisCFrame.X, top.Y + ROVER_SEAT_SIZE.Y / 2, chassisCFrame.Z)
+    end
+
+    -- 좌석은 위치를 정한 뒤 용접한다
+    local seat = Instance.new("VehicleSeat")
+    seat.Name = "DriverSeat"
+    seat.Size = ROVER_SEAT_SIZE
+    seat.CFrame = seatCFrame
+    seat.Color = COLORS.landerTrim
+    seat.Anchored = false
+    seat.MaxSpeed = rv.maxSpeed
+    seat.Torque = rv.torque
+    seat.TurnSpeed = rv.turnSpeed
+    seat:SetAttribute("Tank", 0)
+    seat.Parent = rover
+    weld(chassis, seat)
 end
 
 -- 기지 키트 -------------------------------------------------------------
 
 local function buildLander(kit: Model)
     local lander = makeModel("Lander", kit)
-    local floorTop =
-        buildHut(lander, LANDER_CENTER, LANDER_SIZE, COLORS.lander, Enum.Material.Metal)
+    local zoneFront = SPAWN_POSITION.Z - 3 -- 산소 구역은 문 앞 스폰 위치까지 덮는다
+    local zoneMin: Vector3
+    local zoneMax: Vector3
+    local visual = KitImports.take("Lander")
+    if visual then
+        -- 착륙 데크(Floor, PrimaryPart) 위에 메시를 올린다
+        local floorTop = buildFloor(lander, LANDER_CENTER, LANDER_SIZE)
+        KitImports.fitInto(
+            visual,
+            LANDER_VISUAL_BOX,
+            Vector3.new(LANDER_CENTER.X, floorTop, LANDER_CENTER.Z)
+        )
+        visual.Name = "Visual"
+        KitImports.forEachPart(visual, function(part)
+            part.Anchored = true
+            part.CanCollide = true
+        end)
+        visual.Parent = lander
+        -- 메시 경계 상자를 덮고 바깥으로 여유를 둔 산소 구역
+        local lo, hi = KitImports.bounds(visual)
+        local m = LANDER_ZONE_MARGIN
+        zoneMin = Vector3.new(lo.X - m, floorTop, math.min(lo.Z - m, zoneFront))
+        zoneMax = Vector3.new(hi.X + m, math.max(hi.Y, floorTop + LANDER_SIZE.Y), hi.Z + m)
+    else
+        local floorTop =
+            buildHut(lander, LANDER_CENTER, LANDER_SIZE, COLORS.lander, Enum.Material.Metal)
+        -- 실내와 문 앞(스폰 위치 포함)을 덮는 산소 구역
+        local halfInside = LANDER_SIZE.X / 2 - WALL
+        zoneMin = Vector3.new(LANDER_CENTER.X - halfInside, floorTop, zoneFront)
+        zoneMax = Vector3.new(
+            LANDER_CENTER.X + halfInside,
+            floorTop + LANDER_SIZE.Y,
+            LANDER_CENTER.Z + LANDER_SIZE.Z / 2 - WALL
+        )
+    end
     lander.PrimaryPart = lander:FindFirstChild("Floor") :: BasePart
-
-    -- 실내와 문 앞(스폰 위치 포함)을 덮는 산소 구역
-    local zoneFront = SPAWN_POSITION.Z - 3
-    local zoneBack = LANDER_CENTER.Z + LANDER_SIZE.Z / 2 - WALL
-    local zoneDepth = zoneBack - zoneFront
-    makeMarker(
-        "OxygenZone",
-        Vector3.new(LANDER_SIZE.X - 2 * WALL, LANDER_SIZE.Y, zoneDepth),
-        CFrame.new(LANDER_CENTER.X, floorTop + LANDER_SIZE.Y / 2, zoneFront + zoneDepth / 2),
-        lander
-    )
+    makeMarker("OxygenZone", zoneMax - zoneMin, CFrame.new((zoneMin + zoneMax) / 2), lander)
 
     local spawnPoint = makePart({
         name = "SpawnPoint",
@@ -738,10 +865,44 @@ local function buildModulePads(kit: Model)
             parent = padModel,
         })
         local top = FLOOR_Y + layout.pad.Y
-        buildGhost(padModel, layout.center, top, layout.body)
 
+        local visual = KitImports.take("Habitat" .. id)
+        if visual then
+            -- 외형 메시: 패드 폭에 맞게 스케일하고 바닥을 Pad 윗면에 맞춘다. Ghost는 같은 메시의 반투명 복제본
+            KitImports.fitInto(
+                visual,
+                MODULE_VISUAL_BOX[id],
+                Vector3.new(layout.center.X, top, layout.center.Z)
+            )
+            KitImports.forEachPart(visual, function(part)
+                part.Anchored = true
+                part.CanCollide = true
+            end)
+            local ghost = visual:Clone()
+            ghost.Name = "Ghost"
+            KitImports.ghostify(ghost, COLORS.ghost, Config.GHOST_TRANSPARENCY)
+            ghost.Parent = padModel
+            visual.Name = "Built"
+            visual.Parent = padModel
+            if id == Config.OXYGEN.habitatModule then
+                -- Built 경계 상자를 덮고 바깥으로 여유를 둔 산소 구역
+                local lo, hi = KitImports.bounds(visual)
+                local m = HABITAT_ZONE_MARGIN
+                local zoneMin = Vector3.new(lo.X - m, top, lo.Z - m)
+                local zoneMax = Vector3.new(hi.X + m, hi.Y + m, hi.Z + m)
+                makeMarker(
+                    "OxygenZone",
+                    zoneMax - zoneMin,
+                    CFrame.new((zoneMin + zoneMax) / 2),
+                    padModel
+                )
+            end
+            continue
+        end
+
+        buildGhost(padModel, layout.center, top, layout.body)
         local built = makeModel("Built", padModel)
-        if id == "A" then
+        if id == Config.OXYGEN.habitatModule then
             -- Habitat A: 안에 들어갈 수 있는 건물 + 산소 구역
             local hutTop = buildHut(
                 built,
@@ -818,6 +979,24 @@ local function buildBaseKit()
 end
 
 local function buildPanelTemplate()
+    local visual, yawSet = KitImports.take("Panel")
+    if visual then
+        -- 외형 메시: 슬롯 크기에 맞게 스케일 (긴 변을 슬롯의 긴 변 X에 맞춘다)
+        if not yawSet then
+            KitImports.alignLongAxis(visual, "X")
+        end
+        KitImports.fitInto(visual, PANEL_VISUAL_BOX, Vector3.zero)
+        KitImports.forEachPart(visual, function(part)
+            part.Anchored = true
+            part.CanCollide = false
+        end)
+        visual.Name = "PanelTemplate"
+        if not visual.PrimaryPart then
+            visual.PrimaryPart = KitImports.largestPart(visual)
+        end
+        visual.Parent = ServerStorage
+        return
+    end
     local template = makeModel("PanelTemplate", nil)
     local panel = makePart({
         name = "Panel",
@@ -842,6 +1021,19 @@ end
 
 -- 진입점: 없는 것만 만든다
 function DevMap.ensure()
+    -- Workspace.KitImports를 ServerStorage로 옮기고 항목을 검사한다 (플레이 중에는 보이지 않게)
+    KitImports.load()
+    local kitParts = { "Rover", "Lander", "HabitatA", "HabitatB", "HabitatC" }
+    if ServerStorage:FindFirstChild("BaseKit") then
+        for _, name in kitParts do
+            if KitImports.has(name) then
+                warn(
+                    "[DevMap] ServerStorage.BaseKit이 이미 있어 KitImports의 기지 외형은 쓰지 않습니다"
+                )
+                break
+            end
+        end
+    end
     if not workspace:FindFirstChild("LandingPads") then
         buildTerrainAndSites()
     elseif not workspace:FindFirstChild("IceSites") then

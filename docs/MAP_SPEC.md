@@ -213,3 +213,46 @@ OxygenZone 은 플레이어가 "실내"에 있다고 판단하는 보이지 않�
 - [ ] 두 곳의 OxygenZone 은 CanCollide 가 꺼져 있고 Transparency 가 1 입니다.
 - [ ] 무료 모델을 가져왔다면 [ASSETS.md](ASSETS.md) 의 안전 점검을 마쳤습니다.
 - [ ] 맵을 Play 해서 Output 창에 빨간 오류가 없는지 확인했습니다.
+
+## 간편 경로: KitImports 폴더로 자동 조립
+
+디자이너가 BaseKit 을 직접 만들지 않아도, 가져온 로우폴리 메시(예: Quaternius Ultimate Space Kit)를 정해진 이름으로 폴더에 넣으면 서버가 그레이박스 상자 대신 그 메시를 외형으로 써서 BaseKit, PanelTemplate, 바위를 만듭니다.
+
+- 바뀌는 것은 외형뿐입니다. Origin, DriverSeat, 바퀴 힌지, SpawnPoint, OxygenZone, Pad, Ghost, Built, Attribute, 프롬프트 대상은 그레이박스와 이름과 구조가 똑같습니다.
+- 크기는 코드가 맞춥니다. 메시를 역할별 목표 크기 안에 들어가게 균일하게 키우거나 줄이고, 바닥을 제자리에 맞춥니다.
+- 없는 항목은 그레이박스로 만듭니다. 이름 오타, Model 이나 MeshPart 가 아닌 것, 파트가 없는 빈 모델은 Output 창에 경고 한 줄을 남기고 그레이박스로 대체합니다.
+- 원본은 바꾸지 않습니다. 코드는 복제본만 씁니다.
+- Play 를 누르면 서버가 `Workspace.KitImports` 폴더를 ServerStorage 로 옮겨서 플레이 중에는 보이지 않게 합니다. 이 이동은 플레이 세션 안에서만 일어나므로 Stop 하면 편집 화면의 폴더는 그대로 남습니다.
+
+### 폴더 안 이름 목록
+
+| 이름 | 역할 | 권장 조각 |
+|---|---|---|
+| `Rover` | 로버 외형. 기존 물리 리그(섀시, 바퀴 4개, 힌지, DriverSeat) 위에 얹고 섀시에 용접합니다. 충돌은 리그가 맡습니다. DriverSeat 는 메시 윗면 중앙에 놓입니다. | 로버 두 종류 중 큰 것 |
+| `Lander` | 착륙선 외형. 산소 구역이 메시를 덮도록 자동으로 커집니다. SpawnPoint 와 로버 복구 콘솔은 그대로 생깁니다. | 착륙선 또는 로켓 |
+| `HabitatA` | Habitat A 완공 모델(Built)과 고스트(Ghost, 같은 메시의 반투명 복제본). 산소 회복 구역이 건물을 덮습니다. | 구부러진 생활동 건물 |
+| `HabitatB` | Farm B 완공 모델과 고스트 | 검은 뚜껑 모양 재배 시설 |
+| `HabitatC` | Research Lab C 완공 모델과 고스트 | 큰 돔 |
+| `Panel` | 태양광 패널 원본(PanelTemplate). 슬롯 한 칸 크기에 맞춥니다. | 태양광 패널 |
+| `Rock1`, `Rock2`, ... | 지형 바위. 번호 순서로 돌려 쓰고 크기는 0.7 ~ 1.4배 사이에서 무작위입니다. 바위 위치는 그레이박스와 같습니다. | 바위 |
+
+- 각 항목은 Model 또는 MeshPart 하나입니다. MeshPart 하나만 넣어도 코드가 Model 로 감싸서 처리합니다.
+- 방향: Rover 는 긴 쪽이 앞뒤, Panel 은 긴 쪽이 좌우가 되도록 코드가 90도 돌려 맞춥니다. 앞뒤가 반대로 보이면 그 항목에 number Attribute `Yaw` 를 추가해 각도(도)를 넣습니다. 예: 180. `Yaw` 가 있으면 자동 방향 맞춤은 하지 않습니다.
+- 바위는 맵 전체를 그레이박스로 만들 때, 즉 `Workspace.LandingPads` 가 없을 때만 쓰입니다.
+
+### Studio 에서 하는 일
+
+1. Import 3D 로 가져오기: Home 탭의 Import 3D 로 키트의 glTF 또는 FBX 파일을 하나씩 가져옵니다. 가져온 모델의 파트는 Anchored 를 켜 둡니다. 꺼져 있으면 Play 직후 떨어지면서 모양이 흐트러질 수 있습니다.
+2. Workspace 에 KitImports 폴더 만들기: Explorer 에서 Workspace 를 오른쪽 클릭하고 Insert Object, Folder 를 고른 뒤 이름을 `KitImports` 로 바꿉니다.
+3. 이름 바꾸기: 가져온 모델을 KitImports 폴더 안으로 옮기고 위 표의 이름으로 바꿉니다. 대소문자까지 정확히 씁니다.
+4. Play: Output 창에서 `[KitImports]` 경고가 없는지 확인하고, 기지와 로버가 메시로 보이는지 확인합니다.
+
+### 팁: 완성된 BaseKit 을 영구 저장하기
+
+KitImports 로 만든 BaseKit 은 Play 중에만 존재합니다. 영구 저장하려면 이렇게 합니다.
+
+1. Play 중 Explorer 에서 `ServerStorage.BaseKit` 를 선택하고 복사합니다. 패널도 저장하려면 `ServerStorage.PanelTemplate` 도 함께 복사합니다.
+2. Stop 합니다.
+3. 편집 화면의 ServerStorage 를 선택하고 붙여넣습니다.
+
+ServerStorage 에 BaseKit 이 있으면 코드는 그것을 그대로 쓰고 KitImports 의 기지 외형은 쓰지 않습니다. 이때 Output 창에 경고 한 줄이 나옵니다. 붙여넣은 BaseKit 을 손으로 고쳐 쓸 수 있고, 다시 자동 조립하려면 ServerStorage 의 BaseKit 을 지우면 됩니다.

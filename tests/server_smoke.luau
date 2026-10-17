@@ -208,6 +208,21 @@ roblox.implementMethod("Model", "GetBoundingBox", function(model)
     end
     return CFrame.new((minV + maxV) / 2), maxV - minV
 end)
+roblox.implementMethod("Model", "GetScale", function(model)
+    return model:GetAttribute("__scale") or 1
+end)
+roblox.implementMethod("Model", "ScaleTo", function(model, newScale)
+    local factor = newScale / (model:GetAttribute("__scale") or 1)
+    local pivot = modelPivot(model)
+    for _, d in model:GetDescendants() do
+        if d:IsA("BasePart") then
+            local rel = pivot:ToObjectSpace(d.CFrame)
+            d.Size = d.Size * factor
+            d.CFrame = pivot * CFrame.new(rel.Position * factor) * (rel - rel.Position)
+        end
+    end
+    model:SetAttribute("__scale", newScale)
+end)
 roblox.implementMethod("Model", "WaitForChild", function(inst, name)
     return inst:FindFirstChild(name)
 end)
@@ -270,77 +285,82 @@ function Random.new(seed)
     return r
 end
 
-local cache = {}
-local loadModule
-local function makeEnv(scriptInst)
-    return {
-        script = scriptInst,
-        game = dm,
-        workspace = dm:GetService("Workspace"),
-        require = function(target)
-            return loadModule(target)
-        end,
-        task = task,
-        os = {
-            clock = function()
-                return now
+-- DataModel마다 따로 모듈을 불러오는 로더 (warnSink에 warn 출력을 모은다)
+local function makeLoader(dataModel, warnSink)
+    local cache = {}
+    local loadModule
+    local function makeEnv(scriptInst)
+        return {
+            script = scriptInst,
+            game = dataModel,
+            workspace = dataModel:GetService("Workspace"),
+            require = function(target)
+                return loadModule(target)
             end,
-            time = function()
-                return 1700000000 + math.floor(now)
+            task = task,
+            os = {
+                clock = function()
+                    return now
+                end,
+                time = function()
+                    return 1700000000 + math.floor(now)
+                end,
+            },
+            warn = function(...)
+                local text = table.concat(table.pack(...), " ")
+                table.insert(warnSink, text)
+                print("WARN " .. text)
             end,
-        },
-        warn = function(...)
-            local text = table.concat(table.pack(...), " ")
-            table.insert(warnings, text)
-            print("WARN " .. text)
-        end,
-        print = print,
-        Instance = Instance,
-        Vector3 = Vector3,
-        CFrame = CFrame,
-        Color3 = roblox.Color3,
-        UDim2 = roblox.UDim2,
-        Enum = roblox.Enum,
-        PhysicalProperties = roblox.PhysicalProperties,
-        Random = Random,
-        math = math,
-        string = string,
-        table = table,
-        coroutine = coroutine,
-        debug = debug,
-        pcall = pcall,
-        xpcall = xpcall,
-        error = error,
-        assert = assert,
-        type = type,
-        typeof = typeof,
-        tostring = tostring,
-        tonumber = tonumber,
-        pairs = pairs,
-        ipairs = ipairs,
-        next = next,
-        select = select,
-        setmetatable = setmetatable,
-        getmetatable = getmetatable,
-        rawget = rawget,
-        rawset = rawset,
-        rawequal = rawequal,
-        utf8 = utf8,
-    }
-end
-function loadModule(target)
-    local key = target:GetFullName()
-    if cache[key] ~= nil then
-        return cache[key]
+            print = print,
+            Instance = Instance,
+            Vector3 = Vector3,
+            CFrame = CFrame,
+            Color3 = roblox.Color3,
+            UDim2 = roblox.UDim2,
+            Enum = roblox.Enum,
+            PhysicalProperties = roblox.PhysicalProperties,
+            Random = Random,
+            math = math,
+            string = string,
+            table = table,
+            coroutine = coroutine,
+            debug = debug,
+            pcall = pcall,
+            xpcall = xpcall,
+            error = error,
+            assert = assert,
+            type = type,
+            typeof = typeof,
+            tostring = tostring,
+            tonumber = tonumber,
+            pairs = pairs,
+            ipairs = ipairs,
+            next = next,
+            select = select,
+            setmetatable = setmetatable,
+            getmetatable = getmetatable,
+            rawget = rawget,
+            rawset = rawset,
+            rawequal = rawequal,
+            utf8 = utf8,
+        }
     end
-    local fn = luau.load(
-        target.Source,
-        { debugName = key, environment = makeEnv(target), injectGlobals = false }
-    )
-    local result = fn()
-    cache[key] = result
-    return result
+    function loadModule(target)
+        local key = target:GetFullName()
+        if cache[key] ~= nil then
+            return cache[key]
+        end
+        local fn = luau.load(
+            target.Source,
+            { debugName = key, environment = makeEnv(target), injectGlobals = false }
+        )
+        local result = fn()
+        cache[key] = result
+        return result
+    end
+    return loadModule, makeEnv
 end
+local loadModule, makeEnv = makeLoader(dm, warnings)
 
 local Server = dm:GetService("ServerScriptService"):FindFirstChild("Server")
 local Shared = dm:GetService("ReplicatedStorage"):FindFirstChild("Shared")
@@ -912,6 +932,373 @@ advance(Config.SITE_SELECT_TIMEOUT + 1)
 check(
     state().phase == "selecting" and Workspace:FindFirstChild("Base") == nil,
     "선택 중 퇴장하면 타이머 취소 (자동 착륙 없음)"
+)
+
+-- KitImports 간편 경로 -----------------------------------------------------
+print("[KitImports]")
+local EPS = 1e-3
+
+local function attrString(inst)
+    local keys = {}
+    for key, value in inst:GetAttributes() do
+        if string.sub(key, 1, 2) ~= "__" then
+            table.insert(keys, key .. "=" .. tostring(value))
+        end
+    end
+    table.sort(keys)
+    return table.concat(keys, ",")
+end
+
+-- 판정과 로직이 쓰는 인스턴스만 모은 구조 서명 (외형 파트는 제외)
+local LOGIC_PATHS = {
+    "Origin",
+    "Lander",
+    "Lander.Floor",
+    "Lander.SpawnPoint",
+    "Lander.OxygenZone",
+    "Lander.RoverConsole",
+    "Rover",
+    "Rover.Chassis",
+    "Rover.DriverSeat",
+    "Rover.WaterTankBox",
+    "Rover.WheelFL",
+    "Rover.WheelFR",
+    "Rover.WheelRL",
+    "Rover.WheelRR",
+    "Rover.KnuckleFL",
+    "Rover.KnuckleFR",
+    "SolarField",
+    "SolarField.InstallPad",
+    "SolarField.Slots",
+    "ModulePads",
+    "ModulePads.PadA",
+    "ModulePads.PadA.Pad",
+    "ModulePads.PadA.Ghost",
+    "ModulePads.PadA.Built",
+    "ModulePads.PadA.OxygenZone",
+    "ModulePads.PadB",
+    "ModulePads.PadB.Pad",
+    "ModulePads.PadB.Ghost",
+    "ModulePads.PadB.Built",
+    "ModulePads.PadC",
+    "ModulePads.PadC.Pad",
+    "ModulePads.PadC.Ghost",
+    "ModulePads.PadC.Built",
+    "WaterTank",
+}
+local function signature(targetKit)
+    local lines = {
+        "BaseKit:"
+            .. targetKit.ClassName
+            .. ":primary="
+            .. (targetKit.PrimaryPart and targetKit.PrimaryPart.Name or "nil"),
+    }
+    for _, path in LOGIC_PATHS do
+        local inst = targetKit
+        for segment in string.gmatch(path, "[^%.]+") do
+            inst = inst and inst:FindFirstChild(segment)
+        end
+        if not inst then
+            table.insert(lines, path .. ":MISSING")
+        else
+            local line = path .. ":" .. inst.ClassName .. ":" .. attrString(inst)
+            if inst:IsA("Model") then
+                line ..= ":primary=" .. (inst.PrimaryPart and inst.PrimaryPart.Name or "nil")
+            end
+            if inst:IsA("BasePart") then
+                line ..= ":anchored=" .. tostring(inst.Anchored)
+            end
+            table.insert(lines, line)
+        end
+    end
+    local hingeLines = {}
+    for _, d in targetKit.Rover:GetDescendants() do
+        if d:IsA("HingeConstraint") then
+            table.insert(
+                hingeLines,
+                string.format(
+                    "%s:%s:%s:%s->%s",
+                    d.Name,
+                    tostring(d.ActuatorType),
+                    attrString(d),
+                    d.Attachment0.Parent.Name,
+                    d.Attachment1.Parent.Name
+                )
+            )
+        end
+    end
+    table.sort(hingeLines)
+    table.insert(lines, "slots=" .. #targetKit.SolarField.Slots:GetChildren())
+    return table.concat(lines, "\n") .. "\n" .. table.concat(hingeLines, "\n")
+end
+
+local function boundsOf(model)
+    local lo = Vector3.new(math.huge, math.huge, math.huge)
+    local hi = -lo
+    for _, d in model:GetDescendants() do
+        if d:IsA("BasePart") then
+            local h = d.Size / 2
+            for _, sx in { -1, 1 } do
+                for _, sy in { -1, 1 } do
+                    for _, sz in { -1, 1 } do
+                        local p = d.CFrame * Vector3.new(sx * h.X, sy * h.Y, sz * h.Z)
+                        lo = Vector3.new(
+                            math.min(lo.X, p.X),
+                            math.min(lo.Y, p.Y),
+                            math.min(lo.Z, p.Z)
+                        )
+                        hi = Vector3.new(
+                            math.max(hi.X, p.X),
+                            math.max(hi.Y, p.Y),
+                            math.max(hi.Z, p.Z)
+                        )
+                    end
+                end
+            end
+        end
+    end
+    return lo, hi
+end
+local function boxContains(part, lo, hi)
+    local c, h = part.CFrame.Position, part.Size / 2
+    return c.X - h.X <= lo.X + EPS
+        and c.Y - h.Y <= lo.Y + EPS
+        and c.Z - h.Z <= lo.Z + EPS
+        and c.X + h.X >= hi.X - EPS
+        and c.Y + h.Y >= hi.Y - EPS
+        and c.Z + h.Z >= hi.Z - EPS
+end
+local function allParts(model, predicate)
+    local count = 0
+    for _, d in model:GetDescendants() do
+        if d:IsA("BasePart") then
+            count += 1
+            if not predicate(d) then
+                return false
+            end
+        end
+    end
+    return count > 0
+end
+
+-- 두 번째 place에 가짜 메시를 넣고 DevMap만 다시 돌린다
+local dm2 = roblox.deserializePlace(fs.readFile(placePath))
+local importWarnings = {}
+local loadModule2 = makeLoader(dm2, importWarnings)
+local Workspace2 = dm2:GetService("Workspace")
+local ServerStorage2 = dm2:GetService("ServerStorage")
+local importsFolder = Instance.new("Folder")
+importsFolder.Name = "KitImports"
+importsFolder.Parent = Workspace2
+local function fakeModel(name, specs)
+    local m = Instance.new("Model")
+    m.Name = name
+    for i, spec in specs do
+        local p = Instance.new("Part")
+        p.Name = name .. "Part" .. i
+        p.Size = spec[1]
+        p.CFrame = CFrame.new(spec[2])
+        p.Anchored = false
+        p.CanCollide = true
+        p.Parent = m
+    end
+    m.Parent = importsFolder
+    return m
+end
+-- Rover: 긴 축이 X인 큰 모델 (자동 방향 맞춤과 축소 확인)
+local roverSource = fakeModel("Rover", {
+    { Vector3.new(16, 3, 8), Vector3.new(100, 50, 0) },
+    { Vector3.new(4, 2, 4), Vector3.new(100, 52.5, 0) },
+})
+fakeModel("Lander", {
+    { Vector3.new(6, 20, 6), Vector3.new(-50, 10, 0) },
+    { Vector3.new(10, 1, 10), Vector3.new(-50, 0.5, 0) },
+})
+fakeModel("HabitatA", {
+    { Vector3.new(40, 10, 30), Vector3.new(0, 5, 200) },
+    { Vector3.new(10, 4, 10), Vector3.new(0, 12, 200) },
+})
+-- Panel: 단일 파트 (MeshPart 대용), 긴 축이 Z
+local panelSource = Instance.new("Part")
+panelSource.Name = "Panel"
+panelSource.Size = Vector3.new(1.4, 0.1, 2)
+panelSource.CFrame = CFrame.new(0, 30, 30)
+panelSource.Parent = importsFolder
+fakeModel("Rock1", { { Vector3.new(2, 1.5, 2.5), Vector3.zero } })
+fakeModel("Rock2", { { Vector3.new(3, 2, 1), Vector3.zero } })
+local emptyHabitat = Instance.new("Model")
+emptyHabitat.Name = "HabitatB" -- 빈 모델 -> 그레이박스
+emptyHabitat.Parent = importsFolder
+fakeModel("Rovr", { { Vector3.one, Vector3.zero } }) -- 이름 오타
+local roverSourceSize = roverSource.RoverPart1.Size
+local roverSourceCFrame = roverSource.RoverPart1.CFrame
+
+task.spawn(function()
+    loadModule2(dm2:GetService("ServerScriptService").Server.DevMap).ensure()
+end)
+advance(0)
+
+local kitGrey = ServerStorage:FindFirstChild("BaseKit")
+local kitImport = ServerStorage2:FindFirstChild("BaseKit")
+check(kitImport ~= nil, "KitImports로 BaseKit 생성")
+check(
+    Workspace2:FindFirstChild("KitImports") == nil
+        and ServerStorage2:FindFirstChild("KitImports") ~= nil,
+    "KitImports 폴더를 ServerStorage로 옮김"
+)
+check(
+    roverSource.RoverPart1.Size == roverSourceSize
+        and roverSource.RoverPart1.CFrame == roverSourceCFrame,
+    "원본 KitImports는 바뀌지 않음"
+)
+local sigGrey, sigImport = signature(kitGrey), signature(kitImport)
+check(sigGrey == sigImport, "판정 구조 서명이 그레이박스와 동일")
+if sigGrey ~= sigImport then
+    print("--- 그레이박스\n" .. sigGrey .. "\n--- KitImports\n" .. sigImport)
+end
+local function warned(part)
+    for _, w in importWarnings do
+        if string.find(w, part, 1, true) then
+            return true
+        end
+    end
+    return false
+end
+check(warned("'Rovr'"), "이름 오타 경고")
+check(warned("'HabitatB' 안에 파트가 없어"), "빈 모델 경고")
+check(#importWarnings == 2, "경고는 오타와 빈 모델 두 줄 (" .. #importWarnings .. ")")
+
+-- 로버 외형
+local rover2 = kitImport.Rover
+local visual = rover2:FindFirstChild("Visual")
+check(visual ~= nil and visual:IsA("Model"), "Rover.Visual 메시")
+check(
+    allParts(visual, function(p)
+        return p.Anchored == false
+            and p.Massless == true
+            and p.CanCollide == false
+            and p.CanQuery == false
+    end),
+    "로버 메시: 비고정, Massless, CanCollide/CanQuery 꺼짐"
+)
+local weldedToChassis = 0
+for _, w in rover2.Chassis:GetChildren() do
+    if w:IsA("WeldConstraint") and w.Part1 and w.Part1:IsDescendantOf(visual) then
+        weldedToChassis += 1
+    end
+end
+check(
+    weldedToChassis == #visual:GetChildren(),
+    "로버 메시 파트 전부 섀시에 용접 (" .. weldedToChassis .. ")"
+)
+local vLo, vHi = boundsOf(visual)
+local vSize = vHi - vLo
+check(
+    vSize.X <= 8.8 + EPS and vSize.Y <= 3.5 + EPS and vSize.Z <= 11 + EPS and vSize.Z >= vSize.X,
+    string.format(
+        "로버 메시가 리그 상자 안, 긴 축 Z (%.1f x %.1f x %.1f)",
+        vSize.X,
+        vSize.Y,
+        vSize.Z
+    )
+)
+local seat2 = rover2.DriverSeat
+check(
+    math.abs((seat2.CFrame.Position.Y - seat2.Size.Y / 2) - vHi.Y) < EPS
+        and math.abs(seat2.CFrame.Position.X - rover2.Chassis.CFrame.Position.X) < EPS
+        and math.abs(seat2.CFrame.Position.Z - rover2.Chassis.CFrame.Position.Z) < EPS,
+    "DriverSeat가 메시 윗면 중앙"
+)
+check(
+    rover2.Chassis.Transparency == 1 and rover2.WheelFL.Transparency == 1,
+    "리그 섀시와 바퀴는 숨김"
+)
+
+-- 착륙선 외형
+local lander2 = kitImport.Lander
+local landerVisual = lander2:FindFirstChild("Visual")
+check(landerVisual ~= nil, "Lander.Visual 메시")
+check(
+    allParts(landerVisual, function(p)
+        return p.Anchored and p.CanCollide
+    end),
+    "착륙선 메시: 고정, CanCollide"
+)
+local lLo, lHi = boundsOf(landerVisual)
+check(boxContains(lander2.OxygenZone, lLo, lHi), "착륙선 OxygenZone이 메시를 덮음")
+-- 산소 판정은 캐릭터 중심 기준이므로 스폰된 캐릭터 중심 높이에서 본다
+local spawnPart = lander2.SpawnPoint
+local spawnRoot = spawnPart.CFrame.Position
+    + Vector3.new(0, spawnPart.Size.Y / 2 + Config.SPAWN_HEIGHT_OFFSET, 0)
+check(
+    boxContains(lander2.OxygenZone, spawnRoot, spawnRoot),
+    "착륙선 OxygenZone이 스폰된 캐릭터 위치를 덮음"
+)
+
+-- Habitat A 외형
+local padA2 = kitImport.ModulePads.PadA
+local builtA = padA2.Built
+local aLo, aHi = boundsOf(builtA)
+local padPart = padA2.Pad
+local padTop = padPart.CFrame.Position.Y + padPart.Size.Y / 2
+check(math.abs(aLo.Y - padTop) < EPS, "Habitat A 바닥이 Pad 윗면")
+check(
+    aHi.X - aLo.X <= padPart.Size.X + EPS and aHi.Z - aLo.Z <= padPart.Size.Z + EPS,
+    string.format("Habitat A 폭이 패드 안 (%.1f x %.1f)", aHi.X - aLo.X, aHi.Z - aLo.Z)
+)
+check(
+    allParts(builtA, function(p)
+        return p.Anchored and p.CanCollide
+    end),
+    "Built 메시: 고정, CanCollide"
+)
+check(
+    allParts(padA2.Ghost, function(p)
+        return math.abs(p.Transparency - Config.GHOST_TRANSPARENCY) < EPS and p.CanCollide == false
+    end),
+    "Ghost: 같은 메시, 투명도 0.7, CanCollide 꺼짐"
+)
+check(boxContains(padA2.OxygenZone, aLo, aHi), "PadA OxygenZone이 Built를 덮음")
+check(
+    kitImport.ModulePads.PadB.Built:FindFirstChild("Greenhouse") ~= nil,
+    "빈 HabitatB는 그레이박스"
+)
+
+-- 패널 원본
+local panel2 = ServerStorage2:FindFirstChild("PanelTemplate")
+local pLo, pHi = boundsOf(panel2)
+check(panel2.PrimaryPart ~= nil, "PanelTemplate PrimaryPart")
+check(
+    pHi.X - pLo.X <= 5 + EPS and pHi.Z - pLo.Z <= 3.5 + EPS and pHi.X - pLo.X >= pHi.Z - pLo.Z,
+    string.format(
+        "패널이 슬롯 크기 안, 긴 축 X (%.2f x %.2f)",
+        pHi.X - pLo.X,
+        pHi.Z - pLo.Z
+    )
+)
+check(
+    allParts(panel2, function(p)
+        return p.Anchored and p.CanCollide == false
+    end),
+    "패널 메시: 고정, CanCollide 꺼짐"
+)
+
+-- 바위
+local greyRocks = Workspace.DevTerrain.Boulders:GetChildren()
+local importRocks = Workspace2.DevTerrain.Boulders:GetChildren()
+check(#greyRocks == #importRocks, "바위 수 동일 (" .. #importRocks .. ")")
+check(importRocks[1]:IsA("Model") and importRocks[1].Name == "Boulder", "바위가 Rock 메시")
+local firstLo, firstHi = boundsOf(importRocks[1])
+local firstCenter = (firstLo + firstHi) / 2
+local greyFirst = greyRocks[1].CFrame.Position
+check(
+    math.abs(firstCenter.X - greyFirst.X) < EPS and math.abs(firstCenter.Z - greyFirst.Z) < EPS,
+    "바위 배치 위치가 그레이박스와 같음"
+)
+check(
+    importRocks[1]:FindFirstChild("Rock1Part1") ~= nil
+        and importRocks[2]:FindFirstChild("Rock2Part1") ~= nil,
+    "Rock1, Rock2 순환 사용"
 )
 
 print("")
