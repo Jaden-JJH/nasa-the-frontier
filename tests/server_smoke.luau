@@ -753,9 +753,9 @@ local function runTerrainChecks()
         #blocks == 1
             and math.abs(block.cframe.Position.Y + block.size.Y / 2 - TERRAIN_TOP) < 1e-6
             and block.size.Y == 24
-            and block.size.X >= 1400
-            and block.size.Z >= 1100,
-        "FillBlock 한 번: 두께 24, 지형 윗면 y -1.5 (콘크리트 판보다 3 아래)"
+            and block.size.X >= 2600
+            and block.size.Z >= 2200,
+        "FillBlock 한 번: 2600 x 2200, 두께 24, 지형 윗면 y -1.5 (콘크리트 판보다 3 아래)"
     )
     check(
         terrainInstance:GetMaterialColor(roblox.Enum.Material.Sand)
@@ -791,7 +791,8 @@ local function runTerrainChecks()
     local corridors = corridorsOf(Workspace)
     local violations, corridorHits = 0, 0
     local craters, hills, smallCraters, badDepth, highRim, badHill = 0, 0, 0, 0, 0, 0
-    local bigCraters = 0
+    local bigCraters, outerCraters = 0, 0
+    local bigNearPad = { 0, 0, 0, 0 }
     local nearPad = { 0, 0, 0, 0 }
     local craterCircles = {}
     for _, ball in balls do
@@ -831,7 +832,13 @@ local function runTerrainChecks()
             for i = 1, 4 do
                 if apronDistanceAt(apron, i, ball.center) <= 120 then
                     nearPad[i] += 1
+                    if ball.radius >= 30 then
+                        bigNearPad[i] += 1
+                    end
                 end
+            end
+            if math.abs(ball.center.X) > 700 or math.abs(ball.center.Z) > 550 then
+                outerCraters += 1
             end
         elseif ball.radius >= 40 then
             hills += 1
@@ -853,10 +860,10 @@ local function runTerrainChecks()
         "폭 24 주행 회랑에 크레이터와 언덕 없음 (침범 " .. corridorHits .. ")"
     )
     check(
-        craters == 45 and smallCraters == 0 and bigCraters == 0,
+        craters >= 45 and smallCraters == 0 and bigCraters == 0,
         "크레이터 "
             .. craters
-            .. "개 (약 45), 반지름 12 미만 "
+            .. "개 (45 이상), 반지름 12 미만 "
             .. smallCraters
             .. "개, 50 초과 "
             .. bigCraters
@@ -876,6 +883,20 @@ local function runTerrainChecks()
             nearPad[3],
             nearPad[4]
         )
+    )
+    check(
+        bigNearPad[1] >= 2 and bigNearPad[2] >= 2 and bigNearPad[3] >= 2 and bigNearPad[4] >= 2,
+        string.format(
+            "네 착륙지 모두 판 120 안 크레이터 중 반지름 30 이상 2개 이상 (%d, %d, %d, %d)",
+            bigNearPad[1],
+            bigNearPad[2],
+            bigNearPad[3],
+            bigNearPad[4]
+        )
+    )
+    check(
+        outerCraters > 0,
+        "넓힌 지형(중심 1400 x 1100 밖)에도 크레이터 " .. outerCraters .. "개"
     )
     check(
         nearPad[4] > nearPad[1],
@@ -957,7 +978,9 @@ local function runTerrainChecks()
     -- 바위 3층 (약 220): 기지 둘레, 회랑 옆, 산포. 회랑 안과 판 + 6 안에 없음, 크레이터 밖, 약 10%는 2배 크기
     local boulders = Workspace.DevTerrain.Boulders:GetChildren()
     local dev = Config.DEV_MAP
-    local layers = { ring = 0, corridor = 0, scatter = 0 }
+    local layers = { ring = 0, corridor = 0, scatter = 0, near = 0 }
+    local ringBand = { 0, 0, 0, 0 } -- 착륙지별 판 + 6 ~ + 45 띠 안 바위 (층 무관)
+    local nearBandRocks, coreFarRocks, outerRocks, outOfMap = 0, 0, 0, 0
     local inCorridor, blocked, inCrater, big, badRing = 0, 0, 0, 0, 0
     local nearIce = {}
     for index = 1, #ices do
@@ -978,7 +1001,24 @@ local function runTerrainChecks()
         end
         local nearestApron = math.huge
         for i = 1, 4 do
-            nearestApron = math.min(nearestApron, apronDistanceAt(apron, i, p))
+            local d = apronDistanceAt(apron, i, p)
+            nearestApron = math.min(nearestApron, d)
+            if d >= 6 and d <= 45 then
+                ringBand[i] += 1
+            end
+        end
+        local scattered = layer == "scatter" or layer == "near"
+        local inCore = math.abs(p.X) <= 700 and math.abs(p.Z) <= 550
+        if scattered and nearestApron >= 45 and nearestApron <= 200 then
+            nearBandRocks += 1
+        elseif layer == "scatter" and inCore and nearestApron > 200 then
+            coreFarRocks += 1
+        end
+        if not inCore then
+            outerRocks += 1
+        end
+        if math.abs(p.X) > 1300 or math.abs(p.Z) > 1100 then
+            outOfMap += 1
         end
         if nearestApron < 6 then
             blocked += 1
@@ -1014,15 +1054,64 @@ local function runTerrainChecks()
         layers.ring == sum(dev.baseRingBouldersBySite)
             and layers.corridor >= sum(dev.boulderCountBySite) * 0.9
             and layers.scatter >= dev.scatterBoulders * 0.9
-            and #boulders == layers.ring + layers.corridor + layers.scatter
-            and #boulders >= 200
-            and #boulders <= 230,
+            and layers.near > 0
+            and #boulders == layers.ring + layers.corridor + layers.scatter + layers.near,
         string.format(
-            "바위 %d개 (약 220): 기지 둘레 %d, 회랑 옆 %d, 산포 %d",
+            "바위 %d개: 기지 둘레 %d, 회랑 옆 %d, 산포 %d, 기지 근처 산포 %d",
             #boulders,
             layers.ring,
             layers.corridor,
-            layers.scatter
+            layers.scatter,
+            layers.near
+        )
+    )
+    local ringOk = true
+    for i = 1, 4 do
+        if ringBand[i] < dev.baseRingBouldersBySite[i] or ringBand[i] < 35 then
+            ringOk = false
+        end
+    end
+    check(
+        ringOk,
+        string.format(
+            "어느 기지든 판 + 6 ~ + 45 띠에 바위 35개 이상 (%d, %d, %d, %d)",
+            ringBand[1],
+            ringBand[2],
+            ringBand[3],
+            ringBand[4]
+        )
+    )
+    -- 산포 밀도: 판 + 45 ~ + 200 띠는 중심 구역의 다른 곳보다 약 1.5배 (격자 10 studs로 넓이 추정)
+    local bandCells, farCells = 0, 0
+    for gx = -695, 695, 10 do
+        for gz = -545, 545, 10 do
+            local nearest = math.huge
+            for i = 1, 4 do
+                nearest = math.min(nearest, apronDistanceAt(apron, i, Vector3.new(gx, 0, gz)))
+            end
+            if nearest >= 45 and nearest <= 200 then
+                bandCells += 1
+            elseif nearest > 200 then
+                farCells += 1
+            end
+        end
+    end
+    local ratio = (nearBandRocks / bandCells) / (coreFarRocks / farCells)
+    check(
+        ratio >= 1.25 and ratio <= 2.2,
+        string.format(
+            "판 + 45 ~ + 200 산포 밀도가 중심 구역 다른 곳의 %.2f배 (목표 1.5, 띠 %d개, 그 밖 %d개)",
+            ratio,
+            nearBandRocks,
+            coreFarRocks
+        )
+    )
+    check(
+        outerRocks > 0 and outOfMap == 0,
+        string.format(
+            "넓힌 지형(중심 밖)에도 바위 %d개, 지형 밖 바위 %d개",
+            outerRocks,
+            outOfMap
         )
     )
     check(
@@ -1145,10 +1234,26 @@ local function runFlatCase()
     end)
     advance(0)
     check(patched == 1, "지형 꺼짐 경로: DevMap 플래그를 false로 바꿈")
-    local ground = ws3.DevTerrain:FindFirstChild("MoonGround")
+    local tiles, area, tilesOk = 0, 0, true
+    for _, child in ws3.DevTerrain:GetChildren() do
+        if child.Name == "MoonGround" then
+            tiles += 1
+            area += child.Size.X * child.Size.Z
+            if
+                math.abs(child.CFrame.Position.Y + child.Size.Y / 2 - 1.5) > 1e-4
+                or child.Size.X > 2048
+                or child.Size.Z > 2048
+            then
+                tilesOk = false
+            end
+        end
+    end
     check(
-        ground ~= nil and math.abs(ground.CFrame.Position.Y + ground.Size.Y / 2 - 1.5) < 1e-6,
-        "TERRAIN_ENABLED false: 평평한 지면 Part (윗면 y 1.5)"
+        tiles >= 2 and tilesOk and math.abs(area - 2600 * 2200) < 1,
+        string.format(
+            "TERRAIN_ENABLED false: 평평한 지면 타일 %d개 (윗면 y 1.5, 한 변 2048 이하, 합계 2600 x 2200)",
+            tiles
+        )
     )
     check(#terrainCalls == callsBefore, "TERRAIN_ENABLED false: Terrain 호출 0회")
     check(
@@ -2563,7 +2668,7 @@ local greyRocks = Workspace.DevTerrain.Boulders:GetChildren()
 local importRocks = Workspace2.DevTerrain.Boulders:GetChildren()
 -- 바위 위치는 기지 판 크기(메시 키트면 달라짐)를 피해 정해지므로 개수와 규칙만 비교한다
 check(
-    math.abs(#greyRocks - #importRocks) <= 10 and #importRocks >= 200,
+    math.abs(#greyRocks - #importRocks) <= #greyRocks * 0.05 and #importRocks >= 400,
     string.format("바위 수 비슷함 (그레이박스 %d, 메시 %d)", #greyRocks, #importRocks)
 )
 check(importRocks[1]:IsA("Model") and importRocks[1].Name == "Boulder", "바위가 Rock 메시")

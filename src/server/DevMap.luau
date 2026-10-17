@@ -25,7 +25,11 @@ local DevMap = {}
 
 -- 기지 콘크리트 판 윗면 (월드 y). 착륙 패드 윗면은 이보다 0.5 위 (4차: 0.5 -> 1.5, 지형과 3 studs 단차)
 local GROUND_TOP = 1.5
-local GROUND_SIZE = Vector3.new(1400, 4, 1100)
+-- 지형 채움 범위. 어느 착륙 패드에서도 가장자리가 보이지 않게 넓힌다 (4차 추가: 1400 x 1100 -> 2600 x 2200)
+local GROUND_SIZE = Vector3.new(2600, 4, 2200)
+-- 중심 구역 (착륙지와 얼음이 있는 예전 맵 범위). 밖은 산포 바위와 크레이터 밀도를 낮춘다
+local CORE_HALF_X, CORE_HALF_Z = 700, 550
+local PART_MAX_SIZE = 2048 -- Roblox Part 한 변 최대 크기 (지형을 끈 평지 지면은 타일로 나눈다)
 local LANDING_PAD_SIZE = Vector3.new(48, 1, 48) -- 윗면은 GROUND_TOP + 0.5 (기지 키트 바닥). 지면까지 아래로 늘려 묻는다
 local ICE_SIZE = Vector3.new(14, 3, 14)
 local ICE_LIGHT_RANGE = 18
@@ -56,7 +60,10 @@ local CRATER_RIM_PIECE_RATIO = 0.3 -- 테두리 공 반지름 = 크레이터 반
 local CRATER_RIM_PIECE_MIN = 4
 local CRATERS_NEAR_SITE = { 8, 8, 9, 11 } -- 착륙지 주변 크레이터 (Pad4는 지형 위험 높음)
 local CRATER_NEAR_REACH = 120 -- 착륙지 "주변" = 콘크리트 판 가장자리에서 크레이터 중심까지 이 거리 안
-local CRATERS_SCATTERED = 9 -- 맵 전체 (주변 36개와 합쳐 45개)
+local BIG_NEAR_CRATERS = 2 -- 착륙지 주변 크레이터 중 앞의 이 개수는 크게 (기지에서 눈에 띄게)
+local BIG_CRATER_RADIUS_MIN = 30
+local CRATERS_SCATTERED = 18 -- 맵 전체 (중심 구역 밖은 OUTER_FEATURE_DENSITY배 밀도). 주변 36개와 합쳐 54개
+local OUTER_FEATURE_DENSITY = 0.5 -- 중심 구역 밖 크레이터와 언덕 밀도 배율
 local HILL_COUNT = 12
 local HILL_RADIUS_MIN, HILL_RADIUS_MAX = 40, 80
 local HILL_HEIGHT_MIN, HILL_HEIGHT_MAX = 2, 4 -- 지형 위로 솟는 높이
@@ -88,6 +95,7 @@ local PAD_LAYOUT = {
 -- 바위 3층: 기지 둘레 고리, 주행 회랑 양옆 무더기, 맵 전체 산포 (개수는 Config.DEV_MAP)
 local APRON_ROCK_GAP = 6 -- 콘크리트 판 가장자리에서 바위 가장자리까지 최소 거리
 local BASE_RING_REACH = 45 -- 기지 둘레 고리 바깥 경계 (판 가장자리에서 바위 중심까지)
+local NEAR_SCATTER_REACH = 200 -- 고리 바깥 ~ 이 거리까지는 산포 밀도를 Config.DEV_MAP.nearBaseScatterFactor배로
 local ICE_CLEARANCE = 15 -- 얼음 중심 주변 바위 금지 거리
 local CLUSTER_SPREAD = 22 -- 회랑 가장자리 밖으로 바위 무더기가 퍼지는 폭
 local CLUSTER_BEYOND_ICE = 60 -- 회랑 방향으로 얼음 너머까지 무더기를 두는 거리
@@ -525,13 +533,14 @@ type Footprint = { x: number, z: number, r: number }
 type Rect = { minX: number, maxX: number, minZ: number, maxZ: number }
 -- 착륙지 하나: 패드 중심(y 0), 얼음 쪽을 보는 수평 프레임, 가장 가까운 얼음
 type Site = { position: Vector3, frame: CFrame, ice: Vector3 }
-type RockLayer = "ring" | "corridor" | "scatter"
+type RockLayer = "ring" | "corridor" | "scatter" | "near"
 type GroundStats = {
     craters: number,
     hills: number,
     ring: number,
     corridor: number,
     scatter: number,
+    near: number,
 }
 
 -- xz 평면 거리
@@ -610,6 +619,26 @@ local function sampleAroundApron(rng: Random, site: Site, rect: Rect, reach: num
         return nil
     end
     return Vector3.new(world.X, 0, world.Z)
+end
+
+-- 중심 구역(착륙지와 얼음이 있는 범위) 안인지
+local function inCore(x: number, z: number): boolean
+    return math.abs(x) <= CORE_HALF_X and math.abs(z) <= CORE_HALF_Z
+end
+
+-- 거리에 따른 밀도 솎기: 중심 구역 밖의 후보는 factor 확률로만 받는다 (난수 1개를 항상 쓴다)
+local function keepByDensity(rng: Random, x: number, z: number, factor: number): boolean
+    local roll = rng:NextNumber()
+    return inCore(x, z) or roll < factor
+end
+
+-- 판(W x H) 가장자리에서 거리 inner ~ outer 사이 띠의 넓이
+local function bandArea(rect: Rect, inner: number, outer: number): number
+    local w, h = rect.maxX - rect.minX, rect.maxZ - rect.minZ
+    local function within(r: number): number
+        return w * h + 2 * r * (w + h) + math.pi * r * r
+    end
+    return within(outer) - within(inner)
 end
 
 -- 바위를 놓아도 되는 자리인지 (radius = 바위 반지름 추정)
@@ -795,7 +824,8 @@ local function buildBoulders(
         end
     end
 
-    -- 3) 맵 전체에 낮은 밀도로 흩뿌리기
+    -- 3) 맵 전체 산포: 중심 구역은 기본 밀도, 밖은 scatterOuterDensity배 (거리에 따라 낮춘다)
+    local scattered: { Vector3 } = {}
     for _ = 1, dev.scatterBoulders do
         for _ = 1, BOULDER_ATTEMPTS do
             local scale = drawScale()
@@ -804,8 +834,47 @@ local function buildBoulders(
                 0,
                 rng:NextNumber(-GROUND_SIZE.Z / 2, GROUND_SIZE.Z / 2)
             )
-            if place(position, "scatter", scale) then
+            if
+                keepByDensity(rng, position.X, position.Z, dev.scatterOuterDensity)
+                and place(position, "scatter", scale)
+            then
+                table.insert(scattered, position)
                 break
+            end
+        end
+    end
+
+    -- 4) 기지 근처 추가 산포: 고리 바깥 ~ NEAR_SCATTER_REACH 띠의 산포 바위가
+    --    중심 밀도 x nearBaseScatterFactor x 띠 넓이가 되도록 모자란 만큼 띠 안에 더 놓는다.
+    --    (띠에는 크레이터, 회랑, 경사로 차선이 많아 3층 산포가 덜 들어가므로 실제 개수를 세어 채운다)
+    local coreArea = 4 * CORE_HALF_X * CORE_HALF_Z
+    local mapArea = GROUND_SIZE.X * GROUND_SIZE.Z
+    local coreDensity = dev.scatterBoulders
+        / (coreArea + dev.scatterOuterDensity * (mapArea - coreArea))
+    local target = math.round(
+        dev.nearBaseScatterFactor
+            * coreDensity
+            * bandArea(rect, BASE_RING_REACH, NEAR_SCATTER_REACH)
+    )
+    for _, site in sites do
+        local existing = 0
+        for _, position in scattered do
+            local d = apronDistance(position, site, rect)
+            if d >= BASE_RING_REACH and d <= NEAR_SCATTER_REACH then
+                existing += 1
+            end
+        end
+        for _ = 1, math.max(0, target - existing) do
+            for _ = 1, BOULDER_ATTEMPTS do
+                local scale = drawScale()
+                local point = sampleAroundApron(rng, site, rect, NEAR_SCATTER_REACH)
+                if
+                    point
+                    and apronDistance(point, site, rect) >= BASE_RING_REACH
+                    and place(point, "near", scale)
+                then
+                    break
+                end
             end
         end
     end
@@ -903,6 +972,9 @@ local function planTerrain(sites: { Site }, rect: Rect): TerrainPlan
     for _ = 1, HILL_COUNT do
         for _ = 1, FEATURE_ATTEMPTS do
             local cx, cz = rng:NextNumber(-halfX, halfX), rng:NextNumber(-halfZ, halfZ)
+            if not keepByDensity(rng, cx, cz, OUTER_FEATURE_DENSITY) then
+                continue
+            end
             local balls, footprint = planHill(
                 cx,
                 cz,
@@ -915,11 +987,15 @@ local function planTerrain(sites: { Site }, rect: Rect): TerrainPlan
             end
         end
     end
-    -- 착륙지 주변: 판 가장자리에서 CRATER_NEAR_REACH 안 (지형 위험이 높은 곳일수록 많이)
+    -- 착륙지 주변: 판 가장자리에서 CRATER_NEAR_REACH 안 (지형 위험이 높은 곳일수록 많이).
+    -- 앞의 BIG_NEAR_CRATERS개는 반지름 BIG_CRATER_RADIUS_MIN 이상으로 크게
     for index, site in sites do
-        for _ = 1, CRATERS_NEAR_SITE[index] or 0 do
+        for k = 1, CRATERS_NEAR_SITE[index] or 0 do
+            local minRadius = if k <= BIG_NEAR_CRATERS
+                then BIG_CRATER_RADIUS_MIN
+                else CRATER_RADIUS_MIN
             for _ = 1, FEATURE_ATTEMPTS do
-                local radius = rng:NextNumber(CRATER_RADIUS_MIN, CRATER_RADIUS_MAX)
+                local radius = rng:NextNumber(minRadius, CRATER_RADIUS_MAX)
                 local point = sampleAroundApron(rng, site, rect, CRATER_NEAR_REACH)
                 if point then
                     local balls, footprint = planCrater(point.X, point.Z, radius)
@@ -935,6 +1011,9 @@ local function planTerrain(sites: { Site }, rect: Rect): TerrainPlan
     for _ = 1, CRATERS_SCATTERED do
         for _ = 1, FEATURE_ATTEMPTS do
             local cx, cz = rng:NextNumber(-halfX, halfX), rng:NextNumber(-halfZ, halfZ)
+            if not keepByDensity(rng, cx, cz, OUTER_FEATURE_DENSITY) then
+                continue
+            end
             local balls, footprint =
                 planCrater(cx, cz, rng:NextNumber(CRATER_RADIUS_MIN, CRATER_RADIUS_MAX))
             if tryAdd(balls, footprint, cx, cz) then
@@ -950,14 +1029,26 @@ end
 local function applyTerrain(plan: TerrainPlan, folder: Instance)
     local terrain = if TERRAIN_ENABLED then workspace:FindFirstChildOfClass("Terrain") else nil
     if not terrain then
-        makePart({
-            name = "MoonGround",
-            size = GROUND_SIZE,
-            cframe = CFrame.new(0, SURFACE_Y - GROUND_SIZE.Y / 2, 0),
-            color = COLORS.regolith,
-            material = Enum.Material.Sand,
-            parent = folder,
-        })
+        -- Part 한 변은 PART_MAX_SIZE까지라 같은 크기 타일로 나눈다
+        local tilesX = math.ceil(GROUND_SIZE.X / PART_MAX_SIZE)
+        local tilesZ = math.ceil(GROUND_SIZE.Z / PART_MAX_SIZE)
+        local tileX, tileZ = GROUND_SIZE.X / tilesX, GROUND_SIZE.Z / tilesZ
+        for ix = 1, tilesX do
+            for iz = 1, tilesZ do
+                makePart({
+                    name = "MoonGround",
+                    size = Vector3.new(tileX, GROUND_SIZE.Y, tileZ),
+                    cframe = CFrame.new(
+                        -GROUND_SIZE.X / 2 + (ix - 0.5) * tileX,
+                        SURFACE_Y - GROUND_SIZE.Y / 2,
+                        -GROUND_SIZE.Z / 2 + (iz - 0.5) * tileZ
+                    ),
+                    color = COLORS.regolith,
+                    material = Enum.Material.Sand,
+                    parent = folder,
+                })
+            end
+        end
         return
     end
     local material = Enum.Material.Sand
@@ -1074,6 +1165,7 @@ local function buildTerrainAndSites(rect: Rect): GroundStats
         ring = 0,
         corridor = 0,
         scatter = 0,
+        near = 0,
     }
     buildBoulders(terrain, sites, rect, plan.footprints, stats)
     buildLighting()
@@ -1973,15 +2065,18 @@ function DevMap.ensure()
     if stats then
         print(
             string.format(
-                "[DevMap] 지면: 판 윗면 y %.1f, 지형 윗면 y %.1f, 크레이터 %d, 언덕 %d, 바위 %d(기지 둘레 %d, 회랑 옆 %d, 산포 %d)",
+                "[DevMap] 지면: 판 윗면 y %.1f, 지형 윗면 y %.1f, 범위 %d x %d, 크레이터 %d, 언덕 %d, 바위 %d(기지 둘레 %d, 회랑 옆 %d, 산포 %d, 기지 근처 산포 %d)",
                 GROUND_TOP,
                 SURFACE_Y,
+                GROUND_SIZE.X,
+                GROUND_SIZE.Z,
                 stats.craters,
                 stats.hills,
-                stats.ring + stats.corridor + stats.scatter,
+                stats.ring + stats.corridor + stats.scatter + stats.near,
                 stats.ring,
                 stats.corridor,
-                stats.scatter
+                stats.scatter,
+                stats.near
             )
         )
     else

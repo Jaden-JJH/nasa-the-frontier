@@ -246,10 +246,12 @@ local Config = {
     -- 그레이박스 맵(DevMap) 게임 영향 수치. 레이아웃 좌표는 DevMap.luau 상단 상수에 있다
     DEV_MAP = {
         iceDistanceBySite = { 450, 300, 180, 100 }, -- 패드 중심에서 가장 가까운 얼음 지점까지 studs
-        -- 바위 3층 (합계 약 220, 4차): 기지 둘레 고리 + 주행 회랑 양옆 무더기 + 맵 전체 산포
-        baseRingBouldersBySite = { 8, 10, 10, 12 }, -- 착륙지별 기지 판 둘레 (판 가장자리 + 6 ~ + 45)
+        -- 바위 4층 (4차 추가, 합계 약 560): 기지 둘레 고리 + 주행 회랑 양옆 무더기 + 맵 전체 산포 + 기지 근처 추가 산포
+        baseRingBouldersBySite = { 36, 40, 40, 46 }, -- 착륙지별 기지 판 둘레 (판 가장자리 + 6 ~ + 45). 어느 기지에서도 약 40개
         boulderCountBySite = { 16, 26, 26, 40 }, -- 착륙지별 주행 회랑 양옆 바위 무더기 (지형 위험)
-        scatterBoulders = 72, -- 맵 전체에 낮은 밀도로 흩뿌리는 바위 수
+        scatterBoulders = 260, -- 맵 전체(2600 x 2200)에 흩뿌리는 바위 수
+        scatterOuterDensity = 0.5, -- 중심 구역(1400 x 1100) 밖 산포 밀도 배율 (멀수록 듬성듬성)
+        nearBaseScatterFactor = 1.5, -- 판 가장자리 + 45 ~ + 200 띠의 산포 밀도 = 중심 구역의 이 배율
         iceBoulderCap = 12, -- 얼음 지점 하나 주변 바위 상한 (얼음이 바위에 묻히지 않게)
         iceBoulderCapRadius = 40, -- 위 상한을 세는 반지름
         seed = 20261017, -- 바위 배치 난수 시드 (항상 같은 맵)
