@@ -8,3 +8,6 @@ globalTypes.d.luau
 *.swp
 *.swo
 .cache/
+
+# oh-my-claudecode plugin state
+.omc/
