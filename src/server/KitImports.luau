@@ -211,6 +211,34 @@ function KitImports.alignLongAxis(model: Model, axis: "X" | "Z")
     end
 end
 
+-- 텍스처를 걷어 내고 단색 재질로 칠한다 (얼음 덩어리, 회색 바위)
+function KitImports.recolor(
+    model: Instance,
+    color: Color3,
+    material: Enum.Material,
+    transparency: number?
+)
+    for _, descendant in model:GetDescendants() do
+        if
+            descendant:IsA("SurfaceAppearance")
+            or descendant:IsA("Decal")
+            or descendant:IsA("Texture")
+        then
+            descendant:Destroy()
+        end
+    end
+    KitImports.forEachPart(model, function(part)
+        part.Color = color
+        part.Material = material
+        if transparency ~= nil then
+            part.Transparency = transparency
+        end
+        if part:IsA("MeshPart") then
+            part.TextureID = ""
+        end
+    end)
+end
+
 -- 고스트 외형: 반투명 단색, 충돌과 판정 없음
 function KitImports.ghostify(model: Model, color: Color3, transparency: number)
     for _, descendant in model:GetDescendants() do

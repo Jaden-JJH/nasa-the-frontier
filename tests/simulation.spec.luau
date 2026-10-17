@@ -379,6 +379,14 @@ return function(t)
         t.eq(clamped.food, 0)
     end)
 
+    t.test("미션 문구: 패널을 덜 깔아도 2일차가 되면 탑승 안내", function()
+        local s = installMany(playingState(1), 1)
+        t.contains(Simulation.missionText(s, Config), "패널 2장")
+        s = Simulation.applyDay(s, Config)
+        t.eq(s.day, Config.TUTORIAL_BOARD_DAY)
+        t.eq(s.missionText, Config.MISSION_TEXTS.boardRover)
+    end)
+
     t.test("미션 문구가 단계에 따라 바뀐다", function()
         local s = playingState(1)
         t.eq(
@@ -388,8 +396,17 @@ return function(t)
         local one = installMany(s, 1)
         t.eq(one.missionText, "솔라 필드에서 패널 2장을 설치하세요")
         s = installMany(s, 3)
-        t.eq(s.missionText, Config.MISSION_TEXTS.firstWaterTrip)
+        t.eq(
+            s.missionText,
+            Config.MISSION_TEXTS.boardRover,
+            "오늘 한도를 채우면 탑승 안내"
+        )
         local _, filled = Simulation.fillTank(s, Config)
+        t.eq(
+            Simulation.missionText(filled, Config),
+            Config.MISSION_TEXTS.firstWaterTrip,
+            "탱크를 채우면 하역 안내"
+        )
         local _, unloaded = Simulation.unloadWater(filled, Config)
         t.eq(unloaded.missionText, "Habitat A를 착공하세요 (Energy 60, Water 20 필요)")
         unloaded.energy = 100

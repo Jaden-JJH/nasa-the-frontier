@@ -33,8 +33,7 @@ function WaterLoop.refresh()
     if current then
         local state = ResourceState.get()
         current.Enabled = state.phase == "playing"
-        current.ObjectText =
-            string.format(Config.PROMPT_TEXTS.tankObject, state.rover.tank, state.rover.tankMax)
+        current.ObjectText = Config.PROMPT_TEXTS.tankObject
     end
 end
 
@@ -164,6 +163,7 @@ function WaterLoop.attach(base: Model)
     tankPart = tank
     local prompt = ServerUtil.makePrompt(tank, {
         actionText = Config.PROMPT_TEXTS.unload,
+        objectText = Config.PROMPT_TEXTS.tankObject,
         holdDuration = Config.PROMPT.unloadHold,
         enabled = false,
     })

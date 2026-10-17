@@ -19,8 +19,6 @@ type PadEntry = {
     ghost: Instance?,
     built: Instance?,
     prompt: ProximityPrompt,
-    label: TextLabel,
-    gui: BillboardGui,
 }
 
 local Construction = {}
@@ -29,48 +27,7 @@ local entries: { [string]: PadEntry } = {}
 local connections: { RBXScriptConnection } = {}
 local currentBase: Model? = nil
 
-local LABEL_BACKGROUND = Color3.fromRGB(16, 22, 40)
-local LABEL_TEXT = Color3.fromRGB(255, 255, 255)
-local LABEL_BACKGROUND_TRANSPARENCY = 0.25
-
-local function makeLabel(pad: BasePart): (BillboardGui, TextLabel)
-    local layout = Config.WORLD_LABEL
-    local gui = Instance.new("BillboardGui")
-    gui.Name = "StatusLabel"
-    gui.Size = UDim2.fromOffset(layout.width, layout.height)
-    gui.StudsOffset = Vector3.new(0, layout.offsetY, 0)
-    gui.MaxDistance = layout.maxDistance
-    gui.AlwaysOnTop = false
-    gui.Parent = pad
-
-    local label = Instance.new("TextLabel")
-    label.Size = UDim2.fromScale(1, 1)
-    label.BackgroundColor3 = LABEL_BACKGROUND
-    label.BackgroundTransparency = LABEL_BACKGROUND_TRANSPARENCY
-    label.TextColor3 = LABEL_TEXT
-    label.Font = Enum.Font.GothamMedium
-    label.TextSize = layout.textSize
-    label.TextWrapped = true
-    label.Text = ""
-    label.Parent = gui
-    return gui, label
-end
-
-local function labelText(id: string, state: GameState): string
-    local def = Config.MODULES[id]
-    local m = state.modules[id]
-    local t = Config.TEXTS
-    if m.status == "building" then
-        return string.format(t.labelBuilding, def.displayName, m.daysLeft)
-    elseif m.status == "active" then
-        return string.format(t.labelActive, def.displayName)
-    elseif m.status == "available" then
-        return string.format(t.labelAvailable, def.displayName)
-    end
-    return string.format(t.labelLocked, def.displayName)
-end
-
--- 상태에 맞춰 고스트, 완성 모델, 프롬프트, 표시판을 맞춘다
+-- 상태에 맞춰 고스트, 완성 모델, 프롬프트를 맞춘다 (패드 상태 표지판은 클라이언트가 state.modules로 그린다)
 local function applyVisuals(entry: PadEntry, state: GameState)
     local m = state.modules[entry.id]
     if not m then
@@ -83,7 +40,6 @@ local function applyVisuals(entry: PadEntry, state: GameState)
         entry.built.Parent = if m.status == "active" then entry.model else nil
     end
     entry.prompt.Enabled = m.status == "available" and state.phase == "playing"
-    entry.label.Text = labelText(entry.id, state)
 end
 
 -- prev와 new를 비교해 화면을 맞추고 상태 전환 알림을 보낸다. prev가 nil이면 알림 없이 맞추기만 한다
@@ -151,6 +107,8 @@ function Construction.attach(base: Model)
         local padPart = ServerUtil.findPart(model, "Pad")
         if model and padPart then
             local def = Config.MODULES[id]
+            -- 클라이언트가 패드 모델을 찾을 수 있게 (디자이너 BaseKit에도 붙인다)
+            model:SetAttribute("ModuleId", id)
             local ghost = model:FindFirstChild("Ghost")
             local built = model:FindFirstChild("Built")
             if ghost then
@@ -161,16 +119,10 @@ function Construction.attach(base: Model)
             end
             local prompt = ServerUtil.makePrompt(padPart, {
                 actionText = Config.PROMPT_TEXTS.build,
-                objectText = string.format(
-                    Config.PROMPT_TEXTS.buildObject,
-                    def.displayName,
-                    def.cost.energy,
-                    def.cost.water
-                ),
+                objectText = string.format(Config.PROMPT_TEXTS.buildObject, def.displayName),
                 holdDuration = Config.PROMPT.buildHold,
                 enabled = false,
             })
-            local gui, label = makeLabel(padPart)
             entries[id] = {
                 id = id,
                 model = model,
@@ -178,8 +130,6 @@ function Construction.attach(base: Model)
                 ghost = ghost,
                 built = built,
                 prompt = prompt,
-                label = label,
-                gui = gui,
             }
             table.insert(
                 connections,
@@ -201,7 +151,6 @@ function Construction.detach()
     table.clear(connections)
     for _, entry in entries do
         entry.prompt:Destroy()
-        entry.gui:Destroy()
         -- 빼 두었던 모델은 Base와 함께 사라지지 않으므로 직접 정리한다
         if entry.ghost and entry.ghost.Parent == nil then
             entry.ghost:Destroy()

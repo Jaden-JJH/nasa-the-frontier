@@ -140,10 +140,32 @@ local Config = {
         maxDistance = 12,
         buildHold = 0.5, -- 건설 시작 홀드 시간(초)
         unloadHold = 0, -- 물 하역은 즉시
+        boardDistance = 10, -- 로버 탑승 프롬프트 활성 거리
+        serverDistanceSlack = 6, -- 서버가 탑승 요청 거리를 검사할 때 지연을 감안한 여유
     },
 
     -- 고스트 모델 투명도 (GDD 6절)
     GHOST_TRANSPARENCY = 0.7,
+
+    -- 튜토리얼: 이 날이 되면 패널 설치 안내를 건너뛰고 로버 탑승 안내로 넘어간다
+    TUTORIAL_BOARD_DAY = 2,
+
+    -- 우주복 (서버가 캐릭터마다 입힌다). 색은 RGB 0..255, 크기는 studs
+    SUIT = {
+        suitColor = { 240, 240, 245 }, -- 몸통, 오른팔, 다리
+        accentColor = { 255, 140, 40 }, -- 왼팔 포인트
+        helmetColor = { 170, 220, 255 }, -- 반투명 유리 헬멧
+        helmetTransparency = 0.55,
+        helmetScale = 1.4, -- 머리 크기 대비 헬멧 지름
+        headMinSize = 1.2, -- 머리 크기 계산 하한 (R6 머리 Part는 실제 메시보다 얇다)
+        packColor = { 120, 124, 132 }, -- 생명유지 배낭
+        packSize = { 1.6, 2, 0.8 },
+        packOffsetY = 0.2,
+        panelColor = { 255, 140, 40 }, -- 가슴 제어판
+        panelSize = { 0.8, 0.5, 0.15 },
+        panelOffsetY = 0.3,
+        loadTimeout = 5, -- 머리와 몸통 파트를 기다리는 최대 시간(초)
+    },
 
     -- 모듈 패드 위 상태 표시판 (BillboardGui, 픽셀과 studs)
     WORLD_LABEL = {
@@ -204,6 +226,7 @@ local Config = {
         selecting = "착륙지를 선택하세요",
         landing = "착륙 중입니다. 잠시 기다리세요",
         installPanels = "솔라 필드에서 패널 %d장을 설치하세요",
+        boardRover = "로버에 다가가 E로 탑승하고 레이더로 얼음을 찾으세요",
         firstWaterTrip = "로버를 타고 얼음 지점에서 물을 채운 뒤 기지 물탱크에 하역하세요",
         -- 모듈별 착공 안내 (Habitat A, Farm B, Research Lab C)
         build = {
@@ -246,6 +269,7 @@ local Config = {
         tankAlreadyFull = "로버 탱크가 이미 가득 찼습니다",
         tankEmpty = "로버 탱크가 비어 있습니다",
         needDriver = "로버 운전석에 앉아 있어야 채취할 수 있습니다",
+        firstBoard = "W A S D 이동, Space 하차. 레이더의 점을 따라가세요",
         waterUnloaded = "물 %dW 하역 완료",
         needRoverAtTank = "로버를 물탱크 옆에 세워야 하역할 수 있습니다",
         roverRecovered = "로버가 복구되었습니다",
@@ -270,17 +294,21 @@ local Config = {
 
     -- ProximityPrompt 문구
     PROMPT_TEXTS = {
-        installPanel = "패널 설치",
-        installTomorrow = "내일 다시",
-        solarObject = "솔라 필드 %d/%d",
-        build = "건설 시작",
-        buildObject = "%s (Energy %d, Water %d)",
-        fillIce = "얼음 채취",
-        iceObject = "얼음 지점",
-        unload = "물 하역",
-        tankObject = "기지 물탱크 (로버 %d/%dW)",
-        recoverRover = "로버 복구",
+        -- ObjectText: 대상 이름
+        solarObject = "태양광 필드",
+        buildObject = "%s 패드",
+        iceObject = "얼음",
+        tankObject = "물탱크",
         recoverObject = "착륙선 콘솔",
+        roverObject = "로버",
+        -- ActionText: 동작
+        installPanel = "패널 설치 (오늘 %d/%d)",
+        installTomorrow = "내일 다시 (오늘 %d/%d)",
+        build = "건설 시작",
+        fillIce = "얼음 채취",
+        unload = "물 하역",
+        recoverRover = "로버 복구",
+        board = "탑승",
     },
 }
 

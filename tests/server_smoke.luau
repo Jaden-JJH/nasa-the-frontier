@@ -188,6 +188,7 @@ local function makePlayer(name, userId)
         UserId = userId,
         Character = nil,
         CharacterAdded = newSignal(),
+        CharacterAppearanceLoaded = newSignal(),
     }
     return p
 end
@@ -265,6 +266,30 @@ roblox.implementProperty("VehicleSeat", "SteerFloat", function()
 end)
 roblox.implementMethod("VehicleSeat", "GetPropertyChangedSignal", function(inst, prop)
     return signalFor(inst, "Changed:" .. prop)
+end)
+-- Terrain: FillBlock, FillBall은 호출만 기록 (SetMaterialColor와 GetMaterialColor는 Lune이 구현)
+local terrainCalls = {}
+roblox.implementMethod("Terrain", "FillBlock", function(_, cframe, size, material)
+    table.insert(
+        terrainCalls,
+        { kind = "block", cframe = cframe, size = size, material = material }
+    )
+end)
+roblox.implementMethod("Terrain", "FillBall", function(_, center, radius, material)
+    table.insert(
+        terrainCalls,
+        { kind = "ball", center = center, radius = radius, material = material }
+    )
+end)
+-- seat:Sit(humanoid): 앉히고 Occupant 변경 신호를 보낸다
+roblox.implementMethod("VehicleSeat", "Sit", function(seat, hum)
+    seat.Occupant = hum
+    hum.SeatPart = seat
+    hum.Sit = true
+    signalFor(seat, "Changed:Occupant"):Fire()
+end)
+roblox.implementProperty("Model", "ChildAdded", function(inst)
+    return signalFor(inst, "ChildAdded")
 end)
 roblox.implementProperty("ProximityPrompt", "Triggered", function(inst)
     return signalFor(inst, "Triggered")
@@ -406,6 +431,17 @@ local Shared = dm:GetService("ReplicatedStorage"):FindFirstChild("Shared")
 local Workspace = dm:GetService("Workspace")
 local ServerStorage = dm:GetService("ServerStorage")
 
+-- 첫 번째 place: 실제 Roblox처럼 Terrain과 기본 Baseplate가 있다 (두 번째 place에는 없음)
+local terrainInstance = Instance.new("Terrain")
+terrainInstance.Parent = dm:GetService("Workspace")
+local baseplate = Instance.new("Part")
+baseplate.Name = "Baseplate"
+baseplate.Size = Vector3.new(2048, 16, 2048)
+baseplate.CFrame = CFrame.new(0, -8, 0)
+baseplate.Parent = dm:GetService("Workspace")
+local baseplateTexture = Instance.new("Texture")
+baseplateTexture.Parent = baseplate
+
 -- 부팅 ------------------------------------------------------------------
 print("[부팅]")
 task.spawn(function()
@@ -494,6 +530,124 @@ check(
     "바위 수 " .. #Workspace.DevTerrain.Boulders:GetChildren()
 )
 
+-- 달 지형 -----------------------------------------------------------------
+print("[지형]")
+do
+    local GROUND_TOP = 0.5
+    local blocks, balls = {}, {}
+    for _, call in terrainCalls do
+        table.insert(if call.kind == "block" then blocks else balls, call)
+    end
+    local block = blocks[1]
+    check(
+        #blocks == 1
+            and math.abs(block.cframe.Position.Y + block.size.Y / 2 - GROUND_TOP) < 1e-6
+            and block.size.Y == 24
+            and block.size.X >= 1400
+            and block.size.Z >= 1100,
+        "FillBlock 한 번: 두께 24, 윗면 y 0.5, 1400 x 1100"
+    )
+    check(
+        terrainInstance:GetMaterialColor(roblox.Enum.Material.Sand)
+            == roblox.Color3.fromRGB(128, 126, 122),
+        "Sand 재질 색 = 달 표토 회색 (128, 126, 122)"
+    )
+    check(
+        Workspace.DevTerrain:FindFirstChild("MoonGround") == nil,
+        "Terrain이 있으면 지면 Part를 만들지 않음"
+    )
+    check(
+        baseplate.Transparency == 1
+            and baseplate.CanCollide == false
+            and baseplateTexture.Transparency == 1,
+        "기본 Baseplate는 플레이 중 숨김"
+    )
+    local craters, hills = 0, 0
+    local pads, ices = {}, {}
+    for i = 1, 4 do
+        table.insert(pads, Workspace.LandingPads["Pad" .. i].CFrame.Position)
+    end
+    for _, ice in Workspace.IceSites:GetChildren() do
+        table.insert(ices, ice.CFrame.Position)
+    end
+    local function flatDistance(a, b)
+        return Vector3.new(a.X - b.X, 0, a.Z - b.Z).Magnitude
+    end
+    local violations = 0
+    local nearPad = { 0, 0, 0, 0 }
+    local craterCenters = {}
+    for _, ball in balls do
+        local dy = ball.center.Y - GROUND_TOP
+        local footprint = if math.abs(dy) < ball.radius
+            then math.sqrt(ball.radius ^ 2 - dy ^ 2)
+            else 0
+        for _, pad in pads do
+            if flatDistance(ball.center, pad) < 80 + footprint - 1e-6 then
+                violations += 1
+            end
+        end
+        for _, ice in ices do
+            if flatDistance(ball.center, ice) < 30 + footprint - 1e-6 then
+                violations += 1
+            end
+        end
+        if ball.material == roblox.Enum.Material.Air then
+            craters += 1
+            table.insert(craterCenters, { center = ball.center, footprint = footprint })
+            for i, pad in pads do
+                if flatDistance(ball.center, pad) <= 80 + 220 then
+                    nearPad[i] += 1
+                end
+            end
+        elseif ball.radius >= 40 then
+            hills += 1
+        end
+    end
+    check(
+        violations == 0,
+        "모든 FillBall의 지표면 원이 패드 반지름 80, 얼음 반지름 30 밖 (침범 "
+            .. violations
+            .. ")"
+    )
+    check(craters == 20, "크레이터 " .. craters .. "개")
+    check(hills >= 6 and hills <= 8, "언덕 " .. hills .. "개")
+    check(
+        nearPad[4] > nearPad[1],
+        string.format(
+            "Pad4(지형 위험 높음) 주변 크레이터 %d개 > Pad1 주변 %d개",
+            nearPad[4],
+            nearPad[1]
+        )
+    )
+    local boulderInCrater = 0
+    for _, boulder in Workspace.DevTerrain.Boulders:GetChildren() do
+        for _, crater in craterCenters do
+            if flatDistance(boulder.CFrame.Position, crater.center) < crater.footprint then
+                boulderInCrater += 1
+            end
+        end
+    end
+    check(boulderInCrater == 0, "바위가 크레이터 안에 놓이지 않음")
+    local firstBoulder = Workspace.DevTerrain.Boulders:GetChildren()[1]
+    check(
+        firstBoulder.Color == roblox.Color3.fromRGB(90, 88, 86),
+        "그레이박스 바위 회색 (90, 88, 86)"
+    )
+    -- 얼음 지점 (그레이박스)
+    local ice1 = Workspace.IceSites.Ice1
+    local glow = ice1:FindFirstChild("IceGlow")
+    local light = glow and glow:FindFirstChildOfClass("PointLight")
+    check(
+        ice1.Material == roblox.Enum.Material.Ice
+            and ice1.Color == roblox.Color3.fromRGB(170, 225, 255)
+            and math.abs(ice1.Transparency - 0.1) < 1e-6,
+        "그레이박스 얼음: Ice 재질, 하늘색, 투명도 0.1"
+    )
+    check(
+        light ~= nil and light.Range == 18 and math.abs(light.Brightness - 1.2) < 1e-6,
+        "얼음 중심에 PointLight (Range 18, Brightness 1.2)"
+    )
+end
 check(state().phase == "selecting", "부팅 후 selecting")
 
 -- 플레이어 입장 ---------------------------------------------------------
@@ -511,12 +665,92 @@ local humanoid = Instance.new("Humanoid")
 humanoid.Health = 100
 humanoid.Parent = character
 character.PrimaryPart = root
+-- R15 머리와 몸통, 평상복과 장신구 (우주복 적용 확인용)
+local function dressCasual(model, rootCFrame)
+    local head = Instance.new("Part")
+    head.Name = "Head"
+    head.Size = Vector3.new(1.2, 1.2, 1.2)
+    head.CFrame = rootCFrame * CFrame.new(0, 2, 0)
+    head.Parent = model
+    local torso = Instance.new("Part")
+    torso.Name = "UpperTorso"
+    torso.Size = Vector3.new(2, 1.6, 1)
+    torso.CFrame = rootCFrame * CFrame.new(0, 0.6, 0)
+    torso.Parent = model
+    for _, className in { "Shirt", "Pants", "ShirtGraphic" } do
+        Instance.new(className).Parent = model
+    end
+    local hair = Instance.new("Accessory")
+    hair.Name = "Hair"
+    local handle = Instance.new("Part")
+    handle.Name = "Handle"
+    handle.Parent = hair
+    hair.Parent = model
+    Instance.new("BodyColors").Parent = model
+end
+dressCasual(character, root.CFrame)
 character.Parent = Workspace
 alice.Character = character
 
 table.insert(players, alice)
 signalFor(PlayersService, "PlayerAdded"):Fire(alice)
 advance(0)
+-- 우주복이 입혀졌는지
+local function suitOk(model)
+    for _, child in model:GetChildren() do
+        if
+            child:IsA("Accessory")
+            or child:IsA("Shirt")
+            or child:IsA("Pants")
+            or child:IsA("ShirtGraphic")
+        then
+            return false, "평상복 남음: " .. child.ClassName
+        end
+    end
+    local helmet = model:FindFirstChild("SuitHelmet")
+    local pack = model:FindFirstChild("SuitPack")
+    local panel = model:FindFirstChild("SuitPanel")
+    if not helmet or not pack or not panel then
+        return false, "헬멧, 배낭, 제어판 중 없음"
+    end
+    if
+        math.abs(helmet.Transparency - Config.SUIT.helmetTransparency) > 1e-6
+        or helmet.CanQuery
+        or helmet.CanCollide
+        or not helmet.Massless
+    then
+        return false, "헬멧 설정"
+    end
+    local weld = helmet:FindFirstChildOfClass("WeldConstraint")
+    if not weld or weld.Part0 ~= model:FindFirstChild("Head") then
+        return false, "헬멧이 머리에 용접되지 않음"
+    end
+    local colors = model:FindFirstChildOfClass("BodyColors")
+    local suit = Config.SUIT
+    if
+        not colors
+        or colors.TorsoColor3 ~= roblox.Color3.fromRGB(table.unpack(suit.suitColor))
+        or colors.LeftArmColor3 ~= roblox.Color3.fromRGB(table.unpack(suit.accentColor))
+    then
+        return false, "BodyColors"
+    end
+    return true, "ok"
+end
+do
+    local ok, why = suitOk(character)
+    check(
+        ok,
+        "입장 직후 우주복 (평상복과 장신구 제거, 헬멧, 배낭, 제어판, 흰 수트 주황 왼팔): "
+            .. why
+    )
+    -- 늦게 붙는 장신구도 걷어 낸다
+    local late = Instance.new("Accessory")
+    late.Name = "LateHat"
+    late.Parent = character
+    signalFor(character, "ChildAdded"):Fire(late)
+    advance(0)
+    check(character:FindFirstChild("LateHat") == nil, "늦게 붙은 장신구 제거")
+end
 local open = lastSent("SiteSelectionOpen")
 check(open ~= nil and open.args[1].chooserUserId == 1, "SiteSelectionOpen 권한자 Alice")
 check(
@@ -651,7 +885,19 @@ check(
     lastSent("Notify").args[1] == "오늘 설치 한도에 도달했습니다",
     "4번째는 한도 경고"
 )
-check(installPrompt.ActionText == "내일 다시", "한도 도달 시 프롬프트 '내일 다시'")
+check(
+    installPrompt.ActionText == string.format(Config.PROMPT_TEXTS.installTomorrow, 3, 3),
+    "한도 도달 시 프롬프트 '" .. installPrompt.ActionText .. "'"
+)
+check(
+    installPrompt.ObjectText == "태양광 필드"
+        and installPrompt.Style == roblox.Enum.ProximityPromptStyle.Custom,
+    "패널 프롬프트 ObjectText '태양광 필드', Style Custom"
+)
+check(
+    state().missionText == Config.MISSION_TEXTS.boardRover,
+    "오늘 한도를 채우면 탑승 안내 미션"
+)
 check(#base.SolarField.Panels:GetChildren() == 3, "패널 모델 3개 배치")
 local slot1 = base.SolarField.Slots.Slot1
 local panel1 = base.SolarField.Panels.Panel1
@@ -682,7 +928,10 @@ check(
         and state().panelsInstalledToday == 0,
     "DayTick: day 2, 시작 에너지 + 패널 3장 발전, 오늘 설치 초기화"
 )
-check(installPrompt.ActionText == "패널 설치", "다음 날 프롬프트 복귀")
+check(
+    installPrompt.ActionText == string.format(Config.PROMPT_TEXTS.installPanel, 0, 3),
+    "다음 날 프롬프트 '" .. installPrompt.ActionText .. "'"
+)
 
 -- 산소: 야외에 세워 두면 고갈 ---------------------------------------------
 print("[산소]")
@@ -811,6 +1060,74 @@ check(
         and consolePrompt.HoldDuration == Config.ROVER_RECOVERY.hold,
     "복구 프롬프트 설정"
 )
+
+-- 탑승 프롬프트 ----------------------------------------------------------
+print("[탑승]")
+do
+    local boardPrompt = newRover.Chassis:FindFirstChildOfClass("ProximityPrompt")
+    check(
+        boardPrompt ~= nil
+            and boardPrompt.ActionText == "탑승"
+            and boardPrompt.ObjectText == "로버"
+            and boardPrompt.HoldDuration == 0
+            and boardPrompt.MaxActivationDistance == 10
+            and boardPrompt.RequiresLineOfSight == false
+            and boardPrompt.Enabled == true,
+        "재생성된 로버 섀시에 탑승 프롬프트 (탑승, 로버, 홀드 0, 거리 10)"
+    )
+    -- 멀리서 보낸 요청은 거부
+    root.CFrame = newRover.Chassis.CFrame * CFrame.new(60, 0, 0)
+    signalFor(boardPrompt, "Triggered"):Fire(alice)
+    advance(0)
+    check(newRover.DriverSeat.Occupant == nil, "멀리서 탑승 요청은 거부")
+    root.CFrame = newRover.Chassis.CFrame * CFrame.new(6, 0, 0)
+    signalFor(boardPrompt, "Triggered"):Fire(alice)
+    advance(0)
+    check(
+        newRover.DriverSeat.Occupant == humanoid and humanoid.SeatPart == newRover.DriverSeat,
+        "프롬프트로 seat:Sit 호출"
+    )
+    check(boardPrompt.Enabled == false, "누가 앉으면 탑승 프롬프트 꺼짐")
+    local note = lastSent("Notify")
+    check(
+        note ~= nil
+            and note.target == alice
+            and note.args[1] == Config.TEXTS.firstBoard
+            and note.args[2] == "info",
+        "첫 탑승 안내: " .. tostring(note and note.args[1])
+    )
+    -- 모든 프롬프트 스타일 Custom
+    local count, custom = 0, 0
+    for _, d in Workspace:GetDescendants() do
+        if d:IsA("ProximityPrompt") then
+            count += 1
+            if d.Style == roblox.Enum.ProximityPromptStyle.Custom then
+                custom += 1
+            end
+        end
+    end
+    check(
+        count > 0 and custom == count,
+        string.format("모든 프롬프트 Style Custom (%d/%d)", custom, count)
+    )
+    -- 패드 모델 ModuleId, 서버 패드 표지판 없음
+    local idsOk, signs = true, 0
+    for _, id in { "A", "B", "C" } do
+        if base.ModulePads["Pad" .. id]:GetAttribute("ModuleId") ~= id then
+            idsOk = false
+        end
+        if kit.ModulePads["Pad" .. id]:GetAttribute("ModuleId") ~= id then
+            idsOk = false
+        end
+    end
+    for _, d in base.ModulePads:GetDescendants() do
+        if d:IsA("BillboardGui") then
+            signs += 1
+        end
+    end
+    check(idsOk, "PadA/B/C 모델 Attribute ModuleId (BaseKit, Base)")
+    check(signs == 0, "모듈 패드에 서버 BillboardGui 표지판 없음")
+end
 
 -- 건설 -----------------------------------------------------------------
 print("[건설]")
@@ -951,6 +1268,27 @@ check(
     over.args[1].won == false and over.args[1].reason == "물이 3일 연속 바닥났습니다",
     "실패 사유: " .. over.args[1].reason
 )
+
+-- 리스폰하면 우주복을 다시 입힌다
+do
+    local reborn = Instance.new("Model")
+    reborn.Name = "AliceCharacter2"
+    local newRoot = Instance.new("Part")
+    newRoot.Name = "HumanoidRootPart"
+    newRoot.CFrame = CFrame.new(0, 60, 0)
+    newRoot.Parent = reborn
+    local newHumanoid = Instance.new("Humanoid")
+    newHumanoid.Health = 100
+    newHumanoid.Parent = reborn
+    reborn.PrimaryPart = newRoot
+    dressCasual(reborn, newRoot.CFrame)
+    reborn.Parent = Workspace
+    alice.Character = reborn
+    alice.CharacterAdded:Fire(reborn)
+    advance(1)
+    local ok, why = suitOk(reborn)
+    check(ok, "리스폰 후 우주복 재적용: " .. why)
+end
 
 -- 마지막 플레이어 퇴장 ---------------------------------------------------
 print("[퇴장]")
@@ -1282,14 +1620,16 @@ do
     local seat2 = rover2.DriverSeat
     local chassis2 = rover2.Chassis
     local seatHeight = seat2.CFrame.Position.Y - vLo.Y
+    local fromFront = seat2.CFrame.Position.Z - vLo.Z -- 앞쪽 = -Z
     check(
-        seatHeight <= 4.5 + EPS
-            and math.abs(seatHeight - math.min(vSize.Y * 0.55, 4.5)) < EPS
-            and seat2.CFrame.Position.Z < (vLo.Z + vHi.Z) / 2
-            and math.abs(seat2.CFrame.Position.X - chassis2.CFrame.Position.X) < EPS,
+        math.abs(seatHeight - math.min(vSize.Y * 0.35, 4.5)) < EPS
+            and math.abs(fromFront - vSize.Z * 0.35) < EPS
+            and math.abs(seat2.CFrame.Position.X - chassis2.CFrame.Position.X) < EPS
+            and seat2.Transparency == 1,
         string.format(
-            "DriverSeat: 메시 바닥에서 %.2f (4.5 이하), 앞쪽 중앙",
-            seatHeight
+            "DriverSeat 캐빈 안: 앞에서 길이의 %.0f%%, 바닥에서 높이의 %.0f%%, 투명",
+            fromFront / vSize.Z * 100,
+            seatHeight / vSize.Y * 100
         )
     )
     local wheelHalf = rover2.WheelFL.Size.X / 2
@@ -1421,6 +1761,18 @@ check(
     "Rock1, Rock2 순환 사용"
 )
 
+check(
+    Workspace2.DevTerrain:FindFirstChild("MoonGround") ~= nil,
+    "Terrain이 없는 환경에서는 평평한 지면 Part로 대체"
+)
+check(
+    allParts(importRocks[1], function(p)
+        return p.Color == roblox.Color3.fromRGB(90, 88, 86)
+            and p.Material == roblox.Enum.Material.Basalt
+    end),
+    "바위 메시도 회색 Basalt로 통일"
+)
+
 -- KitImports 장식 ---------------------------------------------------------
 -- 최상위 지역 변수 한도(200)를 넘지 않도록 함수 안에서 돌린다
 local function runDecorScenario()
@@ -1474,6 +1826,25 @@ local function runDecorScenario()
         end),
         "결정 메시: 고정, CanCollide"
     )
+    check(
+        allParts(crystal, function(p)
+            return p.Material == roblox.Enum.Material.Ice
+                and p.Color == roblox.Color3.fromRGB(170, 225, 255)
+                and math.abs(p.Transparency - 0.1) < 1e-6
+        end),
+        "결정 메시: 텍스처 없는 Ice 재질, 하늘색, 투명도 0.1"
+    )
+    do
+        local glow = iceB:FindFirstChild("IceGlow")
+        local light = glow and glow:FindFirstChildOfClass("PointLight")
+        local cLo2, cHi2 = boundsOf(crystal)
+        check(
+            light ~= nil
+                and light.Range == 18
+                and ((iceB.CFrame * glow.CFrame).Position - (cLo2 + cHi2) / 2).Magnitude < 1e-3,
+            "결정 메시 중심에 PointLight"
+        )
+    end
     -- 물탱크
     local tankB = kitImport.WaterTank
     local tankVisual = tankB:FindFirstChild("Visual")

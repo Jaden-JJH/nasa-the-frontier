@@ -80,10 +80,11 @@ function SolarPanels.refresh()
     local s = ResourceState.get()
     local texts = Config.PROMPT_TEXTS
     current.Enabled = s.phase == "playing" and s.panelsInstalled < s.panelsTotal
-    current.ActionText = if s.panelsInstalledToday >= s.panelsPerDay
+    local template = if s.panelsInstalledToday >= s.panelsPerDay
         then texts.installTomorrow
         else texts.installPanel
-    current.ObjectText = string.format(texts.solarObject, s.panelsInstalled, s.panelsTotal)
+    current.ActionText = string.format(template, s.panelsInstalledToday, s.panelsPerDay)
+    current.ObjectText = texts.solarObject
 end
 
 local function onTriggered(player: Player)
@@ -129,7 +130,8 @@ function SolarPanels.attach(base: Model)
     end
 
     local newPrompt = ServerUtil.makePrompt(installPad, {
-        actionText = Config.PROMPT_TEXTS.installPanel,
+        actionText = string.format(Config.PROMPT_TEXTS.installPanel, 0, Config.PANELS_PER_DAY),
+        objectText = Config.PROMPT_TEXTS.solarObject,
         holdDuration = Config.PANEL_INSTALL_HOLD,
         enabled = false,
     })

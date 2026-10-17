@@ -158,7 +158,7 @@ ServerStorage
       Slots (Folder)
         Slot1 .. Slot30 (Part)      패널이 놓일 자리. 설치되면 PanelTemplate 복제본이 위에 생김
     ModulePads (Folder)
-      PadA, PadB, PadC (Model)
+      PadA, PadB, PadC (Model)    Attribute ModuleId(string, A/B/C). 클라이언트 표지판이 이걸로 찾는다
         Pad (Part)                  ProximityPrompt 부착 대상. ActionText "건설 시작"
         Ghost (Model)               반투명 미리보기. building 중 표시
         Built (Model)               완공 모델. active 전에는 Parent를 ServerStorage로 빼두거나 투명
@@ -167,7 +167,7 @@ ServerStorage
   PanelTemplate (Model)             태양광 패널 1장
 ```
 
-ProximityPrompt 공통: `RequiresLineOfSight = false`, `MaxActivationDistance = 12`. 로버 얼음 프롬프트는 각 Ice 파트에 서버가 부착하고, 로버 DriverSeat에 플레이어가 앉아 있고 Ice와 로버 거리가 Config.ICE_PROMPT_DISTANCE 이내일 때만 Enabled.
+ProximityPrompt 공통: `RequiresLineOfSight = false`, `MaxActivationDistance = 12`, `Style = Custom`(2026-10-17 변경). 서버는 ObjectText(대상 이름)와 ActionText(동작)만 채우고, 화면 표시는 클라이언트 PromptUI가 ProximityPromptService 이벤트로 그린다. 로버 탑승은 로버 섀시의 프롬프트(ObjectText "로버", ActionText "탑승")로 하며 Triggered 시 서버가 seat:Sit를 호출한다. 모듈 패드 표지판은 서버가 만들지 않고 클라이언트 PadSignUI가 PadX 모델의 Attribute `ModuleId`(A/B/C)와 state.modules로 그린다. 로버 얼음 프롬프트는 각 Ice 파트에 서버가 부착하고, 로버 DriverSeat에 플레이어가 앉아 있고 Ice와 로버 거리가 Config.ICE_PROMPT_DISTANCE 이내일 때만 Enabled.
 
 ## 5. 클라이언트 모듈 경계 (src/client)
 
@@ -179,6 +179,8 @@ ProximityPrompt 공통: `RequiresLineOfSight = false`, `MaxActivationDistance = 
 | LandingCamera.lua | LandingSequence 수신. Config.LANDING_SECONDS 동안 카메라 Scriptable로 하강 연출 후 Custom 복귀 |
 | HUD.lua | StateUpdate 수신. Energy/Water/Food/Day, 순증감(+3/일 형식, 음수는 빨강), 패널 n/30 (오늘 k/3), 모듈 A/B/C 상태와 진행바, 로버 탱크, 미션 텍스트, 2배속 토글(SetSpeed) |
 | OxygenBar.lua | OxygenUpdate 수신. 실외일 때 강조, 20 이하 경고 |
+| PromptUI.lua | 커스텀 ProximityPrompt 표시(키 아이콘, ObjectText, ActionText, 홀드 진행 바). 서버 프롬프트는 전부 Style Custom |
+| PadSignUI.lua | 모듈 패드 위 표지판(이름, 상태 배지, 진행 바, 비용). PadX의 ModuleId Attribute와 state.modules 사용 |
 | RadarUI.lua | 로컬 계산. 자신이 DriverSeat에 앉아 있을 때만 표시. Workspace.IceSites 각 파트까지 거리로 점 크기와 방향 표시, Config.RADAR_RANGE 안이면 비프(사운드 선택) |
 | ToastUI.lua | Notify 수신. 3초 표시 후 사라짐. 최대 3개 스택 |
 | ResultUI.lua | GameOver 수신. 승리/실패 공용. 요약 수치. 재도전 버튼(RequestRestart) |

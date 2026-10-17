@@ -28,6 +28,28 @@ local GROUND_SIZE = Vector3.new(1400, 4, 1100)
 local LANDING_PAD_SIZE = Vector3.new(48, 1, 48) -- 절반이 지면에 묻힌다
 local ICE_SIZE = Vector3.new(14, 3, 14)
 local ICE_LIGHT_RANGE = 18
+local ICE_LIGHT_BRIGHTNESS = 1.2
+local ICE_TRANSPARENCY = 0.1 -- 얼음 덩어리 (Part와 결정 메시 공통)
+
+-- 달 지형 (Roblox Terrain). Terrain이 없는 환경(Lune 스모크)에서는 평평한 지면 Part로 대신한다
+local TERRAIN_THICKNESS = 24 -- 윗면은 GROUND_TOP
+local TERRAIN_SEED_OFFSET = 1 -- 바위 배치와 다른 난수 흐름 (같은 시드에서 결정적)
+local TERRAIN_EDGE_MARGIN = 10 -- 지형 특징을 맵 가장자리에서 띄우는 거리
+local PAD_TERRAIN_CLEARANCE = 80 -- 착륙 패드 중심 반지름 (기지 키트, 패널 슬롯 포함) 안은 평지 유지
+local ICE_TERRAIN_CLEARANCE = 30 -- 얼음 지점 중심 반지름 안은 평지 유지
+local FEATURE_ATTEMPTS = 40
+local CRATER_RADIUS_MIN, CRATER_RADIUS_MAX = 10, 40
+local CRATER_DEPTH_RATIO = 0.3 -- 사발 깊이 = 반지름 x 비율 (얕은 사발)
+local CRATER_RIM_HEIGHT_RATIO = 0.08 -- 테두리 둔덕 높이 = 반지름 x 비율
+local CRATER_RIM_PIECES = 12 -- 테두리는 가장자리를 따라 작은 공을 둘러 만든다
+local CRATER_RIM_PIECE_RATIO = 0.3 -- 테두리 공 반지름 = 크레이터 반지름 x 비율
+local CRATER_RIM_PIECE_MIN = 4
+local CRATERS_NEAR_SITE = { 1, 2, 2, 6 } -- 착륙지 주변 크레이터 (Pad4는 지형 위험 높음)
+local CRATER_NEAR_RING = 220 -- 착륙지 "주변" 거리
+local CRATERS_SCATTERED = 9 -- 맵 전체 (주변 11개와 합쳐 20개)
+local HILL_COUNT = 7
+local HILL_RADIUS_MIN, HILL_RADIUS_MAX = 40, 80
+local HILL_HEIGHT_MIN, HILL_HEIGHT_MAX = 2, 5 -- 표면 위로 솟는 높이
 
 -- 얼음 지점 위치 (x, z)
 local ICE_POSITIONS = {
@@ -119,9 +141,10 @@ local WHEEL_CORNERS: { { x: number, z: number, tag: string } } = {
 local ROVER_SEAT_SIZE = Vector3.new(2, 1, 2)
 local ROVER_VISUAL_LENGTH = 11 -- 로버 메시 앞뒤 길이 (리그 길이). 폭과 높이는 원본 비율 그대로
 local ROVER_MIN_WHEEL_OFFSET_X = 2.5 -- 메시가 아주 좁아도 바퀴 간격은 이보다 좁히지 않는다 (전복 방지)
-local ROVER_SEAT_HEIGHT_RATIO = 0.55 -- 좌석 중심 높이 = 메시 바닥에서 메시 높이의 이 비율 (조종석 높이)
+-- 좌석은 캐빈 안: 앞쪽(-Z) 끝에서 메시 길이의 35% 지점, 메시 바닥에서 높이의 35% (앉은 캐릭터 머리가 천장 아래)
+local ROVER_SEAT_HEIGHT_RATIO = 0.35 -- 좌석 중심 높이 = 메시 바닥에서 메시 높이의 이 비율
 local ROVER_SEAT_MAX_HEIGHT = 4.5 -- 좌석 중심 높이 상한 (메시 바닥 기준)
-local ROVER_SEAT_FORWARD_RATIO = 0.2 -- 좌석을 메시 중심에서 앞쪽(-Z)으로 메시 길이의 이 비율만큼
+local ROVER_SEAT_FROM_FRONT_RATIO = 0.35 -- 좌석 중심 = 메시 앞쪽 끝에서 메시 길이의 이 비율만큼 뒤
 local ROVER_SHOW_RIG_WHEELS = false -- 메시를 쓸 때 물리 바퀴 원기둥을 보일지 (메시 바퀴와 겹치므로 기본은 숨김)
 local LANDER_VISUAL_BOX = Vector3.new(14, 40, 14) -- 폭 약 14, 높이는 원본 비율대로 (높이 상한은 사실상 없음)
 local LANDER_ZONE_MARGIN = 4 -- 착륙선 메시 경계 상자 바깥으로 산소 구역을 넓히는 거리
@@ -156,10 +179,10 @@ local CRATE_YAWS = { 0, 12, -8, 20 } -- 2 x 2 상자의 회전(도)
 
 -- 색상
 local COLORS = {
-    ground = Color3.fromRGB(118, 118, 122),
     landingPad = Color3.fromRGB(150, 150, 155),
-    ice = Color3.fromRGB(175, 225, 255),
-    boulder = Color3.fromRGB(58, 58, 62),
+    ice = Color3.fromRGB(170, 225, 255),
+    boulder = Color3.fromRGB(90, 88, 86), -- 표토와 어울리는 회색 바위 (KitImports 바위 메시도 이 색)
+    regolith = Color3.fromRGB(128, 126, 122), -- 달 표토 (Terrain 재질 색)
     lander = Color3.fromRGB(210, 190, 130),
     landerTrim = Color3.fromRGB(90, 90, 95),
     spawn = Color3.fromRGB(255, 255, 255),
@@ -313,28 +336,44 @@ local function addPadRing(pad: BasePart)
     ring.Parent = pad
 end
 
--- 얼음 Part는 숨기고(프롬프트와 레이더 거리 기준은 그대로) 결정 메시를 얹는다
+-- 얼음 지점 외형: Part를 얼음 재질로 칠하고, IceCrystal 메시가 있으면 Part는 숨기고(프롬프트와 레이더
+-- 거리 기준은 그대로) 메시를 텍스처 없는 얼음 덩어리로 얹는다. 중심에 하늘색 PointLight 하나
 local function dressIce(ice: BasePart)
+    ice.Color = COLORS.ice
+    ice.Material = Enum.Material.Ice
+    ice.Transparency = ICE_TRANSPARENCY
+    local glowCenter = ice.CFrame.Position
     local crystal = KitImports.take("IceCrystal")
-    if not crystal then
-        return
+    if crystal then
+        local box = Vector3.new(
+            ice.Size.X * ICE_CRYSTAL_FILL,
+            ICE_CRYSTAL_MAX_HEIGHT,
+            ice.Size.Z * ICE_CRYSTAL_FILL
+        )
+        local p = ice.CFrame.Position
+        KitImports.fitInto(
+            crystal,
+            box,
+            Vector3.new(p.X, p.Y - ice.Size.Y / 2 - ICE_CRYSTAL_EMBED, p.Z)
+        )
+        KitImports.setStatic(crystal, true)
+        KitImports.recolor(crystal, COLORS.ice, Enum.Material.Ice, ICE_TRANSPARENCY)
+        crystal.Name = "Crystal"
+        crystal.Parent = ice
+        ice.Transparency = 1
+        ice.CanCollide = false -- 충돌은 결정 메시가 맡는다
+        local lo, hi = KitImports.bounds(crystal)
+        glowCenter = (lo + hi) / 2
     end
-    local box = Vector3.new(
-        ice.Size.X * ICE_CRYSTAL_FILL,
-        ICE_CRYSTAL_MAX_HEIGHT,
-        ice.Size.Z * ICE_CRYSTAL_FILL
-    )
-    local p = ice.CFrame.Position
-    KitImports.fitInto(
-        crystal,
-        box,
-        Vector3.new(p.X, p.Y - ice.Size.Y / 2 - ICE_CRYSTAL_EMBED, p.Z)
-    )
-    KitImports.setStatic(crystal, true)
-    crystal.Name = "Crystal"
-    crystal.Parent = ice
-    ice.Transparency = 1
-    ice.CanCollide = false -- 충돌은 결정 메시가 맡는다
+    local glow = Instance.new("Attachment")
+    glow.Name = "IceGlow"
+    glow.CFrame = ice.CFrame:ToObjectSpace(CFrame.new(glowCenter))
+    glow.Parent = ice
+    local light = Instance.new("PointLight")
+    light.Color = COLORS.ice
+    light.Range = ICE_LIGHT_RANGE
+    light.Brightness = ICE_LIGHT_BRIGHTNESS
+    light.Parent = glow
 end
 
 -- 바닥에 놓이는 슬래브: 윗면이 floorY + height, 아래로 EMBED만큼 묻힌다
@@ -431,8 +470,20 @@ local function buildLighting()
     end
 end
 
-local function isClear(position: Vector3, padPositions: { Vector3 }): boolean
+type Footprint = { x: number, z: number, r: number }
+
+-- 바위를 놓아도 되는 자리인지 (기지, 얼음, 맵 경계, 크레이터와 언덕을 피한다)
+local function isClear(
+    position: Vector3,
+    padPositions: { Vector3 },
+    footprints: { Footprint }
+): boolean
     local flat = Vector3.new(position.X, 0, position.Z)
+    for _, f in footprints do
+        if (flat - Vector3.new(f.x, 0, f.z)).Magnitude < f.r + BOULDER_MAX then
+            return false
+        end
+    end
     for _, pad in padPositions do
         if (flat - Vector3.new(pad.X, 0, pad.Z)).Magnitude < KIT_CLEARANCE then
             return false
@@ -494,6 +545,7 @@ local function prepareRocks(): RockSet
     local templates = KitImports.takeRocks()
     for _, rock in templates do
         KitImports.fitInto(rock, Vector3.one * ROCK_BASE_SIZE, Vector3.zero)
+        KitImports.recolor(rock, COLORS.boulder, Enum.Material.Basalt)
         KitImports.forEachPart(rock, function(part)
             part.Anchored = true
             part.CanCollide = true
@@ -502,7 +554,11 @@ local function prepareRocks(): RockSet
     return { templates = templates, used = 0 }
 end
 
-local function buildBoulders(terrain: Instance, padPositions: { Vector3 })
+local function buildBoulders(
+    terrain: Instance,
+    padPositions: { Vector3 },
+    footprints: { Footprint }
+)
     local rng = Random.new(Config.DEV_MAP.seed)
     local folder = makeFolder("Boulders", terrain)
     local rocks = prepareRocks()
@@ -516,7 +572,7 @@ local function buildBoulders(terrain: Instance, padPositions: { Vector3 })
                 local t = rng:NextNumber(CORRIDOR_START, CORRIDOR_END)
                 local lateral = rng:NextNumber(-CORRIDOR_HALF_WIDTH, CORRIDOR_HALF_WIDTH)
                 local position = padPosition + along * t + side * lateral
-                if isClear(position, padPositions) then
+                if isClear(position, padPositions, footprints) then
                     makeBoulder(rng, position, folder, rocks)
                     break
                 end
@@ -531,9 +587,178 @@ local function buildBoulders(terrain: Instance, padPositions: { Vector3 })
                 0,
                 rng:NextNumber(-GROUND_SIZE.Z / 2, GROUND_SIZE.Z / 2)
             )
-            if isClear(position, padPositions) then
+            if isClear(position, padPositions, footprints) then
                 makeBoulder(rng, position, folder, rocks)
                 break
+            end
+        end
+    end
+end
+
+-- 달 지형 계획 -----------------------------------------------------------
+type Ball = { center: Vector3, radius: number, air: boolean }
+type TerrainPlan = { balls: { Ball }, footprints: { Footprint } }
+
+-- 공이 지표면(GROUND_TOP)과 만나는 원의 반지름 (안 만나면 0)
+local function surfaceRadius(ball: Ball): number
+    local dy = ball.center.Y - GROUND_TOP
+    if math.abs(dy) >= ball.radius then
+        return 0
+    end
+    return math.sqrt(ball.radius * ball.radius - dy * dy)
+end
+
+-- 공이 바꾸는 지표면 원이 보호 구역(패드, 얼음)과 맵 경계를 침범하지 않는지
+local function ballAllowed(ball: Ball, padPositions: { Vector3 }): boolean
+    local r = surfaceRadius(ball)
+    local flat = Vector3.new(ball.center.X, 0, ball.center.Z)
+    for _, pad in padPositions do
+        if (flat - Vector3.new(pad.X, 0, pad.Z)).Magnitude < PAD_TERRAIN_CLEARANCE + r then
+            return false
+        end
+    end
+    for _, ice in ICE_POSITIONS do
+        if (flat - Vector3.new(ice.X, 0, ice.Z)).Magnitude < ICE_TERRAIN_CLEARANCE + r then
+            return false
+        end
+    end
+    return math.abs(flat.X) + r < GROUND_SIZE.X / 2 - TERRAIN_EDGE_MARGIN
+        and math.abs(flat.Z) + r < GROUND_SIZE.Z / 2 - TERRAIN_EDGE_MARGIN
+end
+
+-- 얕은 사발 크레이터: 가장자리를 따라 둔덕 공을 두르고, 표면 위에 중심을 둔 Air 공으로 판다
+-- (중심을 표면 아래에 두면 너비보다 깊은 구멍이 되고, 큰 공 하나로 테두리를 만들면 돔 껍질이 남는다)
+local function planCrater(cx: number, cz: number, radius: number): ({ Ball }, number)
+    local depth = radius * CRATER_DEPTH_RATIO
+    local edge = math.sqrt(radius * radius - (radius - depth) ^ 2)
+    local rimHeight = radius * CRATER_RIM_HEIGHT_RATIO
+    local pieceRadius = math.max(CRATER_RIM_PIECE_MIN, radius * CRATER_RIM_PIECE_RATIO)
+    local balls: { Ball } = {}
+    for i = 1, CRATER_RIM_PIECES do
+        local angle = 2 * math.pi * i / CRATER_RIM_PIECES
+        table.insert(balls, {
+            center = Vector3.new(
+                cx + math.cos(angle) * edge,
+                GROUND_TOP + rimHeight - pieceRadius,
+                cz + math.sin(angle) * edge
+            ),
+            radius = pieceRadius,
+            air = false,
+        })
+    end
+    table.insert(balls, {
+        center = Vector3.new(cx, GROUND_TOP + radius - depth, cz),
+        radius = radius,
+        air = true,
+    })
+    local rimFootprint = math.sqrt(pieceRadius * pieceRadius - (pieceRadius - rimHeight) ^ 2)
+    return balls, edge + rimFootprint
+end
+
+-- 완만한 언덕: 중심을 표면 아래에 둔 큰 공이 height만큼 솟는다
+local function planHill(cx: number, cz: number, radius: number, height: number): ({ Ball }, number)
+    local ball: Ball = {
+        center = Vector3.new(cx, GROUND_TOP + height - radius, cz),
+        radius = radius,
+        air = false,
+    }
+    return { ball }, surfaceRadius(ball)
+end
+
+-- 언덕과 크레이터 배치 (결정적). Terrain이 없어도 계산해서 바위 배치가 두 환경에서 같게 한다
+local function planTerrain(padPositions: { Vector3 }): TerrainPlan
+    local rng = Random.new(Config.DEV_MAP.seed + TERRAIN_SEED_OFFSET)
+    local plan: TerrainPlan = { balls = {}, footprints = {} }
+    local halfX, halfZ = GROUND_SIZE.X / 2, GROUND_SIZE.Z / 2
+    local function tryAdd(balls: { Ball }, footprint: number, cx: number, cz: number): boolean
+        for _, ball in balls do
+            if not ballAllowed(ball, padPositions) then
+                return false
+            end
+        end
+        for _, ball in balls do
+            table.insert(plan.balls, ball)
+        end
+        table.insert(plan.footprints, { x = cx, z = cz, r = footprint })
+        return true
+    end
+    for _ = 1, HILL_COUNT do
+        for _ = 1, FEATURE_ATTEMPTS do
+            local cx, cz = rng:NextNumber(-halfX, halfX), rng:NextNumber(-halfZ, halfZ)
+            local balls, footprint = planHill(
+                cx,
+                cz,
+                rng:NextNumber(HILL_RADIUS_MIN, HILL_RADIUS_MAX),
+                rng:NextNumber(HILL_HEIGHT_MIN, HILL_HEIGHT_MAX)
+            )
+            if tryAdd(balls, footprint, cx, cz) then
+                break
+            end
+        end
+    end
+    -- 착륙지 주변 (지형 위험이 높은 곳일수록 많이)
+    for index, pad in padPositions do
+        for _ = 1, CRATERS_NEAR_SITE[index] or 0 do
+            for _ = 1, FEATURE_ATTEMPTS do
+                local angle = rng:NextNumber(0, 2 * math.pi)
+                local distance = rng:NextNumber(PAD_TERRAIN_CLEARANCE, CRATER_NEAR_RING)
+                local cx = pad.X + math.cos(angle) * distance
+                local cz = pad.Z + math.sin(angle) * distance
+                local balls, footprint =
+                    planCrater(cx, cz, rng:NextNumber(CRATER_RADIUS_MIN, CRATER_RADIUS_MAX))
+                if tryAdd(balls, footprint, cx, cz) then
+                    break
+                end
+            end
+        end
+    end
+    -- 맵 전체
+    for _ = 1, CRATERS_SCATTERED do
+        for _ = 1, FEATURE_ATTEMPTS do
+            local cx, cz = rng:NextNumber(-halfX, halfX), rng:NextNumber(-halfZ, halfZ)
+            local balls, footprint =
+                planCrater(cx, cz, rng:NextNumber(CRATER_RADIUS_MIN, CRATER_RADIUS_MAX))
+            if tryAdd(balls, footprint, cx, cz) then
+                break
+            end
+        end
+    end
+    return plan
+end
+
+-- 지형 적용: Terrain이 있으면 표토를 채우고 언덕과 크레이터를 만든다. 없으면 평평한 지면 Part
+local function applyTerrain(plan: TerrainPlan, folder: Instance)
+    local terrain = workspace:FindFirstChildOfClass("Terrain")
+    if not terrain then
+        makePart({
+            name = "MoonGround",
+            size = GROUND_SIZE,
+            cframe = CFrame.new(0, GROUND_TOP - GROUND_SIZE.Y / 2, 0),
+            color = COLORS.regolith,
+            material = Enum.Material.Sand,
+            parent = folder,
+        })
+        return
+    end
+    local material = Enum.Material.Sand
+    terrain:FillBlock(
+        CFrame.new(0, GROUND_TOP - TERRAIN_THICKNESS / 2, 0),
+        Vector3.new(GROUND_SIZE.X, TERRAIN_THICKNESS, GROUND_SIZE.Z),
+        material
+    )
+    terrain:SetMaterialColor(material, COLORS.regolith)
+    for _, ball in plan.balls do
+        terrain:FillBall(ball.center, ball.radius, if ball.air then Enum.Material.Air else material)
+    end
+    -- 기본 Baseplate가 있으면 크레이터 바닥을 평평하게 가리므로 플레이 중에만 숨긴다
+    local baseplate = workspace:FindFirstChild("Baseplate")
+    if baseplate and baseplate:IsA("BasePart") then
+        baseplate.Transparency = 1
+        baseplate.CanCollide = false
+        baseplate.CanQuery = false
+        for _, child in baseplate:GetChildren() do
+            if child:IsA("Decal") or child:IsA("Texture") then
+                child.Transparency = 1
             end
         end
     end
@@ -565,14 +790,12 @@ end
 
 local function buildTerrainAndSites()
     local terrain = makeFolder("DevTerrain", workspace)
-    makePart({
-        name = "MoonGround",
-        size = GROUND_SIZE,
-        cframe = CFrame.new(0, GROUND_TOP - GROUND_SIZE.Y / 2, 0),
-        color = COLORS.ground,
-        material = Enum.Material.Sand,
-        parent = terrain,
-    })
+    local padPositions: { Vector3 } = {}
+    for index in Config.SITES do
+        table.insert(padPositions, sitePadPosition(index))
+    end
+    local plan = planTerrain(padPositions)
+    applyTerrain(plan, terrain)
 
     local iceFolder = makeFolder("IceSites", workspace)
     for index, position in ICE_POSITIONS do
@@ -584,18 +807,12 @@ local function buildTerrainAndSites()
             material = Enum.Material.Ice,
             parent = iceFolder,
         })
-        local light = Instance.new("PointLight")
-        light.Color = COLORS.ice
-        light.Range = ICE_LIGHT_RANGE
-        light.Parent = ice
         ServerUtil.safeCall("DevMap IceCrystal", dressIce, ice)
     end
 
     local padsFolder = makeFolder("LandingPads", workspace)
-    local padPositions: { Vector3 } = {}
     for index, site in Config.SITES do
-        local position = sitePadPosition(index)
-        table.insert(padPositions, position)
+        local position = padPositions[index]
         local ice = ICE_POSITIONS[PAD_LAYOUT[index].ice]
         local center = Vector3.new(position.X, GROUND_TOP, position.Z)
         -- 패드의 앞쪽(-Z, LookVector)이 얼음을 향하게 해서 복제된 기지의 로버가 얼음 쪽을 보게 한다
@@ -616,7 +833,7 @@ local function buildTerrainAndSites()
     end
 
     verifyDistances(padPositions)
-    buildBoulders(terrain, padPositions)
+    buildBoulders(terrain, padPositions, plan.footprints)
     buildLighting()
 end
 
@@ -816,11 +1033,12 @@ local function buildRover(kit: Model)
                 wheel.Transparency = 1
             end
         end
-        -- 좌석은 조종석 높이, 앞쪽 중앙. 메시는 CanCollide가 꺼져 있어 캐릭터가 겹쳐 앉아도 된다
+        -- 좌석은 캐빈 안 (앞쪽 = -Z). 메시는 CanCollide가 꺼져 있어 캐릭터가 메시와 겹쳐 앉아도 된다.
+        -- 걸어서 닿기 어려우므로 탑승은 RoverDrive의 "탑승" 프롬프트가 맡는다
         local lo, hi = KitImports.bounds(visual)
         local seatHeight = math.min((hi.Y - lo.Y) * ROVER_SEAT_HEIGHT_RATIO, ROVER_SEAT_MAX_HEIGHT)
-        local seatForward = (hi.Z - lo.Z) * ROVER_SEAT_FORWARD_RATIO
-        seatCFrame = CFrame.new(chassisCFrame.X, lo.Y + seatHeight, (lo.Z + hi.Z) / 2 - seatForward)
+        local seatFromFront = (hi.Z - lo.Z) * ROVER_SEAT_FROM_FRONT_RATIO
+        seatCFrame = CFrame.new(chassisCFrame.X, lo.Y + seatHeight, lo.Z + seatFromFront)
     end
 
     -- 좌석은 위치를 정한 뒤 용접한다
@@ -834,6 +1052,9 @@ local function buildRover(kit: Model)
     seat.Torque = rv.torque
     seat.TurnSpeed = rv.turnSpeed
     seat:SetAttribute("Tank", 0)
+    if visual then
+        seat.Transparency = 1 -- 캐빈 안에 숨긴다 (메시가 외형)
+    end
     seat.Parent = rover
     weld(chassis, seat)
 end
@@ -909,7 +1130,7 @@ local function buildLander(kit: Model)
         material = Enum.Material.Metal,
         parent = lander,
     })
-    makeSign(console, Config.PROMPT_TEXTS.recoverRover, ROVER_CONSOLE_SIZE.Y)
+    makeSign(console, Config.PROMPT_TEXTS.recoverObject, ROVER_CONSOLE_SIZE.Y)
 
     -- KitImports 장식: 지붕 안테나와 레이더, 콘솔 위 안테나 (충돌 없음)
     ServerUtil.safeCall("DevMap LanderDecor", function()
@@ -937,7 +1158,7 @@ local function buildSolarField(kit: Model)
         material = Enum.Material.Metal,
         parent = field,
     })
-    makeSign(installPad, Config.PROMPT_TEXTS.installPanel, Config.WORLD_LABEL.offsetY / 2)
+    makeSign(installPad, Config.PROMPT_TEXTS.solarObject, Config.WORLD_LABEL.offsetY / 2)
     ServerUtil.safeCall("DevMap PadRing", addPadRing, installPad)
 
     local slots = makeFolder("Slots", field)
@@ -983,6 +1204,7 @@ local function buildModulePads(kit: Model)
     for _, id in Config.MODULE_ORDER do
         local layout = MODULE_LAYOUT[id]
         local padModel = makeModel("Pad" .. id, pads)
+        padModel:SetAttribute("ModuleId", id) -- 클라이언트 패드 표지판이 찾는 키
         local padCFrame, padTotal = slabCFrame(CFrame.identity, layout.center, layout.pad.Y)
         local padPart = makePart({
             name = "Pad",
@@ -1092,7 +1314,7 @@ local function buildWaterTank(kit: Model)
         material = Enum.Material.Metal,
         parent = kit,
     })
-    makeSign(tank, Config.PROMPT_TEXTS.unload, WATER_TANK_SIZE.Y)
+    makeSign(tank, Config.PROMPT_TEXTS.tankObject, WATER_TANK_SIZE.Y)
 
     -- KitImports 장식: 탱크 Part는 숨기고(프롬프트와 하역 거리 기준은 그대로) 메시를 같은 자리에
     ServerUtil.safeCall("DevMap WaterTank", function()

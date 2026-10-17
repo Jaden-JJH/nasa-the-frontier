@@ -17,6 +17,7 @@ local RoverDrive = require(script.Parent.RoverDrive)
 local RoverRecovery = require(script.Parent.RoverRecovery)
 local ServerUtil = require(script.Parent.ServerUtil)
 local SolarPanels = require(script.Parent.SolarPanels)
+local Spacesuit = require(script.Parent.Spacesuit)
 local WaterLoop = require(script.Parent.WaterLoop)
 
 local GameFlow = {}
@@ -169,6 +170,7 @@ local function onPlayerAdded(player: Player)
     ResourceState.publishTo(player)
     Oxygen.addPlayer(player)
     LandingSite.onPlayerAdded(player)
+    Spacesuit.watch(player)
 end
 
 -- 마지막 플레이어가 나가면 재시작과 같은 정리를 하고 selecting으로 되돌린다 (선택 타이머도 취소됨)

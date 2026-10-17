@@ -39,13 +39,15 @@ export type PromptOptions = {
     enabled: boolean?,
 }
 
--- CONTRACT 4절 공통 설정(RequiresLineOfSight false, MaxActivationDistance)을 적용한 프롬프트
+-- CONTRACT 4절 공통 설정(RequiresLineOfSight false, MaxActivationDistance)을 적용한 프롬프트.
+-- Style은 Custom: 클라이언트(PromptUI)가 ObjectText(대상 이름)와 ActionText(동작)로 직접 그린다
 function ServerUtil.makePrompt(parent: BasePart, options: PromptOptions): ProximityPrompt
     local prompt = Instance.new("ProximityPrompt")
     prompt.ActionText = options.actionText
     prompt.ObjectText = options.objectText or ""
     prompt.HoldDuration = options.holdDuration
     prompt.RequiresLineOfSight = false
+    prompt.Style = Enum.ProximityPromptStyle.Custom
     prompt.MaxActivationDistance = options.maxDistance or Config.PROMPT.maxDistance
     prompt.Enabled = if options.enabled == nil then true else options.enabled
     prompt.Parent = parent

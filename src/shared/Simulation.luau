@@ -476,13 +476,20 @@ function Simulation.missionText(state: GameState, config: Config): string
 
     local first = state.modules[config.MODULE_ORDER[1]]
     local notStarted = first ~= nil and first.status == "available"
-    if notStarted and state.panelsInstalled < config.PANELS_PER_DAY then
+    -- 1일차: 오늘 한도까지 패널 설치. 한도를 채웠거나 TUTORIAL_BOARD_DAY가 되면 로버 탑승 안내로
+    local installStage = state.day < config.TUTORIAL_BOARD_DAY
+        and state.panelsInstalledToday < config.PANELS_PER_DAY
+    if notStarted and state.waterTrips == 0 and installStage then
         return string.format(
             texts.installPanels,
-            int(config.PANELS_PER_DAY - state.panelsInstalled)
+            int(config.PANELS_PER_DAY - state.panelsInstalledToday)
         )
     end
     if notStarted and state.waterTrips == 0 then
+        -- 탱크가 비어 있으면 탑승과 레이더 안내, 채웠으면 하역 안내
+        if state.rover.tank <= 0 then
+            return texts.boardRover
+        end
         return texts.firstWaterTrip
     end
 
