@@ -25,26 +25,29 @@ local DevMap = {}
 
 local GROUND_TOP = 0.5 -- 기본 Baseplate 윗면(0)과 겹쳐 깜빡이지 않도록 살짝 위
 local GROUND_SIZE = Vector3.new(1400, 4, 1100)
-local LANDING_PAD_SIZE = Vector3.new(48, 1, 48) -- 절반이 지면에 묻힌다
+local LANDING_PAD_SIZE = Vector3.new(48, 1, 48) -- 윗면은 GROUND_TOP + 0.5. 지면까지 아래로 늘려 묻는다
 local ICE_SIZE = Vector3.new(14, 3, 14)
 local ICE_LIGHT_RANGE = 18
 local ICE_LIGHT_BRIGHTNESS = 1.2
 local ICE_TRANSPARENCY = 0.1 -- 얼음 덩어리 (Part와 결정 메시 공통)
 
 -- 달 지형 (Roblox Terrain). Terrain이 없는 환경(Lune 스모크)에서는 평평한 지면 Part로 대신한다
--- 꺼 둠(2026-10-17 플레이테스트): Terrain 복셀(4 studs)이 얇은 패드와 패널 슬롯(두께 0.2)을 덮어
--- 바닥 안내가 묻혔다. false면 지형을 만들지 않고 평평한 지면 Part를 쓰며, 바위도 지형을 피하지 않아
--- 지형 전 버전과 같은 자리에 놓인다. 아래 지형 코드는 다시 켤 때를 위해 남겨 둔다
-local TERRAIN_ENABLED = false
-local TERRAIN_THICKNESS = 24 -- 윗면은 GROUND_TOP
+-- 다시 켬(3차 플레이테스트): 기지는 콘크리트 판(윗면 GROUND_TOP) 위에 놓고, 지형은 그보다 1 stud 낮게 깔아
+-- Terrain 복셀(4 studs)이 얇은 패드와 슬롯을 덮지 않게 한다. false면 예전처럼 평평한 지면 Part 하나
+local TERRAIN_ENABLED = true
+local TERRAIN_TOP = GROUND_TOP - 1 -- 지형 윗면 (콘크리트 판보다 1 stud 아래)
+local SURFACE_Y = if TERRAIN_ENABLED then TERRAIN_TOP else GROUND_TOP -- 얼음, 바위가 놓이는 자연 지면
+local TERRAIN_THICKNESS = 24
 local TERRAIN_SEED_OFFSET = 1 -- 바위 배치와 다른 난수 흐름 (같은 시드에서 결정적)
 local TERRAIN_EDGE_MARGIN = 10 -- 지형 특징을 맵 가장자리에서 띄우는 거리
-local PAD_TERRAIN_CLEARANCE = 80 -- 착륙 패드 중심 반지름 (기지 키트, 패널 슬롯 포함) 안은 평지 유지
+local PAD_TERRAIN_CLEARANCE = 80 -- 착륙 패드 중심 반지름 (콘크리트 판 포함) 안은 평지 유지
 local ICE_TERRAIN_CLEARANCE = 30 -- 얼음 지점 중심 반지름 안은 평지 유지
+local CORRIDOR_CLEARANCE = 12 -- 착륙 패드에서 가장 가까운 얼음까지 폭 24 주행 회랑의 반폭 (지형, 바위 금지)
 local FEATURE_ATTEMPTS = 40
-local CRATER_RADIUS_MIN, CRATER_RADIUS_MAX = 10, 40
-local CRATER_DEPTH_RATIO = 0.3 -- 사발 깊이 = 반지름 x 비율 (얕은 사발)
+local CRATER_RADIUS_MIN, CRATER_RADIUS_MAX = 12, 40 -- 복셀 4 studs라 반지름 12 미만은 만들지 않는다
+local CRATER_DEPTH_RATIO = 0.2 -- 사발 깊이 = 반지름 x 비율 (얕은 사발)
 local CRATER_RIM_HEIGHT_RATIO = 0.08 -- 테두리 둔덕 높이 = 반지름 x 비율
+local CRATER_RIM_HEIGHT_MAX = 1.5
 local CRATER_RIM_PIECES = 12 -- 테두리는 가장자리를 따라 작은 공을 둘러 만든다
 local CRATER_RIM_PIECE_RATIO = 0.3 -- 테두리 공 반지름 = 크레이터 반지름 x 비율
 local CRATER_RIM_PIECE_MIN = 4
@@ -53,7 +56,13 @@ local CRATER_NEAR_RING = 220 -- 착륙지 "주변" 거리
 local CRATERS_SCATTERED = 9 -- 맵 전체 (주변 11개와 합쳐 20개)
 local HILL_COUNT = 7
 local HILL_RADIUS_MIN, HILL_RADIUS_MAX = 40, 80
-local HILL_HEIGHT_MIN, HILL_HEIGHT_MAX = 2, 5 -- 표면 위로 솟는 높이
+local HILL_HEIGHT_MIN, HILL_HEIGHT_MAX = 2, 4 -- 지형 위로 솟는 높이
+
+-- 기지 콘크리트 판 (지형을 켤 때 기지 키트에 포함): 키트 바닥 면적 + 여유, 윗면은 GROUND_TOP
+local APRON_MARGIN = 8
+local APRON_THICKNESS = 2
+local RAMP_WIDTH, RAMP_LENGTH = 10, 4 -- 판 가장자리 4면 중앙의 경사로 (판과 지형 사이 1 stud 단차)
+local greyboxTerrainBuilt = false -- 이번 세션에 지형을 켠 그레이박스 맵을 만들었는지 (콘크리트 판 여부)
 
 -- 얼음 지점 위치 (x, z)
 local ICE_POSITIONS = {
@@ -71,10 +80,13 @@ local PAD_LAYOUT = {
     { ice = 2, direction = Vector3.new(1, 0, 0) },
 }
 
-local KIT_CLEARANCE = 65 -- 패드 중심에서 이 거리 안에는 바위를 두지 않는다 (기지 키트 반경 약 55)
+local KIT_CLEARANCE = 80 -- 패드 중심에서 이 거리 안에는 바위를 두지 않는다 (콘크리트 판 포함)
 local ICE_CLEARANCE = 20 -- 얼음 중심 주변 바위 금지 거리
-local CORRIDOR_HALF_WIDTH = 45 -- 패드와 얼음 사이 통로 반폭
-local CORRIDOR_START, CORRIDOR_END = 0.12, 0.92 -- 통로 구간 (패드 0 -> 얼음 1)
+local CLUSTER_SPREAD = 22 -- 회랑 가장자리 밖으로 바위 무더기가 퍼지는 폭
+local CLUSTER_BEYOND_ICE = 60 -- 회랑 방향으로 얼음 너머까지 무더기를 두는 거리
+local CLUSTER_MIN_LENGTH = 140 -- 패드에서 무더기 구간 최소 길이 (얼음이 가까운 Pad4도 조밀하게)
+local BIG_BOULDER_CHANCE = 0.1 -- 전체의 약 10%는
+local BIG_BOULDER_SCALE = 2 -- 2배 크기
 local BOULDER_MIN, BOULDER_MAX = 3, 8
 local BOULDER_ATTEMPTS = 20
 local BOULDER_EMBED_RATIO = 0.2 -- 바위 높이의 이 비율만큼 지면에 묻는다
@@ -91,9 +103,11 @@ local ROVER_CENTER = Vector3.new(0, 0, -16)
 -- 로버 주차 위치 옆. 운전석에 앉은 채 하역 프롬프트(활성 거리 12)가 닿도록 로버에서 약 10 studs
 local WATER_TANK_POSITION = Vector3.new(-10, 0, -14)
 local WATER_TANK_SIZE = Vector3.new(6, 8, 6)
--- 로버 복구 콘솔: 착륙선 문 오른쪽 바깥, 착륙선 산소 구역 안
-local ROVER_CONSOLE_POSITION = Vector3.new(4.5, 0, -2.5)
+-- 로버 복구 콘솔: 착륙선 오른쪽(+X) 바깥, 문과 겹치지 않게 앞쪽. 상자 4개는 그 뒤(+Z)
 local ROVER_CONSOLE_SIZE = Vector3.new(2, 3, 1)
+local ROVER_CONSOLE_SIDE_GAP = 1.5 -- 충돌 벽 바깥에서 콘솔까지
+local ROVER_CONSOLE_FROM_FRONT = 2 -- 착륙선 앞면에서 안쪽으로
+local RADAR_SIDE_GAP = 2 -- 레이더(지상 장비)는 착륙선 왼쪽(-X) 충돌 벽 바깥
 
 local SOLAR_CENTER = Vector3.new(34, 0, 6)
 local SOLAR_COLUMNS, SOLAR_ROWS = 5, 6
@@ -169,12 +183,11 @@ local ICE_CRYSTAL_EMBED = 0.3 -- 지면에 묻는 깊이
 local WATER_TANK_VISUAL_BOX = Vector3.new(7, 7, 7)
 local PAD_RING_MAX_HEIGHT = 1.5 -- 링 메시 높이 상한
 local PAD_RING_RAISE = 0.1 -- 링 윗면이 패드 윗면보다 이만큼만 올라오게 묻는다 (Ghost, Built와 겹치지 않게)
-local MAST_BOX = Vector3.new(1.5, 2.5, 1.5) -- 착륙선 지붕 안테나 (높이 2.5)
-local RADAR_BOX = Vector3.new(2.5, 2.5, 2.5) -- 착륙선 지붕 레이더 (높이 2.5)
+local MAST_BOX = Vector3.new(1.5, 2.5, 1.5) -- 착륙선 꼭대기 안테나 (높이 2.5)
+local RADAR_BOX = Vector3.new(2.5, 2.5, 2.5) -- 착륙선 왼쪽 바닥의 지상 레이더 (높이 2.5)
 local CONSOLE_MAST_BOX = Vector3.new(1, 1.5, 1) -- 로버 복구 콘솔 위 안테나 (높이 1.5)
-local ROOF_DECOR_OFFSET = 3 -- 지붕 중심에서 안테나와 레이더를 좌우로 띄우는 거리 (지붕 반폭의 절반까지)
 local CRATE_SIZE = 3
-local CRATE_ORIGIN = Vector3.new(11, 0, 16) -- 착륙선 뒤 오른쪽 (스폰, 로버 경로, 모듈 통로를 피함)
+local CRATE_BEHIND_CONSOLE = 3 -- 콘솔 중심에서 상자 첫 줄까지 (+Z)
 local CRATE_PITCH = 3.8
 local CRATE_YAWS = { 0, 12, -8, 20 } -- 2 x 2 상자의 회전(도)
 
@@ -200,23 +213,25 @@ local COLORS = {
     panel = Color3.fromRGB(25, 40, 95),
     panelFrame = Color3.fromRGB(150, 150, 155),
     console = Color3.fromRGB(255, 140, 60),
-    airlockTube = Color3.fromRGB(table.unpack(Config.AIRLOCK.tubeColor)),
-    airlockDoor = Color3.fromRGB(table.unpack(Config.AIRLOCK.doorColor)),
-    airlockRing = Color3.fromRGB(table.unpack(Config.AIRLOCK.ringColor)),
+    door = Color3.fromRGB(table.unpack(Config.AIRLOCK.doorColor)),
+    doorFrame = Color3.fromRGB(table.unpack(Config.AIRLOCK.frameColor)),
+    interiorLight = Color3.fromRGB(table.unpack(Config.AIRLOCK.lightColor)),
+    apron = Color3.fromRGB(105, 105, 108), -- 기지 콘크리트 판
 }
 
--- 하늘 (Lighting에 Sky가 없을 때만 만든다). 자정에는 Roblox가 달 자리에 MoonTexture를 그리므로
--- 내장 태양 텍스처를 달 자리에 써서 검은 하늘에 태양이 뜨게 한다
+-- 하늘 (맵 종류와 관계없이 적용). Sky는 Attribute KeepSky = true가 아니면 덮어쓴다.
+-- 밤에는 Roblox가 달 자리에 MoonTexture를 그리므로 내장 태양 텍스처를 써서 검은 하늘에 태양이 뜨게 한다.
+-- ClockTime 2.5: 달(태양) 자리가 비스듬히 보이는 시각
 local SKY = {
     moonTextureId = "rbxasset://sky/sun.jpg",
     moonAngularSize = 14,
     starCount = 3000,
+    clockTime = 2.5,
 }
 
 -- 조명 (그레이박스 맵을 만들 때만 적용)
 -- 자정(0시)으로 두어 하늘을 검게 하고, 주변광을 밝게 올려 지면이 보이게 한다
 local LIGHTING = {
-    clockTime = 0,
     brightness = 3,
     ambient = Color3.fromRGB(130, 130, 140),
     outdoorAmbient = Color3.fromRGB(170, 170, 180),
@@ -449,30 +464,70 @@ local function sitePadPosition(index: number): Vector3
     return ice + layout.direction.Unit * distance
 end
 
+-- 그레이박스 맵 밝기 (주변광을 올려 밤하늘 아래에서도 지면이 보이게)
 local function buildLighting()
-    Lighting.ClockTime = LIGHTING.clockTime
     Lighting.Brightness = LIGHTING.brightness
     Lighting.Ambient = LIGHTING.ambient
     Lighting.OutdoorAmbient = LIGHTING.outdoorAmbient
+end
+
+-- 하늘: Sky(태양 텍스처), Atmosphere(달에는 대기가 없다), ClockTime. 반환: 로그용 설명 두 개
+local function setupSky(): (string, string)
+    local skyNote: string
+    local sky = Lighting:FindFirstChildOfClass("Sky")
+    if sky and sky:GetAttribute("KeepSky") == true then
+        skyNote = "Sky 유지(KeepSky)"
+    else
+        if sky then
+            skyNote = "Sky 덮어씀"
+        else
+            sky = Instance.new("Sky")
+            skyNote = "Sky 생성"
+        end
+        local target = sky :: Sky
+        target.MoonTextureId = SKY.moonTextureId
+        target.MoonAngularSize = SKY.moonAngularSize
+        target.StarCount = SKY.starCount
+        target.CelestialBodiesShown = true
+        target.Parent = Lighting
+    end
+    local atmosphereNote: string
     local atmosphere = Lighting:FindFirstChildOfClass("Atmosphere")
-    if atmosphere then
-        -- 달에는 대기가 없다
+    if not atmosphere then
+        atmosphereNote = "Atmosphere 없음"
+    elseif atmosphere:GetAttribute("KeepAtmosphere") == true then
+        atmosphereNote = "Atmosphere 유지(KeepAtmosphere)"
+    else
         atmosphere.Density = 0
         atmosphere.Haze = 0
         atmosphere.Glare = 0
+        atmosphereNote = "Atmosphere 밀도 0"
     end
-    -- 디자이너가 둔 Sky가 있으면 건드리지 않는다
-    if not Lighting:FindFirstChildOfClass("Sky") then
-        local sky = Instance.new("Sky")
-        sky.MoonTextureId = SKY.moonTextureId
-        sky.MoonAngularSize = SKY.moonAngularSize
-        sky.StarCount = SKY.starCount
-        sky.CelestialBodiesShown = true
-        sky.Parent = Lighting
-    end
+    Lighting.ClockTime = SKY.clockTime
+    return skyNote, atmosphereNote
 end
 
 type Footprint = { x: number, z: number, r: number }
+
+-- xz 평면에서 점과 선분 사이 거리
+local function segmentDistance(point: Vector3, a: Vector3, b: Vector3): number
+    local p = Vector3.new(point.X, 0, point.Z)
+    local s0, s1 = Vector3.new(a.X, 0, a.Z), Vector3.new(b.X, 0, b.Z)
+    local d = s1 - s0
+    local lengthSq = d:Dot(d)
+    local t = if lengthSq > 0 then math.clamp((p - s0):Dot(d) / lengthSq, 0, 1) else 0
+    return (p - (s0 + d * t)).Magnitude
+end
+
+-- 가장 가까운 주행 회랑(각 착륙 패드 -> 가장 가까운 얼음) 중심선까지 거리
+local function corridorDistance(point: Vector3, padPositions: { Vector3 }): number
+    local best = math.huge
+    for index, pad in padPositions do
+        local ice = ICE_POSITIONS[PAD_LAYOUT[index].ice]
+        best = math.min(best, segmentDistance(point, pad, ice))
+    end
+    return best
+end
 
 -- 바위를 놓아도 되는 자리인지 (기지, 얼음, 맵 경계, 크레이터와 언덕을 피한다)
 local function isClear(
@@ -485,6 +540,10 @@ local function isClear(
         if (flat - Vector3.new(f.x, 0, f.z)).Magnitude < f.r + BOULDER_MAX then
             return false
         end
+    end
+    -- 주행 회랑 안 금지 (큰 바위 반지름까지 감안)
+    if corridorDistance(flat, padPositions) < CORRIDOR_CLEARANCE + BOULDER_MAX then
+        return false
     end
     for _, pad in padPositions do
         if (flat - Vector3.new(pad.X, 0, pad.Z)).Magnitude < KIT_CLEARANCE then
@@ -503,9 +562,15 @@ end
 type RockSet = { templates: { Model }, used: number }
 
 -- 바위 1개. 난수는 메시 여부와 관계없이 같은 순서로 6개를 써서 바위 위치 배치가 항상 같다
-local function makeBoulder(rng: Random, position: Vector3, parent: Instance, rocks: RockSet)
+local function makeBoulder(
+    rng: Random,
+    position: Vector3,
+    parent: Instance,
+    rocks: RockSet,
+    scale: number
+)
     local s = rng:NextNumber(BOULDER_MIN, BOULDER_MAX)
-    local size = Vector3.new(s, s * rng:NextNumber(0.5, 0.9), s * rng:NextNumber(0.7, 1.2))
+    local size = Vector3.new(s, s * rng:NextNumber(0.5, 0.9), s * rng:NextNumber(0.7, 1.2)) * scale
     local rotation = CFrame.Angles(
         math.rad(rng:NextNumber(-15, 15)),
         math.rad(rng:NextNumber(0, 360)),
@@ -516,30 +581,32 @@ local function makeBoulder(rng: Random, position: Vector3, parent: Instance, roc
         rocks.used += 1
         local rock = rocks.templates[(rocks.used - 1) % #rocks.templates + 1]:Clone()
         local t = (s - BOULDER_MIN) / (BOULDER_MAX - BOULDER_MIN)
-        KitImports.scaleBy(rock, ROCK_SCALE_MIN + t * (ROCK_SCALE_MAX - ROCK_SCALE_MIN))
+        KitImports.scaleBy(rock, (ROCK_SCALE_MIN + t * (ROCK_SCALE_MAX - ROCK_SCALE_MIN)) * scale)
         KitImports.rotateAboutCenter(rock, rotation)
         local lo, hi = KitImports.bounds(rock)
         local height = hi.Y - lo.Y
         KitImports.placeBottom(
             rock,
-            Vector3.new(position.X, GROUND_TOP - height * BOULDER_EMBED_RATIO, position.Z)
+            Vector3.new(position.X, SURFACE_Y - height * BOULDER_EMBED_RATIO, position.Z)
         )
         rock.Name = "Boulder"
+        rock:SetAttribute("BoulderScale", scale)
         rock.Parent = parent
         return
     end
-    makePart({
+    local part = makePart({
         name = "Boulder",
         size = size,
         cframe = CFrame.new(
             position.X,
-            GROUND_TOP + size.Y * (0.5 - BOULDER_EMBED_RATIO),
+            SURFACE_Y + size.Y * (0.5 - BOULDER_EMBED_RATIO),
             position.Z
         ) * rotation,
         color = COLORS.boulder,
         material = Enum.Material.Basalt,
         parent = parent,
     })
+    part:SetAttribute("BoulderScale", scale)
 end
 
 -- KitImports의 바위 메시를 기준 크기로 맞춘 원본 목록
@@ -564,18 +631,28 @@ local function buildBoulders(
     local rng = Random.new(Config.DEV_MAP.seed)
     local folder = makeFolder("Boulders", terrain)
     local rocks = prepareRocks()
-    -- 패드와 얼음 사이 통로 (지형 위험)
+    local function place(position: Vector3): boolean
+        if not isClear(position, padPositions, footprints) then
+            return false
+        end
+        local scale = if rng:NextNumber() < BIG_BOULDER_CHANCE then BIG_BOULDER_SCALE else 1
+        makeBoulder(rng, position, folder, rocks, scale)
+        return true
+    end
+    -- 주행 회랑 양옆 무더기 (회랑 안은 비운다). 얼음이 가까운 Pad4는 같은 구간에 더 많이 몰려 조밀하다
     for index, padPosition in padPositions do
         local ice = ICE_POSITIONS[PAD_LAYOUT[index].ice]
-        local along = ice - padPosition
-        local side = Vector3.new(-along.Z, 0, along.X).Unit
+        local toIce = Vector3.new(ice.X - padPosition.X, 0, ice.Z - padPosition.Z)
+        local dir = toIce.Unit
+        local side = Vector3.new(-dir.Z, 0, dir.X)
+        local reach =
+            math.max(toIce.Magnitude + CLUSTER_BEYOND_ICE, KIT_CLEARANCE + CLUSTER_MIN_LENGTH)
         for _ = 1, Config.DEV_MAP.boulderCountBySite[index] do
             for _ = 1, BOULDER_ATTEMPTS do
-                local t = rng:NextNumber(CORRIDOR_START, CORRIDOR_END)
-                local lateral = rng:NextNumber(-CORRIDOR_HALF_WIDTH, CORRIDOR_HALF_WIDTH)
-                local position = padPosition + along * t + side * lateral
-                if isClear(position, padPositions, footprints) then
-                    makeBoulder(rng, position, folder, rocks)
+                local along = rng:NextNumber(KIT_CLEARANCE, reach)
+                local sign = if rng:NextNumber() < 0.5 then -1 else 1
+                local lateral = CORRIDOR_CLEARANCE + BOULDER_MAX + rng:NextNumber(0, CLUSTER_SPREAD)
+                if place(padPosition + dir * along + side * sign * lateral) then
                     break
                 end
             end
@@ -589,8 +666,7 @@ local function buildBoulders(
                 0,
                 rng:NextNumber(-GROUND_SIZE.Z / 2, GROUND_SIZE.Z / 2)
             )
-            if isClear(position, padPositions, footprints) then
-                makeBoulder(rng, position, folder, rocks)
+            if place(position) then
                 break
             end
         end
@@ -603,7 +679,7 @@ type TerrainPlan = { balls: { Ball }, footprints: { Footprint } }
 
 -- 공이 지표면(GROUND_TOP)과 만나는 원의 반지름 (안 만나면 0)
 local function surfaceRadius(ball: Ball): number
-    local dy = ball.center.Y - GROUND_TOP
+    local dy = ball.center.Y - TERRAIN_TOP
     if math.abs(dy) >= ball.radius then
         return 0
     end
@@ -624,6 +700,9 @@ local function ballAllowed(ball: Ball, padPositions: { Vector3 }): boolean
             return false
         end
     end
+    if corridorDistance(flat, padPositions) < CORRIDOR_CLEARANCE + r then
+        return false
+    end
     return math.abs(flat.X) + r < GROUND_SIZE.X / 2 - TERRAIN_EDGE_MARGIN
         and math.abs(flat.Z) + r < GROUND_SIZE.Z / 2 - TERRAIN_EDGE_MARGIN
 end
@@ -633,7 +712,7 @@ end
 local function planCrater(cx: number, cz: number, radius: number): ({ Ball }, number)
     local depth = radius * CRATER_DEPTH_RATIO
     local edge = math.sqrt(radius * radius - (radius - depth) ^ 2)
-    local rimHeight = radius * CRATER_RIM_HEIGHT_RATIO
+    local rimHeight = math.min(radius * CRATER_RIM_HEIGHT_RATIO, CRATER_RIM_HEIGHT_MAX)
     local pieceRadius = math.max(CRATER_RIM_PIECE_MIN, radius * CRATER_RIM_PIECE_RATIO)
     local balls: { Ball } = {}
     for i = 1, CRATER_RIM_PIECES do
@@ -641,7 +720,7 @@ local function planCrater(cx: number, cz: number, radius: number): ({ Ball }, nu
         table.insert(balls, {
             center = Vector3.new(
                 cx + math.cos(angle) * edge,
-                GROUND_TOP + rimHeight - pieceRadius,
+                TERRAIN_TOP + rimHeight - pieceRadius,
                 cz + math.sin(angle) * edge
             ),
             radius = pieceRadius,
@@ -649,7 +728,7 @@ local function planCrater(cx: number, cz: number, radius: number): ({ Ball }, nu
         })
     end
     table.insert(balls, {
-        center = Vector3.new(cx, GROUND_TOP + radius - depth, cz),
+        center = Vector3.new(cx, TERRAIN_TOP + radius - depth, cz),
         radius = radius,
         air = true,
     })
@@ -660,7 +739,7 @@ end
 -- 완만한 언덕: 중심을 표면 아래에 둔 큰 공이 height만큼 솟는다
 local function planHill(cx: number, cz: number, radius: number, height: number): ({ Ball }, number)
     local ball: Ball = {
-        center = Vector3.new(cx, GROUND_TOP + height - radius, cz),
+        center = Vector3.new(cx, TERRAIN_TOP + height - radius, cz),
         radius = radius,
         air = false,
     }
@@ -735,7 +814,7 @@ local function applyTerrain(plan: TerrainPlan, folder: Instance)
         makePart({
             name = "MoonGround",
             size = GROUND_SIZE,
-            cframe = CFrame.new(0, GROUND_TOP - GROUND_SIZE.Y / 2, 0),
+            cframe = CFrame.new(0, SURFACE_Y - GROUND_SIZE.Y / 2, 0),
             color = COLORS.regolith,
             material = Enum.Material.Sand,
             parent = folder,
@@ -744,7 +823,7 @@ local function applyTerrain(plan: TerrainPlan, folder: Instance)
     end
     local material = Enum.Material.Sand
     terrain:FillBlock(
-        CFrame.new(0, GROUND_TOP - TERRAIN_THICKNESS / 2, 0),
+        CFrame.new(0, TERRAIN_TOP - TERRAIN_THICKNESS / 2, 0),
         Vector3.new(GROUND_SIZE.X, TERRAIN_THICKNESS, GROUND_SIZE.Z),
         material
     )
@@ -800,13 +879,14 @@ local function buildTerrainAndSites()
         then planTerrain(padPositions)
         else { balls = {}, footprints = {} }
     applyTerrain(plan, terrain)
+    greyboxTerrainBuilt = TERRAIN_ENABLED
 
     local iceFolder = makeFolder("IceSites", workspace)
     for index, position in ICE_POSITIONS do
         local ice = makePart({
             name = "Ice" .. index,
             size = ICE_SIZE,
-            cframe = CFrame.new(position.X, GROUND_TOP + ICE_SIZE.Y / 2, position.Z),
+            cframe = CFrame.new(position.X, SURFACE_Y + ICE_SIZE.Y / 2, position.Z),
             color = COLORS.ice,
             material = Enum.Material.Ice,
             parent = iceFolder,
@@ -818,12 +898,15 @@ local function buildTerrainAndSites()
     for index, site in Config.SITES do
         local position = padPositions[index]
         local ice = ICE_POSITIONS[PAD_LAYOUT[index].ice]
-        local center = Vector3.new(position.X, GROUND_TOP, position.Z)
+        -- 윗면은 GROUND_TOP + 0.5로 고정하고, 자연 지면(SURFACE_Y)까지 아래로 늘려 묻는다
+        local padTop = GROUND_TOP + LANDING_PAD_SIZE.Y / 2
+        local padHeight = padTop - SURFACE_Y + LANDING_PAD_SIZE.Y / 2
+        local center = Vector3.new(position.X, padTop - padHeight / 2, position.Z)
         -- 패드의 앞쪽(-Z, LookVector)이 얼음을 향하게 해서 복제된 기지의 로버가 얼음 쪽을 보게 한다
         local pad = makePart({
             name = "Pad" .. index,
-            size = LANDING_PAD_SIZE,
-            cframe = CFrame.lookAt(center, Vector3.new(ice.X, GROUND_TOP, ice.Z)),
+            size = Vector3.new(LANDING_PAD_SIZE.X, padHeight, LANDING_PAD_SIZE.Z),
+            cframe = CFrame.lookAt(center, Vector3.new(ice.X, center.Y, ice.Z)),
             color = COLORS.landingPad,
             material = Enum.Material.Concrete,
             parent = padsFolder,
@@ -1064,121 +1147,198 @@ end
 
 -- 기지 키트 -------------------------------------------------------------
 
--- 에어락 통로 -------------------------------------------------------------
--- 돔 앞면(faceZ)에서 -Z(앞쪽)로 뻗는 통로. KitImports.Connector 메시가 있으면 길이에 맞춰 스케일한 튜브,
--- 없으면 바닥, 양 벽, 윗판의 ㄷ자 통로. 돔 쪽 끝에 어두운 문 판, 바닥에 하늘색 범위 링.
--- 반환: 산소 구역 최소점, 최대점 (통로 내부 + 문 지나 zoneDoorDepth), 통로 안 걷는 바닥 높이
-local function buildAirlock(
+-- 걸어 들어가는 건물 (착륙선, Habitat A) ---------------------------------------
+-- 건물 외형(메시 또는 오두막)은 충돌을 끄고, 경계 상자 lo, hi 둘레에 보이지 않는 충돌 벽을 세운다.
+-- 정면(-Z) 가운데는 문 폭만큼 비워 문으로만 드나든다. shape "octagon"은 돔을 8각형으로, "box"는 4면.
+-- 정면에는 어두운 문 판과 밝은 프레임(열린 통로라 충돌 없음), 그 위에 "AIRLOCK" 표지, 안에는 따뜻한 빛.
+-- 반환: 산소 구역 최소점, 최대점 (경계 상자를 각 면 zoneInset씩 줄이고 문 앞 zoneDoorMargin 포함), 문 z
+local function buildEntry(
     parent: Instance,
-    centerX: number,
-    faceZ: number,
-    floorY: number
+    lo: Vector3,
+    hi: Vector3,
+    floorY: number,
+    shape: "octagon" | "box"
 ): (Vector3, Vector3, number)
     local a = Config.AIRLOCK
-    local model = makeModel("Airlock", parent)
-    local midZ = faceZ - a.length / 2
-    local walkY = floorY
-    local tube, yawSet = KitImports.take("Connector")
-    if tube then
-        if not yawSet then
-            KitImports.alignLongAxis(tube, "Z")
-        end
-        KitImports.fitLength(tube, a.length, Vector3.new(centerX, floorY, midZ))
-        -- 열린 튜브: 플레이어가 안으로 들어갈 수 있게 충돌 없음
-        KitImports.setStatic(tube, false)
-        tube.Name = "Tube"
-        tube.Parent = model
-    else
-        local t = a.wallThickness
-        -- 바닥은 지면까지 내려 묻는다 (패드 밖에서도 뜨지 않게)
-        local floorBottom = FLOOR_Y - EMBED
-        local floorTop = floorY + t
-        makePart({
-            name = "TubeFloor",
-            size = Vector3.new(a.width, floorTop - floorBottom, a.length),
-            cframe = CFrame.new(centerX, (floorTop + floorBottom) / 2, midZ),
-            color = COLORS.airlockTube,
-            material = Enum.Material.DiamondPlate,
-            parent = model,
+    local entry = makeModel("Entry", parent)
+    local cx, cz = (lo.X + hi.X) / 2, (lo.Z + hi.Z) / 2
+    local doorZ = lo.Z + a.doorInset
+
+    local function wall(name: string, length: number, center: Vector3, outward: Vector3)
+        local position = Vector3.new(center.X, floorY + a.wallHeight / 2, center.Z)
+        local part = makePart({
+            name = name,
+            size = Vector3.new(length, a.wallHeight, a.wallThickness),
+            cframe = CFrame.lookAt(position, position + outward),
+            color = COLORS.door,
+            transparency = 1,
+            canCollide = true,
+            parent = entry,
         })
-        for _, side in { -1, 1 } do
-            makePart({
-                name = if side < 0 then "TubeWallLeft" else "TubeWallRight",
-                size = Vector3.new(t, a.height, a.length),
-                cframe = CFrame.new(
-                    centerX + side * (a.width / 2 - t / 2),
-                    floorY + a.height / 2,
-                    midZ
-                ),
-                color = COLORS.airlockTube,
-                material = Enum.Material.Metal,
-                canCollide = false,
-                parent = model,
-            })
-        end
-        makePart({
-            name = "TubeRoof",
-            size = Vector3.new(a.width, t, a.length),
-            cframe = CFrame.new(centerX, floorY + a.height - t / 2, midZ),
-            color = COLORS.airlockTube,
-            material = Enum.Material.Metal,
-            canCollide = false,
-            parent = model,
-        })
-        walkY = floorTop
+        part.CanQuery = false
+        part.CanTouch = false
+        part.CastShadow = false
     end
-    -- 돔 쪽 끝의 문
-    local door = makePart({
-        name = "Door",
+    -- 정면 벽: 가운데 문 폭을 비우고 양쪽 조각만
+    local function frontWall(length: number, center: Vector3, tangent: Vector3, outward: Vector3)
+        local piece = (length - a.doorGap) / 2
+        if piece <= 0 then
+            return
+        end
+        for _, side in { -1, 1 } do
+            wall(
+                if side < 0 then "WallFrontLeft" else "WallFrontRight",
+                piece,
+                center + tangent * side * (a.doorGap / 2 + piece / 2),
+                outward
+            )
+        end
+    end
+
+    local t = a.wallThickness
+    if shape == "octagon" then
+        local radius = math.max(hi.X - lo.X, hi.Z - lo.Z) / 2
+        local apothem = radius + t / 2
+        local side = 2 * apothem * math.tan(math.pi / 8) + t -- 모서리가 벌어지지 않게 조금 겹친다
+        for k = 0, 7 do
+            local phi = k * math.pi / 4
+            local outward = Vector3.new(math.sin(phi), 0, -math.cos(phi)) -- k = 0이 정면(-Z)
+            local tangent = Vector3.new(math.cos(phi), 0, math.sin(phi))
+            local center = Vector3.new(cx, 0, cz) + outward * apothem
+            if k == 0 then
+                frontWall(side, center, tangent, outward)
+            else
+                wall("Wall" .. k, side, center, outward)
+            end
+        end
+    else
+        local halfX, halfZ = (hi.X - lo.X) / 2, (hi.Z - lo.Z) / 2
+        frontWall(
+            2 * (halfX + t),
+            Vector3.new(cx, 0, lo.Z - t / 2),
+            Vector3.xAxis,
+            Vector3.new(0, 0, -1)
+        )
+        wall("WallBack", 2 * (halfX + t), Vector3.new(cx, 0, hi.Z + t / 2), Vector3.zAxis)
+        wall("WallLeft", 2 * halfZ, Vector3.new(lo.X - t / 2, 0, cz), Vector3.new(-1, 0, 0))
+        wall("WallRight", 2 * halfZ, Vector3.new(hi.X + t / 2, 0, cz), Vector3.xAxis)
+    end
+
+    -- 문: 어두운 판 뒤로 조금 더 큰 밝은 프레임을 겹친다
+    local doorY = floorY + a.doorHeight / 2
+    local frame = makePart({
+        name = "DoorFrame",
         size = Vector3.new(
-            a.width - 2 * a.wallThickness,
-            a.height - a.wallThickness,
-            a.doorThickness
+            a.doorWidth + 2 * a.frameBorder,
+            a.doorHeight + a.frameBorder,
+            a.doorThickness / 2
         ),
         cframe = CFrame.new(
-            centerX,
-            floorY + (a.height - a.wallThickness) / 2,
-            faceZ - a.doorThickness / 2
+            cx,
+            floorY + (a.doorHeight + a.frameBorder) / 2,
+            doorZ + a.doorThickness / 2
         ),
-        color = COLORS.airlockDoor,
-        material = Enum.Material.SmoothPlastic,
-        transparency = a.doorTransparency,
+        color = COLORS.doorFrame,
+        material = Enum.Material.Metal,
         canCollide = false,
-        parent = model,
+        parent = entry,
+    })
+    frame.CanQuery = false
+    local door = makePart({
+        name = "Door",
+        size = Vector3.new(a.doorWidth, a.doorHeight, a.doorThickness),
+        cframe = CFrame.new(cx, doorY, doorZ),
+        color = COLORS.door,
+        material = Enum.Material.Metal,
+        canCollide = false,
+        parent = entry,
     })
     door.CanQuery = false
-    -- 바닥 범위 링 (얇은 원통을 눕힌다)
-    local diameter = a.length + 2 * a.ringMargin
-    local ring = makePart({
-        name = "OxygenRing",
-        shape = Enum.PartType.Cylinder,
-        size = Vector3.new(a.ringThickness, diameter, diameter),
-        cframe = CFrame.new(centerX, floorY + a.ringThickness / 2, midZ)
-            * CFrame.Angles(0, 0, math.rad(90)),
-        color = COLORS.airlockRing,
+    -- 문 위 작은 표지
+    local sign = makePart({
+        name = "DoorSign",
+        size = Vector3.new(a.doorWidth, a.signHeight, a.doorThickness / 2),
+        cframe = CFrame.new(
+            cx,
+            floorY + a.doorHeight + a.frameBorder + a.signHeight / 2,
+            doorZ - a.doorThickness / 4
+        ),
+        color = COLORS.door,
         material = Enum.Material.SmoothPlastic,
-        transparency = a.ringTransparency,
         canCollide = false,
-        parent = model,
+        parent = entry,
     })
-    ring.CanQuery = false
-    ring.CanTouch = false
-    ring.CastShadow = false
-    local zoneMin = Vector3.new(centerX - a.width / 2, floorY, faceZ - a.length)
-    local zoneMax = Vector3.new(centerX + a.width / 2, floorY + a.height, faceZ + a.zoneDoorDepth)
-    return zoneMin, zoneMax, walkY
+    sign.CanQuery = false
+    local gui = Instance.new("SurfaceGui")
+    gui.Name = "SignGui"
+    gui.Face = Enum.NormalId.Front
+    gui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
+    gui.PixelsPerStud = 40
+    gui.Parent = sign
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.fromScale(1, 1)
+    label.BackgroundTransparency = 1
+    label.TextColor3 = COLORS.doorFrame
+    label.TextScaled = true
+    label.Font = Enum.Font.GothamMedium
+    label.Text = a.signText
+    label.Parent = gui
+
+    -- 내부의 따뜻한 빛
+    local glow = Instance.new("Attachment")
+    glow.Name = "InteriorLight"
+    glow.CFrame = CFrame.new(cx, floorY + (hi.Y - floorY) * 0.6, cz)
+    local light = Instance.new("PointLight")
+    light.Color = COLORS.interiorLight
+    light.Range = a.lightRange
+    light.Brightness = a.lightBrightness
+    light.Parent = glow
+    -- Attachment는 파트 아래에만 둘 수 있어 문 표지 파트에 붙이고 위치는 월드 기준으로 맞춘다
+    glow.CFrame = sign.CFrame:ToObjectSpace(glow.CFrame)
+    glow.Parent = sign
+
+    local zoneMin = Vector3.new(lo.X + a.zoneInset, floorY, doorZ - a.zoneDoorMargin)
+    local zoneMax = Vector3.new(
+        hi.X - a.zoneInset,
+        math.max(hi.Y - a.zoneInset, floorY + a.doorHeight),
+        hi.Z - a.zoneInset
+    )
+    return zoneMin, zoneMax, doorZ
+end
+
+-- 건물 외형을 걸어 들어갈 수 있게: 충돌 끄기, 메시는 양면 렌더링
+local doubleSidedWarned = false
+local function makeWalkIn(model: Instance, keepFloor: boolean)
+    KitImports.forEachPart(model, function(part)
+        if keepFloor and part.Name == "Floor" then
+            return
+        end
+        part.CanCollide = false
+        if part:IsA("MeshPart") then
+            -- 스크립트에서 쓰기가 막혀 있는 환경도 있어 실패하면 한 번만 알린다
+            local ok = pcall(function()
+                (part :: MeshPart).DoubleSided = true
+            end)
+            if not ok and not doubleSidedWarned then
+                doubleSidedWarned = true
+                warn(
+                    "[DevMap] MeshPart.DoubleSided를 스크립트에서 바꿀 수 없어 안쪽 면이 안 보일 수 있습니다"
+                )
+            end
+        end
+    end)
 end
 
 local function buildLander(kit: Model)
     local lander = makeModel("Lander", kit)
-    local faceZ: number -- 착륙선 앞면 (에어락이 붙는 자리, 스폰 쪽 = -Z)
-    local centerX: number
-    local roofCenter: Vector3 -- 지붕 장식 기준 (윗면 중심)
-    local roofHalfWidth: number
+    local lo: Vector3
+    local hi: Vector3
+    local floorTop: number
+    local shape: "octagon" | "box"
     local visual = KitImports.take("Lander")
     if visual then
-        -- 착륙 데크(Floor, PrimaryPart) 위에 메시를 올린다
-        local floorTop = buildFloor(lander, LANDER_CENTER, LANDER_SIZE)
+        -- 착륙 데크(Floor, PrimaryPart) 위에 메시를 올리고 안으로 걸어 들어갈 수 있게 한다
+        floorTop = buildFloor(lander, LANDER_CENTER, LANDER_SIZE)
         KitImports.fitInto(
             visual,
             LANDER_VISUAL_BOX,
@@ -1187,31 +1347,27 @@ local function buildLander(kit: Model)
         visual.Name = "Visual"
         KitImports.forEachPart(visual, function(part)
             part.Anchored = true
-            part.CanCollide = true
         end)
+        makeWalkIn(visual, false)
         visual.Parent = lander
-        local lo, hi = KitImports.bounds(visual)
-        faceZ = lo.Z
-        centerX = (lo.X + hi.X) / 2
-        roofCenter = Vector3.new((lo.X + hi.X) / 2, hi.Y, (lo.Z + hi.Z) / 2)
-        roofHalfWidth = (hi.X - lo.X) / 2
+        lo, hi = KitImports.bounds(visual)
+        shape = "octagon"
     else
-        local floorTop =
-            buildHut(lander, LANDER_CENTER, LANDER_SIZE, COLORS.lander, Enum.Material.Metal)
-        faceZ = LANDER_CENTER.Z - LANDER_SIZE.Z / 2
-        centerX = LANDER_CENTER.X
-        roofCenter = Vector3.new(LANDER_CENTER.X, floorTop + LANDER_SIZE.Y + WALL, LANDER_CENTER.Z)
-        roofHalfWidth = LANDER_SIZE.X / 2
+        floorTop = buildHut(lander, LANDER_CENTER, LANDER_SIZE, COLORS.lander, Enum.Material.Metal)
+        lo, hi = KitImports.bounds(lander)
+        makeWalkIn(lander, true)
+        shape = "box"
     end
     lander.PrimaryPart = lander:FindFirstChild("Floor") :: BasePart
-    -- 에어락 통로 (스폰 쪽 앞면). 산소 구역은 통로 안만이고, 스폰 지점은 통로 가운데라 스폰하면 실내다
-    local zoneMin, zoneMax, walkY = buildAirlock(lander, centerX, faceZ, FLOOR_Y)
-    makeMarker("OxygenZone", zoneMax - zoneMin, CFrame.new((zoneMin + zoneMax) / 2), lander)
+    local cx, cz = (lo.X + hi.X) / 2, (lo.Z + hi.Z) / 2
 
+    -- 문, 충돌 벽, 내부 산소 구역. 스폰은 문에서 spawnInset 안쪽 (스폰하면 실내)
+    local zoneMin, zoneMax, doorZ = buildEntry(lander, lo, hi, floorTop, shape)
+    makeMarker("OxygenZone", zoneMax - zoneMin, CFrame.new((zoneMin + zoneMax) / 2), lander)
     local spawnPoint = makePart({
         name = "SpawnPoint",
         size = Vector3.new(4, 0.2, 4),
-        cframe = CFrame.new(centerX, walkY + 0.1, faceZ - Config.AIRLOCK.length / 2),
+        cframe = CFrame.new(cx, floorTop + 0.1, doorZ + Config.AIRLOCK.spawnInset),
         color = COLORS.spawn,
         material = Enum.Material.Neon,
         transparency = 0.6,
@@ -1220,9 +1376,15 @@ local function buildLander(kit: Model)
     })
     spawnPoint.CanTouch = false
 
-    -- 로버 복구 콘솔 (RoverRecovery가 프롬프트를 붙인다)
+    -- 로버 복구 콘솔: 오른쪽(+X) 충돌 벽 바깥, 앞쪽 (RoverRecovery가 프롬프트를 붙인다)
+    local wallOut = Config.AIRLOCK.wallThickness
+    local consolePosition = Vector3.new(
+        hi.X + wallOut + ROVER_CONSOLE_SIDE_GAP + ROVER_CONSOLE_SIZE.X / 2,
+        0,
+        lo.Z + ROVER_CONSOLE_FROM_FRONT
+    )
     local consoleCFrame, consoleTotal =
-        slabCFrame(CFrame.identity, ROVER_CONSOLE_POSITION, ROVER_CONSOLE_SIZE.Y)
+        slabCFrame(CFrame.identity, consolePosition, ROVER_CONSOLE_SIZE.Y)
     makePart({
         name = "RoverConsole",
         size = Vector3.new(ROVER_CONSOLE_SIZE.X, consoleTotal, ROVER_CONSOLE_SIZE.Z),
@@ -1232,18 +1394,22 @@ local function buildLander(kit: Model)
         parent = lander,
     })
 
-    -- KitImports 장식: 지붕 안테나와 레이더, 콘솔 위 안테나 (충돌 없음)
+    -- KitImports 장식: 꼭대기 안테나, 왼쪽(-X) 바닥 지상 레이더, 콘솔 위 안테나 (충돌 없음)
     ServerUtil.safeCall("DevMap LanderDecor", function()
-        local offset = Vector3.new(math.min(ROOF_DECOR_OFFSET, roofHalfWidth / 2), 0, 0)
-        placeDecor("Antenna", MAST_BOX, roofCenter + offset, false, lander, "RoofAntenna")
-        placeDecor("Radar", RADAR_BOX, roofCenter - offset, false, lander, "RoofRadar")
-        local consoleTop = Vector3.new(
-            ROVER_CONSOLE_POSITION.X,
-            FLOOR_Y + ROVER_CONSOLE_SIZE.Y,
-            ROVER_CONSOLE_POSITION.Z
+        placeDecor("Antenna", MAST_BOX, Vector3.new(cx, hi.Y, cz), false, lander, "RoofAntenna")
+        placeDecor(
+            "Radar",
+            RADAR_BOX,
+            Vector3.new(lo.X - wallOut - RADAR_SIDE_GAP - RADAR_BOX.X / 2, FLOOR_Y, cz),
+            false,
+            lander,
+            "GroundRadar"
         )
+        local consoleTop =
+            Vector3.new(consolePosition.X, FLOOR_Y + ROVER_CONSOLE_SIZE.Y, consolePosition.Z)
         placeDecor("Antenna", CONSOLE_MAST_BOX, consoleTop, false, lander, "ConsoleAntenna")
     end)
+    return consolePosition
 end
 
 local function buildSolarField(kit: Model)
@@ -1335,9 +1501,11 @@ local function buildModulePads(kit: Model)
             visual.Name = "Built"
             visual.Parent = padModel
             if id == Config.OXYGEN.habitatModule then
-                -- 패드 앞(-Z, A-B 통로 반대편)에 에어락. 산소 구역은 통로 안만 (완공 전에는 Built와 함께 숨음)
+                -- 걸어 들어가는 건물: 정면(-Z, A-B 통로 반대편) 문, 4면 충돌 벽, 내부 산소 구역.
+                -- 문, 벽, 빛은 Built 안이라 완공 때 함께 나타나고, 구역은 PadA 아래(가동 중일 때만 유효)
                 local lo, hi = KitImports.bounds(visual)
-                local zoneMin, zoneMax = buildAirlock(visual, (lo.X + hi.X) / 2, lo.Z, top)
+                makeWalkIn(visual, false)
+                local zoneMin, zoneMax = buildEntry(visual, lo, hi, top, "box")
                 makeMarker(
                     "OxygenZone",
                     zoneMax - zoneMin,
@@ -1351,10 +1519,17 @@ local function buildModulePads(kit: Model)
         buildGhost(padModel, layout.center, top, layout.body)
         local built = makeModel("Built", padModel)
         if id == Config.OXYGEN.habitatModule then
-            -- Habitat A: 건물 + 앞면 에어락 (메시 경로와 같은 판정). 산소 구역은 통로 안만
-            buildHut(built, layout.center, layout.body, COLORS.habitat, Enum.Material.SmoothPlastic)
-            local zoneMin, zoneMax =
-                buildAirlock(built, layout.center.X, layout.center.Z - layout.body.Z / 2, top)
+            -- Habitat A: 오두막 + 문, 충돌 벽, 내부 산소 구역 (메시 경로와 같은 판정)
+            local hutFloor = buildHut(
+                built,
+                layout.center,
+                layout.body,
+                COLORS.habitat,
+                Enum.Material.SmoothPlastic
+            )
+            local lo, hi = KitImports.bounds(built)
+            makeWalkIn(built, true)
+            local zoneMin, zoneMax = buildEntry(built, lo, hi, hutFloor, "box")
             makeMarker(
                 "OxygenZone",
                 zoneMax - zoneMin,
@@ -1419,7 +1594,7 @@ local function buildWaterTank(kit: Model)
 end
 
 -- KitImports 장식: 착륙선 옆 바닥에 상자 2 x 2
-local function addCrates(kit: Model)
+local function addCrates(kit: Model, consolePosition: Vector3)
     if not KitImports.has("Crate") then
         return
     end
@@ -1438,9 +1613,9 @@ local function addCrates(kit: Model)
                 KitImports.placeBottom(
                     crate,
                     Vector3.new(
-                        CRATE_ORIGIN.X + column * CRATE_PITCH,
+                        consolePosition.X + column * CRATE_PITCH,
                         FLOOR_Y,
-                        CRATE_ORIGIN.Z + row * CRATE_PITCH
+                        consolePosition.Z + CRATE_BEHIND_CONSOLE + row * CRATE_PITCH
                     )
                 )
                 KitImports.setStatic(crate, true)
@@ -1451,16 +1626,65 @@ local function addCrates(kit: Model)
     end
 end
 
+-- 지형을 켠 그레이박스 맵에서만: 키트 바닥 전체를 덮는 콘크리트 판(윗면 = 착륙 패드 윗면 - 0.5 = 월드 GROUND_TOP)
+-- 판은 x 방향으로 대칭이라 정면 경사로가 로버 차선(x = 0)에 온다. 가장자리 4면 중앙에 지형으로 내려가는 경사로
+local function buildApron(kit: Model)
+    local lo, hi = KitImports.bounds(kit)
+    local halfX = math.max(math.abs(lo.X), math.abs(hi.X)) + APRON_MARGIN
+    local minZ, maxZ = lo.Z - APRON_MARGIN, hi.Z + APRON_MARGIN
+    local top = FLOOR_Y - LANDING_PAD_SIZE.Y / 2
+    local midZ = (minZ + maxZ) / 2
+    makePart({
+        name = "Apron",
+        size = Vector3.new(2 * halfX, APRON_THICKNESS, maxZ - minZ),
+        cframe = CFrame.new(0, top - APRON_THICKNESS / 2, midZ),
+        color = COLORS.apron,
+        material = Enum.Material.Concrete,
+        parent = kit,
+    })
+    local drop = GROUND_TOP - TERRAIN_TOP
+    local ramps = makeModel("Ramps", kit)
+    local edges = {
+        { name = "RampFront", point = Vector3.new(0, 0, minZ), outward = Vector3.new(0, 0, -1) },
+        { name = "RampBack", point = Vector3.new(0, 0, maxZ), outward = Vector3.zAxis },
+        {
+            name = "RampLeft",
+            point = Vector3.new(-halfX, 0, midZ),
+            outward = Vector3.new(-1, 0, 0),
+        },
+        { name = "RampRight", point = Vector3.new(halfX, 0, midZ), outward = Vector3.xAxis },
+    }
+    for _, edge in edges do
+        -- WedgePart는 뒤(+Z)가 높고 앞(-Z, LookVector)으로 낮아진다: 앞을 바깥으로 향하게
+        local center = edge.point
+            + edge.outward * (RAMP_LENGTH / 2)
+            + Vector3.new(0, top - drop / 2, 0)
+        local ramp = Instance.new("WedgePart")
+        ramp.Name = edge.name
+        ramp.Size = Vector3.new(RAMP_WIDTH, drop, RAMP_LENGTH)
+        ramp.CFrame = CFrame.lookAt(center, center + edge.outward)
+        ramp.Color = COLORS.apron
+        ramp.Material = Enum.Material.Concrete
+        ramp.Anchored = true
+        ramp.TopSurface = Enum.SurfaceType.Smooth
+        ramp.BottomSurface = Enum.SurfaceType.Smooth
+        ramp.Parent = ramps
+    end
+end
+
 local function buildBaseKit()
     local kit = makeModel("BaseKit", nil)
     local origin = makeMarker("Origin", ORIGIN_SIZE, CFrame.identity, kit)
     kit.PrimaryPart = origin
-    buildLander(kit)
+    local consolePosition = buildLander(kit)
     buildRover(kit)
     buildSolarField(kit)
     buildModulePads(kit)
     buildWaterTank(kit)
-    ServerUtil.safeCall("DevMap Crates", addCrates, kit)
+    ServerUtil.safeCall("DevMap Crates", addCrates, kit, consolePosition)
+    if greyboxTerrainBuilt then
+        buildApron(kit)
+    end
     kit.Parent = ServerStorage
 end
 
@@ -1517,8 +1741,6 @@ end
 function DevMap.ensure()
     -- Workspace.KitImports를 ServerStorage로 옮기고 항목을 검사한다 (플레이 중에는 보이지 않게)
     KitImports.load()
-    -- 하늘의 행성은 맵 종류와 관계없이 (Workspace.Decor.Planet이 이미 있으면 건너뜀)
-    ServerUtil.safeCall("KitImports Planet", KitImports.ensurePlanet)
     local kitParts = { "Rover", "Lander", "HabitatA", "HabitatB", "HabitatC" }
     if ServerStorage:FindFirstChild("BaseKit") then
         for _, name in kitParts do
@@ -1541,6 +1763,32 @@ function DevMap.ensure()
     if not ServerStorage:FindFirstChild("PanelTemplate") then
         buildPanelTemplate()
     end
+
+    -- 하늘과 행성 (맵 종류와 관계없이). 행성은 기본 착륙지에서 가장 가까운 얼음 쪽에 두고,
+    -- 착륙지가 정해지면 GameFlow가 그 기지 기준으로 다시 조준한다
+    local skyNote, atmosphereNote = setupSky()
+    local planetNote = "만들지 못함"
+    local planetCenter: Vector3? = nil
+    ServerUtil.safeCall("KitImports Planet", function()
+        planetNote = KitImports.ensurePlanet()
+        local pads = workspace:FindFirstChild("LandingPads")
+        local pad = pads and pads:FindFirstChild("Pad" .. Config.DEFAULT_SITE_ID)
+        local origin = if pad and pad:IsA("BasePart") then pad.CFrame.Position else Vector3.zero
+        planetCenter = KitImports.aimPlanetFrom(origin)
+    end)
+    local center = planetCenter
+    print(
+        string.format(
+            "[DevMap] 하늘: %s, %s, ClockTime %.1f, 행성 위치 %s, 행성 %s",
+            skyNote,
+            atmosphereNote,
+            SKY.clockTime,
+            if center
+                then string.format("(%.0f, %.0f, %.0f)", center.X, center.Y, center.Z)
+                else "없음",
+            planetNote
+        )
+    )
 end
 
 return DevMap

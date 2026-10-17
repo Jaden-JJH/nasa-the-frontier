@@ -150,7 +150,7 @@ ServerStorage
     Origin (Part)                   패드 중심에 PivotTo로 맞춤
     Lander (Model)
       SpawnPoint (Part)             플레이어 스폰 위치
-      OxygenZone (Part, CanCollide false, Transparency 1)   에어락 통로 내부 + 문 앞 1 stud 범위 (2026-10-17). 통로는 Connector 메시 또는 Part, 바닥에 범위 링
+      OxygenZone (Part, CanCollide false, Transparency 1)   건물 내부(경계 상자를 각 면 1 stud 줄인 박스) + 문 앞 1 stud (2026-10-17 3차). 정면 문과 보이지 않는 충돌 벽은 코드가 생성
     Rover (Model, PrimaryPart 있음)
       DriverSeat (VehicleSeat)       Attributes: Tank(number) 서버가 관리
     SolarField (Model)

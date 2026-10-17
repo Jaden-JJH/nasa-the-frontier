@@ -57,6 +57,84 @@ local function panelFill(panel, slot)
     return (hi.X - lo.X) / slot.Size.X, (hi.Z - lo.Z) / slot.Size.Z
 end
 
+-- 점이 파트의 회전된 박스 안인지 (Oxygen의 판정과 같은 계산)
+local function insidePart(part, point)
+    local p = part.CFrame:PointToObjectSpace(point)
+    local h = part.Size / 2
+    return math.abs(p.X) <= h.X and math.abs(p.Y) <= h.Y and math.abs(p.Z) <= h.Z
+end
+
+-- 걸어 들어가는 건물 출입 구조 검사: Entry 모델의 문, 프레임, 표지, 충돌 벽, 내부 빛
+local function entryOk(building, expectedWalls)
+    local entry = building:FindFirstChild("Entry")
+    if not entry then
+        return false, "Entry 없음"
+    end
+    local door, frame, sign =
+        entry:FindFirstChild("Door"),
+        entry:FindFirstChild("DoorFrame"),
+        entry:FindFirstChild("DoorSign")
+    if not door or not frame or not sign then
+        return false, "문, 프레임, 표지 중 없음"
+    end
+    if door.CanCollide or frame.CanCollide then
+        return false, "문이 충돌함"
+    end
+    if
+        math.abs(door.Size.X - 4.5) > 1e-3
+        or math.abs(door.Size.Y - 5.5) > 1e-3
+        or math.abs(door.Size.Z - 0.4) > 1e-3
+    then
+        return false, "문 크기 " .. tostring(door.Size)
+    end
+    if frame.Color == door.Color then
+        return false, "프레임 색이 문과 같음"
+    end
+    local gui = sign:FindFirstChildOfClass("SurfaceGui")
+    local label = gui and gui:FindFirstChildOfClass("TextLabel")
+    if not label or label.Text ~= "AIRLOCK" then
+        return false, "AIRLOCK 표지 없음"
+    end
+    local walls, left, right = 0, nil, nil
+    for _, child in entry:GetChildren() do
+        if string.sub(child.Name, 1, 4) == "Wall" then
+            walls += 1
+            if
+                child.Transparency ~= 1
+                or not child.CanCollide
+                or math.abs(child.Size.Y - 6) > 1e-6
+            then
+                return false, "벽 설정 " .. child.Name
+            end
+            if child.Name == "WallFrontLeft" then
+                left = child
+            elseif child.Name == "WallFrontRight" then
+                right = child
+            end
+        end
+    end
+    if walls ~= expectedWalls then
+        return false, "벽 " .. walls .. "개 (기대 " .. expectedWalls .. ")"
+    end
+    if not left or not right then
+        return false, "정면 벽 조각 없음"
+    end
+    local gap = (left.CFrame.Position - right.CFrame.Position).Magnitude - left.Size.X
+    if math.abs(gap - 5) > 1e-3 then
+        return false, string.format("문 폭 비움 %.2f", gap)
+    end
+    local light = nil
+    for _, d in entry:GetDescendants() do
+        if d:IsA("PointLight") then
+            light = d
+        end
+    end
+    if not light or light.Range ~= 18 or light.Brightness ~= 1 then
+        return false, "내부 빛"
+    end
+    return true, "ok"
+end
+
 -- 가상 시계와 task 스케줄러 ---------------------------------------------
 local now = 0
 local queue = {}
@@ -446,6 +524,10 @@ baseplate.CFrame = CFrame.new(0, -8, 0)
 baseplate.Parent = dm:GetService("Workspace")
 local baseplateTexture = Instance.new("Texture")
 baseplateTexture.Parent = baseplate
+local atmosphere1 = Instance.new("Atmosphere")
+atmosphere1.Density = 0.4
+atmosphere1.Haze = 1
+atmosphere1.Parent = dm:GetService("Lighting")
 
 -- 부팅 ------------------------------------------------------------------
 print("[부팅]")
@@ -535,20 +617,63 @@ check(
     "바위 수 " .. #Workspace.DevTerrain.Boulders:GetChildren()
 )
 
--- 달 지형 -----------------------------------------------------------------
+-- 달 지형 (기본값 TERRAIN_ENABLED = true) ------------------------------------
 print("[지형]")
-do
-    -- 기본값 TERRAIN_ENABLED = false: Terrain 없이 평평한 지면 Part (Terrain 인스턴스가 있어도)
+local function flatDistance(a, b)
+    return Vector3.new(a.X - b.X, 0, a.Z - b.Z).Magnitude
+end
+local function segmentDistance(point, a, b)
+    local p = Vector3.new(point.X, 0, point.Z)
+    local s0, s1 = Vector3.new(a.X, 0, a.Z), Vector3.new(b.X, 0, b.Z)
+    local d = s1 - s0
+    local t = math.clamp((p - s0):Dot(d) / d:Dot(d), 0, 1)
+    return (p - (s0 + d * t)).Magnitude
+end
+-- 각 착륙 패드와 가장 가까운 얼음을 잇는 회랑
+local function corridorsOf(ws)
+    local list = {}
+    for i = 1, 4 do
+        local pad = ws.LandingPads["Pad" .. i].CFrame.Position
+        local nearest, best = nil, math.huge
+        for _, ice in ws.IceSites:GetChildren() do
+            local d = flatDistance(pad, ice.CFrame.Position)
+            if d < best then
+                nearest, best = ice.CFrame.Position, d
+            end
+        end
+        table.insert(list, { pad = pad, ice = nearest })
+    end
+    return list
+end
+local function runTerrainChecks()
+    local TERRAIN_TOP = -0.5
+    local blocks, balls = {}, {}
+    for _, call in terrainCalls do
+        table.insert(if call.kind == "block" then blocks else balls, call)
+    end
+    local block = blocks[1]
     check(
-        Workspace.DevTerrain:FindFirstChild("MoonGround") ~= nil,
-        "TERRAIN_ENABLED false: 평평한 지면 Part"
+        #blocks == 1
+            and math.abs(block.cframe.Position.Y + block.size.Y / 2 - TERRAIN_TOP) < 1e-6
+            and block.size.Y == 24
+            and block.size.X >= 1400
+            and block.size.Z >= 1100,
+        "FillBlock 한 번: 두께 24, 지형 윗면 y -0.5 (콘크리트 판보다 1 아래)"
     )
-    check(#terrainCalls == 0, "TERRAIN_ENABLED false: Terrain 호출 0회")
     check(
-        baseplate.Transparency == 0
-            and baseplate.CanCollide == true
-            and baseplateTexture.Transparency == 0,
-        "TERRAIN_ENABLED false: Baseplate는 그대로"
+        terrainInstance:GetMaterialColor(roblox.Enum.Material.Sand)
+            == roblox.Color3.fromRGB(128, 126, 122),
+        "Sand 재질 색 = 달 표토 회색 (128, 126, 122)"
+    )
+    check(
+        Workspace.DevTerrain:FindFirstChild("MoonGround") == nil,
+        "Terrain이 있으면 지면 Part를 만들지 않음"
+    )
+    check(
+        baseplate.Transparency == 1
+            and baseplate.CanCollide == false
+            and baseplateTexture.Transparency == 1,
+        "기본 Baseplate는 플레이 중 숨김"
     )
     local labels = 0
     for _, container in { Workspace, ServerStorage } do
@@ -559,18 +684,183 @@ do
         end
     end
     check(labels == 0, "서버 월드 라벨 BillboardGui 0개 (" .. labels .. ")")
-    local sky = dm:GetService("Lighting"):FindFirstChildOfClass("Sky")
+
+    -- 보호 구역: 패드 80, 얼음 30, 주행 회랑 반폭 12 (지표면 원 기준)
+    local pads, ices = {}, {}
+    for i = 1, 4 do
+        table.insert(pads, Workspace.LandingPads["Pad" .. i].CFrame.Position)
+    end
+    for _, ice in Workspace.IceSites:GetChildren() do
+        table.insert(ices, ice.CFrame.Position)
+    end
+    local corridors = corridorsOf(Workspace)
+    local violations, corridorHits = 0, 0
+    local craters, hills, smallCraters, badDepth, highRim, badHill = 0, 0, 0, 0, 0, 0
+    local nearPad = { 0, 0, 0, 0 }
+    local craterCircles = {}
+    for _, ball in balls do
+        local dy = ball.center.Y - TERRAIN_TOP
+        local footprint = if math.abs(dy) < ball.radius
+            then math.sqrt(ball.radius ^ 2 - dy ^ 2)
+            else 0
+        for _, pad in pads do
+            if flatDistance(ball.center, pad) < 80 + footprint - 1e-6 then
+                violations += 1
+            end
+        end
+        for _, ice in ices do
+            if flatDistance(ball.center, ice) < 30 + footprint - 1e-6 then
+                violations += 1
+            end
+        end
+        for _, c in corridors do
+            if segmentDistance(ball.center, c.pad, c.ice) < 12 + footprint - 1e-6 then
+                corridorHits += 1
+            end
+        end
+        local protrude = ball.center.Y + ball.radius - TERRAIN_TOP
+        if ball.material == roblox.Enum.Material.Air then
+            craters += 1
+            if ball.radius < 12 then
+                smallCraters += 1
+            end
+            -- 깊이 = 반지름의 20%: 중심이 지형 위 (반지름 - 깊이)
+            if math.abs(dy - ball.radius * 0.8) > 1e-6 then
+                badDepth += 1
+            end
+            table.insert(craterCircles, { center = ball.center, footprint = footprint })
+            for i, pad in pads do
+                if flatDistance(ball.center, pad) <= 80 + 220 then
+                    nearPad[i] += 1
+                end
+            end
+        elseif ball.radius >= 40 then
+            hills += 1
+            if protrude < 2 - 1e-6 or protrude > 4 + 1e-6 then
+                badHill += 1
+            end
+        elseif protrude > 1.5 + 1e-6 then
+            highRim += 1
+        end
+    end
     check(
-        sky ~= nil
-            and tostring(sky.MoonTextureId) == "rbxasset://sky/sun.jpg"
-            and sky.MoonAngularSize == 14
-            and sky.StarCount == 3000
-            and sky.CelestialBodiesShown == true,
-        "Sky 생성: 달 자리에 태양 텍스처(rbxasset://sky/sun.jpg), 크기 14, 별 3000"
+        violations == 0,
+        "모든 FillBall의 지표면 원이 패드 반지름 80, 얼음 반지름 30 밖 (침범 "
+            .. violations
+            .. ")"
     )
-    local firstBoulder = Workspace.DevTerrain.Boulders:GetChildren()[1]
     check(
-        firstBoulder.Color == roblox.Color3.fromRGB(90, 88, 86),
+        corridorHits == 0,
+        "폭 24 주행 회랑에 크레이터와 언덕 없음 (침범 " .. corridorHits .. ")"
+    )
+    check(
+        craters == 20 and smallCraters == 0,
+        "크레이터 " .. craters .. "개, 반지름 12 미만 " .. smallCraters .. "개"
+    )
+    check(
+        badDepth == 0 and highRim == 0,
+        "크레이터 깊이 반지름의 20%, 테두리 둔덕 1.5 이하"
+    )
+    check(hills == 7 and badHill == 0, "언덕 " .. hills .. "개, 높이 2 ~ 4")
+    check(
+        nearPad[4] > nearPad[1],
+        string.format(
+            "Pad4(지형 위험 높음) 주변 크레이터 %d개 > Pad1 주변 %d개",
+            nearPad[4],
+            nearPad[1]
+        )
+    )
+
+    -- 착륙 패드와 얼음은 지형 위
+    local padsOk, icesOk = true, true
+    for i = 1, 4 do
+        local pad = Workspace.LandingPads["Pad" .. i]
+        local top = pad.CFrame.Position.Y + pad.Size.Y / 2
+        local bottom = pad.CFrame.Position.Y - pad.Size.Y / 2
+        if math.abs(top - 1) > 1e-6 or bottom > TERRAIN_TOP + 1e-6 then
+            padsOk = false
+        end
+    end
+    for _, ice in Workspace.IceSites:GetChildren() do
+        if math.abs(ice.CFrame.Position.Y - ice.Size.Y / 2 - TERRAIN_TOP) > 1e-6 then
+            icesOk = false
+        end
+    end
+    check(padsOk, "착륙 패드 윗면 y 1.0, 지형까지 묻힘")
+    check(icesOk, "얼음 지점이 지형(y -0.5) 위")
+
+    -- 기지 콘크리트 판과 경사로 (키트 좌표: Origin 아래 0.5 = 판 윗면 -1.0)
+    local apron = kit:FindFirstChild("Apron")
+    check(
+        apron ~= nil
+            and apron.Material == roblox.Enum.Material.Concrete
+            and apron.Color == roblox.Color3.fromRGB(105, 105, 108)
+            and math.abs(apron.CFrame.Position.Y + apron.Size.Y / 2 - -1) < 1e-6,
+        "기지 키트에 콘크리트 판 (윗면 = 착륙 패드 윗면 - 0.5 = 월드 y 0.5)"
+    )
+    local ramps = kit:FindFirstChild("Ramps")
+    local rampOk = ramps ~= nil and #ramps:GetChildren() == 4
+    if ramps then
+        for _, ramp in ramps:GetChildren() do
+            if not ramp:IsA("WedgePart") or ramp.Size ~= Vector3.new(10, 1, 4) then
+                rampOk = false
+            end
+        end
+    end
+    check(rampOk, "판 가장자리 경사로 WedgePart 4개 (폭 10, 길이 4, 높이 1)")
+    -- 어느 착륙지에 놓여도 판 위에 크레이터가 없다
+    local onApron = 0
+    for i = 1, 4 do
+        local pad = Workspace.LandingPads["Pad" .. i]
+        local apronWorld = pad.CFrame * CFrame.new(0, pad.Size.Y / 2 + 0.5, 0) * apron.CFrame
+        local half = apron.Size / 2
+        for _, crater in craterCircles do
+            local p = apronWorld:PointToObjectSpace(crater.center)
+            local dx = math.max(math.abs(p.X) - half.X, 0)
+            local dz = math.max(math.abs(p.Z) - half.Z, 0)
+            if math.sqrt(dx * dx + dz * dz) < crater.footprint then
+                onApron += 1
+            end
+        end
+    end
+    check(onApron == 0, "네 착륙지 어디서도 콘크리트 판 위에 크레이터 없음")
+
+    -- 바위: 약 170개, 회랑과 판(패드 80) 밖, 크레이터 밖, 약 10%는 2배 크기
+    local boulders = Workspace.DevTerrain.Boulders:GetChildren()
+    local inCorridor, nearBase, inCrater, big = 0, 0, 0, 0
+    for _, boulder in boulders do
+        local p = boulder.CFrame.Position
+        for _, c in corridors do
+            if segmentDistance(p, c.pad, c.ice) < 12 then
+                inCorridor += 1
+            end
+        end
+        for _, pad in pads do
+            if flatDistance(p, pad) < 80 then
+                nearBase += 1
+            end
+        end
+        for _, crater in craterCircles do
+            if flatDistance(p, crater.center) < crater.footprint then
+                inCrater += 1
+            end
+        end
+        if boulder:GetAttribute("BoulderScale") == 2 then
+            big += 1
+        end
+    end
+    check(#boulders >= 160 and #boulders <= 170, "바위 " .. #boulders .. "개 (약 170)")
+    check(
+        inCorridor == 0 and nearBase == 0,
+        "바위가 회랑 안과 기지 판(패드 80) 안에 없음"
+    )
+    check(inCrater == 0, "바위가 크레이터 안에 놓이지 않음")
+    check(
+        big >= #boulders * 0.05 and big <= #boulders * 0.2,
+        string.format("2배 크기 바위 %d개 (%.0f%%)", big, big / #boulders * 100)
+    )
+    check(
+        boulders[1].Color == roblox.Color3.fromRGB(90, 88, 86),
         "그레이박스 바위 회색 (90, 88, 86)"
     )
     -- 얼음 지점 (그레이박스)
@@ -587,10 +877,51 @@ do
         light ~= nil and light.Range == 18 and math.abs(light.Brightness - 1.2) < 1e-6,
         "얼음 중심에 PointLight (Range 18, Brightness 1.2)"
     )
-end
 
--- 지형 경로: DevMap의 TERRAIN_ENABLED만 true로 바꾼 사본을 별도 place에서 돌린다
-local function runTerrainCase()
+    -- 하늘과 행성
+    local lighting = dm:GetService("Lighting")
+    local sky = lighting:FindFirstChildOfClass("Sky")
+    check(
+        sky ~= nil
+            and tostring(sky.MoonTextureId) == "rbxasset://sky/sun.jpg"
+            and sky.MoonAngularSize == 14
+            and sky.StarCount == 3000
+            and sky.CelestialBodiesShown == true,
+        "Sky 생성: 달 자리에 태양 텍스처(rbxasset://sky/sun.jpg), 크기 14, 별 3000"
+    )
+    check(
+        atmosphere1.Density == 0 and atmosphere1.Haze == 0 and atmosphere1.Glare == 0,
+        "Atmosphere 밀도, Haze, Glare 0"
+    )
+    check(math.abs(lighting.ClockTime - 2.5) < 1e-6, "ClockTime 2.5")
+    local planet = Workspace:FindFirstChild("Decor") and Workspace.Decor:FindFirstChild("Planet")
+    local sphere = planet and planet:FindFirstChild("Sphere")
+    check(
+        planet ~= nil
+            and planet:IsA("Model")
+            and planet.ModelStreamingMode == roblox.Enum.ModelStreamingMode.Persistent
+            and sphere ~= nil
+            and sphere.Material == roblox.Enum.Material.Neon
+            and sphere.Color == roblox.Color3.fromRGB(120, 170, 230)
+            and math.abs(sphere.Size.X - 260) < 1e-6,
+        "메시가 없으면 Neon 구 Planet (지름 260, 항상 스트리밍)"
+    )
+    -- 시작 시에는 기본 착륙지(Pad2)에서 가장 가까운 얼음 쪽 하늘
+    local pad2 = Workspace.LandingPads.Pad2.CFrame.Position
+    local offset = sphere.CFrame.Position - pad2
+    local nearestIce = Workspace.IceSites.Ice2.CFrame.Position
+    local heading = Vector3.new(nearestIce.X - pad2.X, 0, nearestIce.Z - pad2.Z).Unit
+    check(
+        math.abs(offset.Magnitude - 900) < 0.01
+            and math.abs(math.deg(math.asin(offset.Y / offset.Magnitude)) - 20) < 0.01
+            and Vector3.new(offset.X, 0, offset.Z).Unit:Dot(heading) > 0.999,
+        "행성: 기본 착륙지에서 거리 900, 고도 20도, 가장 가까운 얼음 방향"
+    )
+end
+runTerrainChecks()
+
+-- 지형 꺼짐 경로 + 디자이너 하늘 유지: DevMap의 TERRAIN_ENABLED만 false로 바꾼 사본을 별도 place에서
+local function runFlatCase()
     local dm3 = roblox.deserializePlace(fs.readFile(placePath))
     local ws3 = dm3:GetService("Workspace")
     local terrain3 = Instance.new("Terrain")
@@ -600,16 +931,20 @@ local function runTerrainCase()
     plate3.Size = Vector3.new(2048, 16, 2048)
     plate3.CFrame = CFrame.new(0, -8, 0)
     plate3.Parent = ws3
-    local plateTexture3 = Instance.new("Texture")
-    plateTexture3.Parent = plate3
+    local lighting3 = dm3:GetService("Lighting")
     local designerSky = Instance.new("Sky")
     designerSky.MoonTextureId = "rbxassetid://123"
-    designerSky.Parent = dm3:GetService("Lighting")
+    designerSky:SetAttribute("KeepSky", true)
+    designerSky.Parent = lighting3
+    local designerAtmosphere = Instance.new("Atmosphere")
+    designerAtmosphere.Density = 0.4
+    designerAtmosphere:SetAttribute("KeepAtmosphere", true)
+    designerAtmosphere.Parent = lighting3
     local patched = 0
     local loader3 = makeLoader(dm3, {}, function(key, source)
         if string.sub(key, -6) == "DevMap" then
             local out, n =
-                string.gsub(source, "local TERRAIN_ENABLED = false", "local TERRAIN_ENABLED = true")
+                string.gsub(source, "local TERRAIN_ENABLED = true", "local TERRAIN_ENABLED = false")
             patched += n
             return out
         end
@@ -620,116 +955,38 @@ local function runTerrainCase()
         loader3(dm3:GetService("ServerScriptService").Server.DevMap).ensure()
     end)
     advance(0)
-    check(patched == 1, "지형 경로: DevMap 플래그를 true로 바꿈")
+    check(patched == 1, "지형 꺼짐 경로: DevMap 플래그를 false로 바꿈")
+    local ground = ws3.DevTerrain:FindFirstChild("MoonGround")
+    check(
+        ground ~= nil and math.abs(ground.CFrame.Position.Y + ground.Size.Y / 2 - 0.5) < 1e-6,
+        "TERRAIN_ENABLED false: 평평한 지면 Part (윗면 y 0.5)"
+    )
+    check(#terrainCalls == callsBefore, "TERRAIN_ENABLED false: Terrain 호출 0회")
+    check(
+        plate3.Transparency == 0 and plate3.CanCollide == true,
+        "TERRAIN_ENABLED false: Baseplate는 그대로"
+    )
+    local kit3 = dm3:GetService("ServerStorage").BaseKit
+    check(
+        kit3:FindFirstChild("Apron") == nil and kit3:FindFirstChild("Ramps") == nil,
+        "TERRAIN_ENABLED false: 콘크리트 판과 경사로 없음"
+    )
     local skies = 0
-    for _, child in dm3:GetService("Lighting"):GetChildren() do
+    for _, child in lighting3:GetChildren() do
         if child:IsA("Sky") then
             skies += 1
         end
     end
     check(
         skies == 1 and tostring(designerSky.MoonTextureId) == "rbxassetid://123",
-        "디자이너 Sky가 있으면 건드리지 않음"
-    )
-    -- 이 place에서 생긴 호출만 본다
-    local calls = {}
-    for i = callsBefore + 1, #terrainCalls do
-        table.insert(calls, terrainCalls[i])
-    end
-    local GROUND_TOP = 0.5
-    local blocks, balls = {}, {}
-    for _, call in calls do
-        table.insert(if call.kind == "block" then blocks else balls, call)
-    end
-    local block = blocks[1]
-    check(
-        #blocks == 1
-            and math.abs(block.cframe.Position.Y + block.size.Y / 2 - GROUND_TOP) < 1e-6
-            and block.size.Y == 24
-            and block.size.X >= 1400
-            and block.size.Z >= 1100,
-        "FillBlock 한 번: 두께 24, 윗면 y 0.5, 1400 x 1100"
+        "Sky에 KeepSky = true면 덮어쓰지 않음"
     )
     check(
-        terrain3:GetMaterialColor(roblox.Enum.Material.Sand) == roblox.Color3.fromRGB(128, 126, 122),
-        "Sand 재질 색 = 달 표토 회색 (128, 126, 122)"
+        math.abs(designerAtmosphere.Density - 0.4) < 1e-6,
+        "Atmosphere에 KeepAtmosphere = true면 그대로"
     )
-    check(
-        ws3.DevTerrain:FindFirstChild("MoonGround") == nil,
-        "Terrain이 있으면 지면 Part를 만들지 않음"
-    )
-    check(
-        plate3.Transparency == 1 and plate3.CanCollide == false and plateTexture3.Transparency == 1,
-        "기본 Baseplate는 플레이 중 숨김"
-    )
-    local craters, hills = 0, 0
-    local pads, ices = {}, {}
-    for i = 1, 4 do
-        table.insert(pads, ws3.LandingPads["Pad" .. i].CFrame.Position)
-    end
-    for _, ice in ws3.IceSites:GetChildren() do
-        table.insert(ices, ice.CFrame.Position)
-    end
-    local function flatDistance(a, b)
-        return Vector3.new(a.X - b.X, 0, a.Z - b.Z).Magnitude
-    end
-    local violations = 0
-    local nearPad = { 0, 0, 0, 0 }
-    local craterCenters = {}
-    for _, ball in balls do
-        local dy = ball.center.Y - GROUND_TOP
-        local footprint = if math.abs(dy) < ball.radius
-            then math.sqrt(ball.radius ^ 2 - dy ^ 2)
-            else 0
-        for _, pad in pads do
-            if flatDistance(ball.center, pad) < 80 + footprint - 1e-6 then
-                violations += 1
-            end
-        end
-        for _, ice in ices do
-            if flatDistance(ball.center, ice) < 30 + footprint - 1e-6 then
-                violations += 1
-            end
-        end
-        if ball.material == roblox.Enum.Material.Air then
-            craters += 1
-            table.insert(craterCenters, { center = ball.center, footprint = footprint })
-            for i, pad in pads do
-                if flatDistance(ball.center, pad) <= 80 + 220 then
-                    nearPad[i] += 1
-                end
-            end
-        elseif ball.radius >= 40 then
-            hills += 1
-        end
-    end
-    check(
-        violations == 0,
-        "모든 FillBall의 지표면 원이 패드 반지름 80, 얼음 반지름 30 밖 (침범 "
-            .. violations
-            .. ")"
-    )
-    check(craters == 20, "크레이터 " .. craters .. "개")
-    check(hills >= 6 and hills <= 8, "언덕 " .. hills .. "개")
-    check(
-        nearPad[4] > nearPad[1],
-        string.format(
-            "Pad4(지형 위험 높음) 주변 크레이터 %d개 > Pad1 주변 %d개",
-            nearPad[4],
-            nearPad[1]
-        )
-    )
-    local boulderInCrater = 0
-    for _, boulder in ws3.DevTerrain.Boulders:GetChildren() do
-        for _, crater in craterCenters do
-            if flatDistance(boulder.CFrame.Position, crater.center) < crater.footprint then
-                boulderInCrater += 1
-            end
-        end
-    end
-    check(boulderInCrater == 0, "바위가 크레이터 안에 놓이지 않음")
 end
-runTerrainCase()
+runFlatCase()
 
 check(state().phase == "selecting", "부팅 후 selecting")
 
@@ -1019,34 +1276,46 @@ check(
 -- 산소: 야외에 세워 두면 고갈 ---------------------------------------------
 print("[산소]")
 do
-    -- 그레이박스 착륙선: 통로 안은 실내, 오두막 안쪽과 옆은 실외 (메시 경로와 같은 판정)
-    local airlock = base.Lander:FindFirstChild("Airlock")
+    -- 그레이박스 착륙선: 걸어 들어가는 오두막. 문, 보이지 않는 충돌 벽(정면 문 폭 비움), 내부 산소 구역
+    local ok, why = entryOk(base.Lander, 5)
     check(
-        airlock ~= nil
-            and airlock:FindFirstChild("TubeFloor") ~= nil
-            and airlock:FindFirstChild("TubeWallLeft") ~= nil
-            and airlock:FindFirstChild("TubeWallRight") ~= nil
-            and airlock:FindFirstChild("TubeRoof") ~= nil
-            and airlock:FindFirstChild("Door") ~= nil
-            and airlock:FindFirstChild("OxygenRing") ~= nil,
-        "그레이박스 착륙선 에어락: 바닥, 양 벽, 윗판, 문, 범위 링"
+        ok,
+        "그레이박스 착륙선 출입: 문, 프레임, AIRLOCK 표지, 4면 충돌 벽(정면 5 비움), 내부 빛: "
+            .. why
     )
+    check(base.Lander:FindFirstChild("Airlock") == nil, "통로 튜브, 문 판, 범위 링 없음")
+    local hutWallsOff = true
+    for _, name in { "Roof", "BackWall", "LeftWall", "RightWall", "FrontLeft", "FrontRight" } do
+        local part = base.Lander:FindFirstChild(name)
+        if part and part.CanCollide then
+            hutWallsOff = false
+        end
+    end
     check(
-        kit.ModulePads.PadA.Built:FindFirstChild("Airlock") ~= nil,
-        "그레이박스 Habitat A 에어락은 Built 안"
+        hutWallsOff and base.Lander.Floor.CanCollide,
+        "오두막 외형은 충돌 없음, 바닥만 충돌"
     )
+    local okA, whyA = entryOk(kit.ModulePads.PadA.Built, 5)
+    check(okA, "그레이박스 Habitat A 출입 구조는 Built 안: " .. whyA)
     local originCFrame = base.PrimaryPart.CFrame
     local function insideAt(position)
         root.CFrame = CFrame.new(position)
         advance(0.5)
         return lastSent("OxygenUpdate").args[3]
     end
-    check(insideAt(base.Lander.OxygenZone.CFrame.Position) == true, "통로 안: inside true")
+    check(insideAt(base.Lander.OxygenZone.CFrame.Position) == true, "착륙선 내부: inside true")
     check(
-        insideAt(originCFrame * Vector3.new(0, 4, 8)) == false,
-        "착륙선 오두막 안쪽(통로 밖): inside false"
+        insideAt(originCFrame * Vector3.new(0, 4, 8)) == true,
+        "착륙선 안쪽 깊은 곳: inside true"
     )
-    check(insideAt(originCFrame * Vector3.new(8.5, 3, 6)) == false, "착륙선 옆: inside false")
+    check(
+        insideAt(originCFrame * Vector3.new(8.5, 3, 6)) == false,
+        "착륙선 옆(벽 밖): inside false"
+    )
+    local spawnPart = base.Lander.SpawnPoint
+    local spawnRoot = spawnPart.CFrame.Position
+        + Vector3.new(0, spawnPart.Size.Y / 2 + Config.SPAWN_HEIGHT_OFFSET, 0)
+    check(insidePart(base.Lander.OxygenZone, spawnRoot), "스폰 지점이 착륙선 내부")
 end
 local function lowWarnings()
     local total = 0
@@ -1608,6 +1877,11 @@ local importWarnings = {}
 local loadModule2, makeEnv2 = makeLoader(dm2, importWarnings)
 local Workspace2 = dm2:GetService("Workspace")
 local ServerStorage2 = dm2:GetService("ServerStorage")
+-- 디자이너가 둔 Sky (KeepSky 없음): 덮어써야 한다
+local designerSky2 = Instance.new("Sky")
+designerSky2.MoonTextureId = "rbxassetid://999"
+designerSky2.StarCount = 10
+designerSky2.Parent = dm2:GetService("Lighting")
 local importsFolder = Instance.new("Folder")
 importsFolder.Name = "KitImports"
 importsFolder.Parent = Workspace2
@@ -1679,6 +1953,21 @@ advance(0)
 local kitGrey = ServerStorage:FindFirstChild("BaseKit")
 local kitImport = ServerStorage2:FindFirstChild("BaseKit")
 check(kitImport ~= nil, "KitImports로 BaseKit 생성")
+do
+    local skies = 0
+    for _, child in dm2:GetService("Lighting"):GetChildren() do
+        if child:IsA("Sky") then
+            skies += 1
+        end
+    end
+    check(
+        skies == 1
+            and tostring(designerSky2.MoonTextureId) == "rbxasset://sky/sun.jpg"
+            and designerSky2.StarCount == 3000
+            and designerSky2.MoonAngularSize == 14,
+        "기존 Sky(KeepSky 없음)는 덮어씀: 태양 텍스처, 별 3000"
+    )
+end
 check(
     Workspace2:FindFirstChild("KitImports") == nil
         and ServerStorage2:FindFirstChild("KitImports") ~= nil,
@@ -1781,39 +2070,54 @@ local landerVisual = lander2:FindFirstChild("Visual")
 check(landerVisual ~= nil, "Lander.Visual 메시")
 check(
     allParts(landerVisual, function(p)
-        return p.Anchored and p.CanCollide
+        return p.Anchored and not p.CanCollide
     end),
-    "착륙선 메시: 고정, CanCollide"
+    "착륙선 메시: 고정, 충돌 없음 (안으로 걸어 들어감)"
 )
 local lLo, lHi = boundsOf(landerVisual)
 do
-    local airlock = lander2:FindFirstChild("Airlock")
+    local ok, why = entryOk(lander2, 9)
     check(
-        airlock ~= nil
-            and airlock:FindFirstChild("Tube") ~= nil
-            and airlock:FindFirstChild("Door") ~= nil
-            and airlock:FindFirstChild("OxygenRing") ~= nil,
-        "메시 착륙선 에어락: Connector 튜브, 문, 범위 링"
+        ok,
+        "메시 착륙선 출입: 문, 프레임, AIRLOCK 표지, 8각형 충돌 벽(정면 5 비움), 내부 빛: "
+            .. why
+    )
+    check(
+        lander2:FindFirstChild("Airlock") == nil,
+        "메시 착륙선: 통로 튜브, 문 판, 범위 링 없음"
     )
     local zone = lander2.OxygenZone
-    local tLo, tHi = boundsOf(airlock.Tube)
-    local inTube = (tLo + tHi) / 2
-    local besideDome = Vector3.new(lHi.X + 2, lLo.Y + 3, (lLo.Z + lHi.Z) / 2)
-    check(boxContains(zone, inTube, inTube), "메시 착륙선: 통로 안은 산소 구역")
+    local center = (lLo + lHi) / 2
+    local inside = Vector3.new(center.X, lLo.Y + 3, center.Z)
+    local besideDome = Vector3.new(lHi.X + 2, lLo.Y + 3, center.Z)
+    check(boxContains(zone, inside, inside), "메시 착륙선: 돔 내부는 산소 구역")
     check(
         not boxContains(zone, besideDome, besideDome),
-        "메시 착륙선: 돔 옆(통로 밖)은 산소 구역 아님"
+        "메시 착륙선: 돔 옆은 산소 구역 아님"
     )
+    local door = lander2.Entry.Door
     check(
-        tHi.Z <= lLo.Z + EPS and math.abs((tHi - tLo).Z - 7) < 0.01,
-        "통로가 돔 앞면(스폰 쪽)에서 길이 7로 뻗음"
+        math.abs(door.CFrame.Position.Z - (lLo.Z + 0.5)) < 1e-3
+            and math.abs(door.CFrame.Position.X - center.X) < 1e-3,
+        "문은 돔 정면(-Z) 가운데, 앞면에서 0.5 안쪽"
     )
-    local ring = airlock.OxygenRing
+    -- 꼭대기 안테나, 왼쪽 지상 레이더
+    local aLo3, aHi3 = boundsOf(lander2.RoofAntenna)
+    local antennaCenter = (aLo3 + aHi3) / 2
     check(
-        math.abs(ring.Transparency - 0.6) < EPS
-            and ring.Material ~= roblox.Enum.Material.Neon
-            and not ring.CanCollide,
-        "범위 링: 투명도 0.6, Neon 아님, 충돌 없음"
+        math.abs(aLo3.Y - lHi.Y) < EPS
+            and math.abs(antennaCenter.X - center.X) < 1e-3
+            and math.abs(antennaCenter.Z - center.Z) < 1e-3,
+        "안테나는 돔 꼭대기 중심"
+    )
+    local radar = lander2:FindFirstChild("GroundRadar")
+    local rLo3, rHi3 = boundsOf(radar)
+    check(
+        lander2:FindFirstChild("RoofRadar") == nil
+            and math.abs(rLo3.Y - -0.5) < EPS
+            and rHi3.X < lLo.X
+            and rHi3.Y - rLo3.Y <= 2.5 + EPS,
+        "레이더는 착륙선 왼쪽 바닥의 지상 장비 (높이 2.5 이하)"
     )
 end
 do
@@ -1827,35 +2131,42 @@ do
             size.Z
         )
     )
-    local function overlapsXZ(model)
-        local lo, hi = boundsOf(model)
-        return lo.X < lHi.X and hi.X > lLo.X and lo.Z < lHi.Z and hi.Z > lLo.Z
+    -- 콘솔은 오른쪽 바깥, 상자는 그 뒤: 착륙선 충돌 벽 밖
+    local wallOut = 0.5
+    local function outsideLander(lo, hi)
+        return lo.X > lHi.X + wallOut
+            or hi.X < lLo.X - wallOut
+            or lo.Z > lHi.Z + wallOut
+            or hi.Z < lLo.Z - wallOut
     end
-    local function partOverlapsXZ(part)
-        local c, h = part.CFrame.Position, part.Size / 2
-        return c.X - h.X < lHi.X and c.X + h.X > lLo.X and c.Z - h.Z < lHi.Z and c.Z + h.Z > lLo.Z
-    end
+    local console = lander2.RoverConsole
+    local cLo3 = console.CFrame.Position - console.Size / 2
+    local cHi3 = console.CFrame.Position + console.Size / 2
+    local crLo, crHi = boundsOf(kitImport.Crates)
     check(
-        not partOverlapsXZ(lander2.SpawnPoint)
-            and not partOverlapsXZ(lander2.RoverConsole)
-            and not overlapsXZ(kitImport.Crates),
-        "SpawnPoint, 복구 콘솔, 상자가 착륙선 발밑과 겹치지 않음"
+        outsideLander(cLo3, cHi3)
+            and cLo3.X > lHi.X
+            and outsideLander(crLo, crHi)
+            and crLo.Z > console.CFrame.Position.Z,
+        "복구 콘솔은 착륙선 오른쪽 바깥, 상자는 그 뒤"
     )
 end
--- 산소 판정은 캐릭터 중심 기준이므로 스폰된 캐릭터 중심 높이에서 본다
+-- 스폰은 착륙선 내부 (문에서 2 안쪽)
 local spawnPart = lander2.SpawnPoint
 local spawnRoot = spawnPart.CFrame.Position
     + Vector3.new(0, spawnPart.Size.Y / 2 + Config.SPAWN_HEIGHT_OFFSET, 0)
 check(
-    boxContains(lander2.OxygenZone, spawnRoot, spawnRoot),
-    "착륙선 OxygenZone이 스폰된 캐릭터 위치를 덮음"
+    boxContains(lander2.OxygenZone, spawnRoot, spawnRoot)
+        and math.abs(spawnPart.CFrame.Position.Z - (lander2.Entry.Door.CFrame.Position.Z + 2))
+            < 1e-3,
+    "스폰 지점이 착륙선 내부, 문에서 2 안쪽"
 )
 
--- Habitat A 외형 (Built 안의 에어락은 따로 본다)
+-- Habitat A 외형 (Built 안의 출입 구조 Entry는 따로 본다)
 do
     local padA2 = kitImport.ModulePads.PadA
     local builtA = padA2.Built
-    local airlock = builtA:FindFirstChild("Airlock")
+    local airlock = builtA:FindFirstChild("Entry")
     local function habitatOnly(fn)
         for _, d in builtA:GetDescendants() do
             if d:IsA("BasePart") and not (airlock and d:IsDescendantOf(airlock)) then
@@ -1886,7 +2197,7 @@ do
                 end
             end
         end
-        if not (part.Anchored and part.CanCollide) then
+        if not part.Anchored or part.CanCollide then
             allStatic = false
         end
     end)
@@ -1897,7 +2208,10 @@ do
         aHi.X - aLo.X <= padPart.Size.X + EPS and aHi.Z - aLo.Z <= padPart.Size.Z + EPS,
         string.format("Habitat A 폭이 패드 안 (%.1f x %.1f)", aHi.X - aLo.X, aHi.Z - aLo.Z)
     )
-    check(count > 0 and allStatic, "Built 메시: 고정, CanCollide")
+    check(
+        count > 0 and allStatic,
+        "Habitat A 메시: 고정, 충돌 없음 (안으로 걸어 들어감)"
+    )
     check(
         allParts(padA2.Ghost, function(p)
             return math.abs(p.Transparency - Config.GHOST_TRANSPARENCY) < EPS
@@ -1905,30 +2219,33 @@ do
         end),
         "Ghost: 같은 메시, 투명도 0.7, CanCollide 꺼짐"
     )
+    local ok, why = entryOk(builtA, 5)
     check(
-        airlock ~= nil
-            and airlock:FindFirstChild("Tube") ~= nil
-            and airlock:FindFirstChild("Door") ~= nil
-            and airlock:FindFirstChild("OxygenRing") ~= nil
-            and padA2.Ghost:FindFirstChild("Airlock") == nil,
-        "Habitat A 에어락은 Built 안 (완공 때 함께 나타남, Ghost에는 없음)"
+        ok
+            and padA2.Ghost:FindFirstChild("Entry") == nil
+            and builtA:FindFirstChild("Airlock") == nil,
+        "Habitat A 출입 구조(문, 4면 충돌 벽, 내부 빛)는 Built 안, Ghost에는 없음: "
+            .. why
     )
-    local tLo, tHi = boundsOf(airlock.Tube)
-    local inTube = (tLo + tHi) / 2
-    local besideHabitat = Vector3.new(aHi.X + 2, aLo.Y + 3, (aLo.Z + aHi.Z) / 2)
-    check(boxContains(padA2.OxygenZone, inTube, inTube), "Habitat A: 통로 안은 산소 구역")
+    local center = (aLo + aHi) / 2
+    local inside = Vector3.new(center.X, aLo.Y + 3, center.Z)
+    local besideHabitat = Vector3.new(aHi.X + 2, aLo.Y + 3, center.Z)
+    check(
+        boxContains(padA2.OxygenZone, inside, inside),
+        "Habitat A: 건물 내부는 산소 구역"
+    )
     check(
         not boxContains(padA2.OxygenZone, besideHabitat, besideHabitat),
-        "Habitat A: 건물 옆(통로 밖)은 산소 구역 아님"
+        "Habitat A: 건물 옆(벽 밖)은 산소 구역 아님"
     )
-    -- 통로는 패드 앞(-Z), Farm B는 +Z 쪽이라 A-B 연결 통로와 겹치지 않는다
+    -- 문은 패드 앞(-Z), Farm B는 +Z 쪽이라 A-B 연결 통로와 겹치지 않는다
+    local door = builtA.Entry.Door
     local padB = kitImport.ModulePads.PadB.Pad.CFrame.Position
     check(
-        tHi.Z <= aLo.Z + EPS and padB.Z > aHi.Z,
+        door.CFrame.Position.Z < center.Z and padB.Z > aHi.Z,
         string.format(
-            "Habitat A 에어락은 앞쪽(z %.1f ~ %.1f), Farm B는 뒤쪽(z %.1f): A-B 통로와 겹치지 않음",
-            tLo.Z,
-            tHi.Z,
+            "Habitat A 문은 앞쪽(z %.1f), Farm B는 뒤쪽(z %.1f): A-B 통로와 겹치지 않음",
+            door.CFrame.Position.Z,
             padB.Z
         )
     )
@@ -2001,18 +2318,34 @@ local function runDecorScenario()
         end),
         "Planet: 고정, CanCollide/CanTouch/CanQuery 꺼짐"
     )
-    local planetLo, planetHi = boundsOf(planet)
-    local planetCenter = (planetLo + planetHi) / 2
-    local planetSize = planetHi - planetLo
-    local elevation = math.deg(math.asin(planetCenter.Y / planetCenter.Magnitude))
+    -- 시작 시에는 기본 착륙지(Pad2)에서 가장 가까운 얼음 쪽 하늘 (메시 Planet은 지름 260으로 스케일)
+    local function planetFrom(origin)
+        local lo, hi = boundsOf(planet)
+        local offset = (lo + hi) / 2 - origin
+        local nearest, best = nil, math.huge
+        for _, ice in Workspace2.IceSites:GetChildren() do
+            local d =
+                Vector3.new(ice.CFrame.Position.X - origin.X, 0, ice.CFrame.Position.Z - origin.Z)
+            if d.Magnitude < best then
+                nearest, best = d.Unit, d.Magnitude
+            end
+        end
+        return math.max(hi.X - lo.X, hi.Y - lo.Y, hi.Z - lo.Z),
+            offset.Magnitude,
+            math.deg(math.asin(offset.Y / offset.Magnitude)),
+            Vector3.new(offset.X, 0, offset.Z).Unit:Dot(nearest)
+    end
+    local diameter, distance, elevation, facing =
+        planetFrom(Workspace2.LandingPads.Pad2.CFrame.Position)
     check(
-        math.abs(math.max(planetSize.X, planetSize.Y, planetSize.Z) - 400) < 1
-            and math.abs(planetCenter.Magnitude - 1500) < 1
-            and math.abs(elevation - 25) < 0.5,
+        math.abs(diameter - 260) < 0.5
+            and math.abs(distance - 900) < 0.5
+            and math.abs(elevation - 20) < 0.1
+            and facing > 0.999,
         string.format(
-            "Planet 지름 %.0f, 거리 %.0f, 고도각 %.1f도",
-            planetSize.X,
-            planetCenter.Magnitude,
+            "Planet 메시 지름 %.0f, 기본 착륙지에서 거리 %.0f, 고도 %.1f도, 가장 가까운 얼음 방향",
+            diameter,
+            distance,
             elevation
         )
     )
@@ -2098,9 +2431,9 @@ local function runDecorScenario()
     local landerB = kitImport.Lander
     check(
         landerB:FindFirstChild("RoofAntenna") ~= nil
-            and landerB:FindFirstChild("RoofRadar") ~= nil
+            and landerB:FindFirstChild("GroundRadar") ~= nil
             and landerB:FindFirstChild("ConsoleAntenna") ~= nil,
-        "착륙선 지붕 안테나와 레이더, 콘솔 안테나"
+        "착륙선 꼭대기 안테나, 지상 레이더, 콘솔 안테나"
     )
     check(
         allParts(landerB.RoofAntenna, function(p)
@@ -2120,8 +2453,16 @@ local function runDecorScenario()
         math.abs(caLo.Y - consoleTop) < EPS and caHi.Y - caLo.Y <= 1.5 + EPS,
         "콘솔 안테나가 콘솔 윗면 위, 높이 1.5 이하"
     )
-    local rdLo, rdHi = boundsOf(landerB.RoofRadar)
-    check(rdHi.Y - rdLo.Y <= 2.5 + EPS, "레이더 높이 2.5 이하")
+    local roofDecor = 0
+    for _, id in { "B", "C" } do
+        local built = kitImport.ModulePads["Pad" .. id].Built
+        for _, d in built:GetDescendants() do
+            if d.Name == "RoofAntenna" or d.Name == "RoofRadar" then
+                roofDecor += 1
+            end
+        end
+    end
+    check(roofDecor == 0, "Habitat B, C 지붕에는 장식 없음")
     -- 상자
     local crates = kitImport:FindFirstChild("Crates")
     check(crates ~= nil and #crates:GetChildren() == 4, "상자 4개")
@@ -2161,6 +2502,21 @@ local function runDecorScenario()
     local Server2 = dm2:GetService("ServerScriptService").Server
     local ResourceState2 = loadModule2(Server2.ResourceState)
     check(ResourceState2.get().phase == "playing", "두 번째 place도 playing")
+    do
+        -- 착륙지가 정해지면 그 기지에서 가장 가까운 얼음 쪽 하늘로 다시 조준
+        local baseOrigin = Workspace2.Base:GetPivot().Position
+        local planetModel = Workspace2.Decor.Planet
+        local lo, hi = boundsOf(planetModel)
+        local offset = (lo + hi) / 2 - baseOrigin
+        local ice = Workspace2.IceSites.Ice1.CFrame.Position
+        local heading = Vector3.new(ice.X - baseOrigin.X, 0, ice.Z - baseOrigin.Z).Unit
+        check(
+            math.abs(offset.Magnitude - 900) < 0.5
+                and math.abs(math.deg(math.asin(offset.Y / offset.Magnitude)) - 20) < 0.1
+                and Vector3.new(offset.X, 0, offset.Z).Unit:Dot(heading) > 0.999,
+            "착륙 뒤 행성: 기지에서 거리 900, 고도 20도, 가장 가까운 얼음(Ice1) 방향"
+        )
+    end
     do
         local field = Workspace2.Base.SolarField
         signalFor(field.InstallPad:FindFirstChildOfClass("ProximityPrompt"), "Triggered"):Fire(

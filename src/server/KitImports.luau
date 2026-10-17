@@ -43,12 +43,11 @@ local MIN_EXTENT = 0.01 -- 크기 계산에서 0으로 나누지 않도록 하�
 -- 런타임 장식 상수 (studs, 도) --------------------------------------------
 local DECOR_FOLDER = "Decor" -- Workspace.Decor: 재시작해도 남는 장식 (Planet)
 local BASE_DECOR_FOLDER = "KitDecor" -- Base.KitDecor: 재시작 때 Base와 함께 사라지는 장식
-local PLANET_DISTANCE = 1500 -- 맵 원점에서 행성 중심까지
-local PLANET_ELEVATION = 25 -- 고도각
-local PLANET_AZIMUTH = 20 -- 방위각 (+Z에서 +X 쪽으로). 착륙 패드 대부분이 +Z를 바라본다
-local PLANET_DIAMETER = 400
--- 자정 조명에는 직사광이 없어 행성이 어두우므로 Neon으로 스스로 빛나게 한다. TextureID는 그대로 두고,
--- Neon이 텍스처를 덮어 단색으로 보이는 경우에 대비해 색은 지구 바다빛 계열로
+local PLANET_DISTANCE = 900 -- 기지에서 행성 중심까지
+local PLANET_ELEVATION = 20 -- 고도각
+local PLANET_DIAMETER = 260
+-- 밤 조명에는 직사광이 없어 행성이 어두우므로 Neon으로 스스로 빛나게 한다. TextureID는 그대로 두고,
+-- Neon이 텍스처를 덮어 단색으로 보이는 경우에 대비해 색은 지구 바다빛 계열로 (메시가 없으면 이 색의 구)
 local PLANET_GLOW_COLOR = Color3.fromRGB(120, 170, 230)
 local CONNECTOR_WIDTH = 4 -- 통로 튜브 굵기. 길이 방향으로는 늘리지 않고 세그먼트를 이어 붙인다
 local CONNECTOR_PAIRS = { { "A", "B" }, { "B", "C" } } -- 둘 다 가동되면 잇는다
@@ -443,25 +442,28 @@ local function groundYAt(frame: CFrame, x: number, z: number, exclude: { Instanc
     return frame:PointToObjectSpace(result.Position).Y
 end
 
--- 서버 시작 시: 하늘에 거대한 행성 하나 (Workspace.Decor.Planet). 이미 있으면 건너뛴다
-function KitImports.ensurePlanet()
+-- 서버 시작 시: 하늘에 거대한 행성 하나 (Workspace.Decor.Planet, Model, 항상 스트리밍).
+-- Planet 메시가 없으면 Neon 구로 만든다. 위치는 aimPlanetFrom이 정한다. 반환: 로그용 설명
+function KitImports.ensurePlanet(): string
     local decor = workspace:FindFirstChild(DECOR_FOLDER)
     if decor and decor:FindFirstChild("Planet") then
-        return
+        return "기존 Planet 유지"
     end
     local planet = KitImports.take("Planet")
-    if not planet then
-        return
+    local note = "메시"
+    if planet then
+        KitImports.fitInto(planet, Vector3.one * PLANET_DIAMETER, Vector3.zero)
+    else
+        planet = Instance.new("Model")
+        local sphere = Instance.new("Part")
+        sphere.Name = "Sphere"
+        sphere.Shape = Enum.PartType.Ball
+        sphere.Size = Vector3.one * PLANET_DIAMETER
+        sphere.Parent = planet
+        note = "Neon 구"
     end
-    KitImports.fitInto(planet, Vector3.one * PLANET_DIAMETER, Vector3.zero)
-    local elevation, azimuth = math.rad(PLANET_ELEVATION), math.rad(PLANET_AZIMUTH)
-    local direction = Vector3.new(
-        math.cos(elevation) * math.sin(azimuth),
-        math.sin(elevation),
-        math.cos(elevation) * math.cos(azimuth)
-    )
-    KitImports.placeCenter(planet, direction * PLANET_DISTANCE)
-    KitImports.forEachPart(planet, function(part)
+    local model = planet :: Model
+    KitImports.forEachPart(model, function(part)
         part.Anchored = true
         part.CanCollide = false
         part.CanTouch = false
@@ -470,10 +472,41 @@ function KitImports.ensurePlanet()
         part.Material = Enum.Material.Neon
         part.Color = PLANET_GLOW_COLOR
     end)
-    planet.Name = "Planet"
+    model.Name = "Planet"
     -- 멀리 있어도 클라이언트에 항상 스트리밍되게
-    planet.ModelStreamingMode = Enum.ModelStreamingMode.Persistent
-    planet.Parent = getFolder(workspace, DECOR_FOLDER)
+    model.ModelStreamingMode = Enum.ModelStreamingMode.Persistent
+    model.Parent = getFolder(workspace, DECOR_FOLDER)
+    return note
+end
+
+-- 기준 위치(기지)에서 가장 가까운 얼음 쪽 하늘(고도 PLANET_ELEVATION, 거리 PLANET_DISTANCE)에 행성을 둔다.
+-- 얼음 지점을 못 찾으면 +Z 쪽. 반환: 행성 중심 (행성이 없으면 nil)
+function KitImports.aimPlanetFrom(origin: Vector3): Vector3?
+    local decor = workspace:FindFirstChild(DECOR_FOLDER)
+    local planet = decor and decor:FindFirstChild("Planet")
+    if not planet or not planet:IsA("Model") then
+        return nil
+    end
+    local heading = Vector3.zAxis
+    local best = math.huge
+    local iceFolder = workspace:FindFirstChild("IceSites")
+    if iceFolder then
+        for _, ice in iceFolder:GetChildren() do
+            if ice:IsA("BasePart") then
+                local offset = ice.CFrame.Position - origin
+                local flat = Vector3.new(offset.X, 0, offset.Z)
+                if flat.Magnitude > MIN_EXTENT and flat.Magnitude < best then
+                    best = flat.Magnitude
+                    heading = flat.Unit
+                end
+            end
+        end
+    end
+    local elevation = math.rad(PLANET_ELEVATION)
+    local direction = heading * math.cos(elevation) + Vector3.yAxis * math.sin(elevation)
+    local center = origin + direction * PLANET_DISTANCE
+    KitImports.placeCenter(planet, center)
+    return center
 end
 
 -- 활성화된 모듈의 Built (Pad 아래에 붙어 있을 때만)

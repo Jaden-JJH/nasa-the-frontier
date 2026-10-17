@@ -148,21 +148,26 @@ local Config = {
     -- 고스트 모델 투명도 (GDD 6절)
     GHOST_TRANSPARENCY = 0.7,
 
-    -- 에어락 통로: 착륙선과 Habitat A 앞면에 붙는 통로. 산소 구역 = 통로 내부 + 문 앞 zoneDoorDepth
+    -- 걸어 들어가는 건물 (착륙선, Habitat A): 정면(-Z) 문으로만 들어간다. 산소 구역 = 건물 내부
     AIRLOCK = {
-        length = 7, -- 돔 앞면에서 바깥으로 뻗는 길이
-        width = 5,
-        height = 5,
-        wallThickness = 0.4, -- 그레이박스 바닥, 벽, 윗판 두께
-        zoneDoorDepth = 1, -- 산소 구역이 문을 지나 돔 쪽으로 더 들어가는 깊이
-        tubeColor = { 225, 225, 230 },
-        doorColor = { 40, 44, 52 }, -- 돔 쪽 끝의 어두운 문 판
-        doorThickness = 0.3,
-        doorTransparency = 0.3,
-        ringColor = { 150, 215, 255 }, -- 바닥의 하늘색 범위 표시
-        ringTransparency = 0.6,
-        ringThickness = 0.1,
-        ringMargin = 1.5, -- 링 지름 = 통로 길이 + 2 x 여백
+        doorWidth = 4.5,
+        doorHeight = 5.5,
+        doorThickness = 0.4,
+        doorColor = { 60, 62, 68 }, -- 어두운 회색 문 판 (열린 통로라 충돌 없음)
+        frameColor = { 205, 208, 215 }, -- 문 둘레에 겹쳐 보이는 밝은 프레임
+        frameBorder = 0.3,
+        doorInset = 0.5, -- 건물 경계 상자 앞면에서 안쪽으로
+        signText = "AIRLOCK",
+        signHeight = 0.7,
+        wallHeight = 6, -- 보이지 않는 충돌 벽
+        wallThickness = 0.5,
+        doorGap = 5, -- 정면 벽에서 비우는 폭
+        zoneInset = 1, -- 산소 구역 = 경계 상자를 각 면 이만큼 줄인 박스
+        zoneDoorMargin = 1, -- 산소 구역이 문 앞으로 더 나가는 거리
+        spawnInset = 2, -- 착륙선 스폰 지점 = 문에서 이만큼 안쪽
+        lightColor = { 255, 210, 160 }, -- 내부 따뜻한 빛
+        lightRange = 18,
+        lightBrightness = 1,
     },
 
     -- 튜토리얼: 이 날이 되면 패널 설치 안내를 건너뛰고 로버 탑승 안내로 넘어간다
@@ -233,8 +238,8 @@ local Config = {
     -- 그레이박스 맵(DevMap) 게임 영향 수치. 레이아웃 좌표는 DevMap.luau 상단 상수에 있다
     DEV_MAP = {
         iceDistanceBySite = { 450, 300, 180, 100 }, -- 패드 중심에서 가장 가까운 얼음 지점까지 studs
-        boulderCountBySite = { 6, 14, 14, 28 }, -- 패드와 얼음 사이 통로의 바위 수 (지형 위험)
-        scatterBoulders = 40, -- 맵 전체에 흩뿌리는 바위 수
+        boulderCountBySite = { 10, 22, 22, 46 }, -- 착륙지별 주행 회랑 양옆 바위 무더기 (지형 위험)
+        scatterBoulders = 70, -- 맵 전체에 흩뿌리는 바위 수 (합계 약 170)
         seed = 20261017, -- 바위 배치 난수 시드 (항상 같은 맵)
     },
 

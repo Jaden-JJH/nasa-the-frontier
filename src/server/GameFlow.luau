@@ -10,6 +10,7 @@ local Simulation = require(ReplicatedStorage.Shared.Simulation)
 local Types = require(ReplicatedStorage.Shared.Types)
 local Construction = require(script.Parent.Construction)
 local GameClock = require(script.Parent.GameClock)
+local KitImports = require(script.Parent.KitImports)
 local LandingSite = require(script.Parent.LandingSite)
 local Oxygen = require(script.Parent.Oxygen)
 local ResourceState = require(script.Parent.ResourceState)
@@ -35,6 +36,8 @@ local function onBasePlaced(base: Model)
     Construction.attach(base)
     WaterLoop.attach(base)
     RoverDrive.attach(base)
+    -- 행성을 이 기지에서 가장 가까운 얼음 쪽 하늘로
+    ServerUtil.safeCall("KitImports Planet", KitImports.aimPlanetFrom, base:GetPivot().Position)
 end
 
 -- phase에 따라 켜고 끄는 프롬프트를 모두 현재 상태에 맞춘다

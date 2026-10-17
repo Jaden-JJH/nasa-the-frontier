@@ -269,3 +269,8 @@ KitImports 로 만든 BaseKit 은 Play 중에만 존재합니다. 영구 저장�
 3. 편집 화면의 ServerStorage 를 선택하고 붙여넣습니다.
 
 ServerStorage 에 BaseKit 이 있으면 코드는 그것을 그대로 쓰고 KitImports 의 기지 외형은 쓰지 않습니다. 이때 Output 창에 경고 한 줄이 나옵니다. 붙여넣은 BaseKit 을 손으로 고쳐 쓸 수 있고, 다시 자동 조립하려면 ServerStorage 의 BaseKit 을 지우면 됩니다.
+
+### 3차 라운드 메모 (2026-10-17)
+- 기지 키트는 코드가 만드는 콘크리트 판 위에 놓이고, 판 밖은 Terrain(크레이터, 언덕)입니다. 디자이너 BaseKit을 쓸 때도 판은 코드가 깔아 줍니다.
+- Lander와 HabitatA 메시는 걸어 들어가는 건물입니다. 코드가 정면에 문과 보이지 않는 충돌 벽, 내부 조명, 내부 산소 구역을 만듭니다. 메시는 속이 비어 보여야 하므로 가능하면 안쪽 면이 있는 모델을 고르거나, 코드가 DoubleSided를 켭니다.
+- Antenna는 Lander 꼭대기 중심, Radar는 Lander 왼쪽 바닥(지상 장비)입니다.
