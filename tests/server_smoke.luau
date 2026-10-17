@@ -212,6 +212,14 @@ local function newSignal()
             end,
         }
     end
+    function s:Once(fn)
+        local connection
+        connection = self:Connect(function(...)
+            connection.Disconnect()
+            fn(...)
+        end)
+        return connection
+    end
     function s:Fire(...)
         for _, h in self.handlers do
             if h.connected then
@@ -374,6 +382,24 @@ roblox.implementProperty("Humanoid", "Died", function(inst)
 end)
 roblox.implementProperty("ProximityPrompt", "Triggered", function(inst)
     return signalFor(inst, "Triggered")
+end)
+roblox.implementProperty("ProximityPrompt", "PromptButtonHoldBegan", function(inst)
+    return signalFor(inst, "PromptButtonHoldBegan")
+end)
+roblox.implementProperty("ProximityPrompt", "PromptButtonHoldEnded", function(inst)
+    return signalFor(inst, "PromptButtonHoldEnded")
+end)
+-- 효과음 (Sfx): Play와 Stop은 기록만 한다. soundLog = { { name, parent, looped } }
+local soundLog = {}
+roblox.implementMethod("Sound", "Play", function(inst)
+    table.insert(
+        soundLog,
+        { name = inst.Name, parent = inst.Parent, looped = inst.Looped, sound = inst }
+    )
+end)
+roblox.implementMethod("Sound", "Stop", function() end)
+roblox.implementProperty("Sound", "Ended", function(inst)
+    return signalFor(inst, "Ended")
 end)
 -- 로버 파손 감지 (RoverDamage): 파트 Touched, RunService.Heartbeat (스모크에서는 직접 Fire한다)
 for _, className in { "Part", "VehicleSeat", "WedgePart", "MeshPart", "UnionOperation" } do
@@ -556,6 +582,20 @@ atmosphere1.Haze = 1
 atmosphere1.Parent = dm:GetService("Lighting")
 
 -- 부팅 ------------------------------------------------------------------
+-- 효과음 카탈로그: 아직 id가 0인 키는 테스트 id로 채워 연결 지점을 확인한다 (0이면 건너뜀은 [충전 도크]에서 따로 확인)
+for _, spec in loadModule(Shared:FindFirstChild("SoundIds")) do
+    if spec.id == 0 then
+        spec.id = 1
+    end
+end
+local function playedSound(key)
+    for _, entry in soundLog do
+        if entry.name == "Sfx_" .. key then
+            return true
+        end
+    end
+    return false
+end
 print("[부팅]")
 task.spawn(function()
     local main = Server:FindFirstChild("Main")
@@ -2743,6 +2783,225 @@ do
     newRover = rover
 end
 
+-- 충전 도크 상태와 효과음 헬퍼 (2026-10-18) ----------------------------------
+print("[충전 도크]")
+do
+    local RoverBattery = loadModule(Server:FindFirstChild("RoverBattery"))
+    local Sfx = loadModule(Server:FindFirstChild("Sfx"))
+    local d = Config.CHARGE_DOCK
+    local pad = base.ChargePad
+    local rover = base.Rover
+    local function trimColor()
+        for _, child in pad:GetChildren() do
+            if child.Name == "ChargePadTrim" then
+                return child.Color
+            end
+        end
+        return nil
+    end
+    local function rgb(t)
+        return roblox.Color3.fromRGB(t[1], t[2], t[3])
+    end
+    local function colorNear(a, b)
+        return a ~= nil
+            and math.abs(a.R - b.R) < 0.01
+            and math.abs(a.G - b.G) < 0.01
+            and math.abs(a.B - b.B) < 0.01
+    end
+    local light = pad:FindFirstChildOfClass("SurfaceLight")
+    local ring = pad:FindFirstChild("ChargePadRing")
+    check(light ~= nil and ring ~= nil, "충전 패드에 SurfaceLight와 중앙 원판")
+    -- 시작 상태: 탑승한 로버가 패드 위, 배터리 가득 -> full
+    RoverBattery.step(0.25)
+    RoverBattery.step(0.25)
+    check(
+        pad:GetAttribute("DockState") == "full" and colorNear(trimColor(), rgb(d.fullColor)),
+        "패드 위 만충 로버: DockState full, 초록 ('"
+            .. tostring(pad:GetAttribute("DockState"))
+            .. "')"
+    )
+    -- 로버가 떠나면 empty
+    local home = rover.Chassis.CFrame
+    rover.Chassis.CFrame = home + Vector3.new(40, 0, 0)
+    RoverBattery.step(0.25)
+    RoverBattery.step(0.25)
+    check(
+        pad:GetAttribute("DockState") == "empty"
+            and colorNear(trimColor(), rgb(d.emptyColor))
+            and light.Enabled == false
+            and ring.Transparency == 1,
+        "로버가 떠나면 empty: 노란 테두리, 빛 없음, 원판 숨김"
+    )
+    -- 탑승한 채 들어오면 docked + 운전자에게 안내 + 도크 소리
+    ResourceState.patch(function(st)
+        st.rover.battery = 30
+    end)
+    local dockSounds = 0
+    for _, entry in soundLog do
+        if entry.name == "Sfx_rover_dock" then
+            dockSounds += 1
+        end
+    end
+    rover.Chassis.CFrame = home
+    RoverBattery.step(0.25)
+    RoverBattery.step(0.25)
+    advance(0)
+    local dockSoundsAfter = 0
+    for _, entry in soundLog do
+        if entry.name == "Sfx_rover_dock" then
+            dockSoundsAfter += 1
+        end
+    end
+    check(
+        pad:GetAttribute("DockState") == "docked"
+            and colorNear(trimColor(), rgb(d.dockedColor))
+            and light.Enabled == true
+            and math.abs(light.Brightness - d.dockedLight) < 1e-6,
+        "탑승한 채 도킹: DockState docked, 하늘색 테두리, 약한 빛"
+    )
+    do
+        local told = false
+        for i = #sent, math.max(1, #sent - 6), -1 do
+            local s = sent[i]
+            if
+                s.name == "Notify"
+                and s.target == alice
+                and s.args[1] == Config.TEXTS.dockEntered
+            then
+                told = s.args[2] == "info"
+            end
+        end
+        check(told, "도킹 순간 운전자에게 '하차하면 충전이 시작됩니다' (info)")
+    end
+    check(dockSoundsAfter == dockSounds + 1, "도크 진입 효과음 rover_dock 한 번")
+    -- 하차 (Lune은 Occupant에 nil을 넣을 수 없어 로버를 지워 재복제한다: 빈 좌석으로 패드 위에 돌아온다)
+    advance(Config.ROVER_RECOVERY.cooldownSeconds)
+    rover:Destroy()
+    advance(Config.ROVER_RECOVERY.checkSeconds + 0.1)
+    rover = base:FindFirstChild("Rover")
+    RoverBattery.step(0.25)
+    RoverBattery.step(0.25)
+    advance(0)
+    local started = false
+    for i = #sent, math.max(1, #sent - 8), -1 do
+        local s = sent[i]
+        if
+            s.name == "Notify"
+            and string.find(tostring(s.args[1]), "충전 시작 (", 1, true) == 1
+        then
+            started = s.args[2] == "good"
+        end
+    end
+    local chargeLoopOn = false
+    for _, child in pad:GetChildren() do
+        if child:IsA("Sound") and child.Name == "Sfx_rover_charge_loop" and child.Looped then
+            chargeLoopOn = true
+        end
+    end
+    check(
+        pad:GetAttribute("DockState") == "charging"
+            and state().rover.charging == true
+            and ring.Transparency < 1
+            and colorNear(trimColor(), rgb(d.chargingColor)),
+        "하차하면 charging: 노란 테두리와 원판"
+    )
+    check(started, "충전 시작 순간 '충전 시작 (n / 50)' (good)")
+    check(chargeLoopOn, "충전 중 패드에 rover_charge_loop 루프")
+    -- 펄스: 시간이 지나면 밝기가 변한다
+    local b1 = light.Brightness
+    advance(d.pulsePeriod / 4)
+    check(math.abs(light.Brightness - b1) > 1e-3, "충전 중 SurfaceLight 밝기 펄스")
+    -- 기지 에너지 0이면 docked
+    ResourceState.patch(function(st)
+        st.energy = 0
+    end)
+    RoverBattery.step(0.25)
+    advance(0)
+    local loopGone = true
+    for _, child in pad:GetChildren() do
+        if child:IsA("Sound") and child.Name == "Sfx_rover_charge_loop" then
+            loopGone = false
+        end
+    end
+    check(
+        pad:GetAttribute("DockState") == "docked" and state().rover.charging == false and loopGone,
+        "기지 에너지 0이면 충전 멈추고 docked, 충전 루프 정지"
+    )
+    -- 다시 에너지가 생기면 charging, 가득 차면 full
+    ResourceState.patch(function(st)
+        st.energy = 100
+        st.rover.battery = st.rover.batteryMax - 0.3
+    end)
+    RoverBattery.step(0.25)
+    RoverBattery.step(0.25)
+    advance(0)
+    check(
+        pad:GetAttribute("DockState") == "full" and colorNear(trimColor(), rgb(d.fullColor)),
+        "가득 차면 full: 초록 고정"
+    )
+    rover.Chassis.CFrame = rover.Chassis.CFrame + Vector3.new(40, 0, 0)
+    RoverBattery.step(0.25)
+    check(pad:GetAttribute("DockState") == "empty", "로버가 떠나면 다시 empty")
+    rover.Chassis.CFrame = home
+    RoverBattery.step(0.25)
+
+    -- 효과음 헬퍼: id 0이면 Sound를 만들지 않는다. 루프 핸들은 정지하면 지운다
+    local SoundIds = loadModule(Shared:FindFirstChild("SoundIds"))
+    local keep = SoundIds.rover_hit.id
+    SoundIds.rover_hit.id = 0
+    local silent = Sfx.play("rover_hit", pad)
+    check(
+        silent == nil and pad:FindFirstChild("Sfx_rover_hit") == nil,
+        "id 0이면 Sound를 만들지 않음 (오류 없음)"
+    )
+    local silentLoop = Sfx.loop("rover_hit", pad)
+    check(silentLoop ~= nil and silentLoop.sound == nil, "id 0 루프도 핸들은 돌려줌")
+    silentLoop.stop()
+    SoundIds.rover_hit.id = keep
+    local played = Sfx.play("rover_hit", pad)
+    check(
+        played ~= nil
+            and played.Parent == pad
+            and played.SoundId == "rbxassetid://" .. tostring(keep)
+            and played.RollOffMaxDistance == Config.SFX.rollOffMaxDistance
+            and played.Looped == false,
+        "id가 있으면 한 번 재생하는 Sound (RollOffMaxDistance 120)"
+    )
+    signalFor(played, "Ended"):Fire()
+    advance(0)
+    check(played.Parent == nil, "재생이 끝나면 Sound를 지움")
+    local handle = Sfx.loop("build_loop", pad)
+    local loopSound = handle.sound
+    Sfx.setLoopSpeed(handle, 1.2)
+    check(
+        loopSound ~= nil
+            and loopSound.Looped == true
+            and math.abs(loopSound.PlaybackSpeed - 1.2) < 1e-4,
+        "루프 Sound와 속도 조절"
+    )
+    handle.stop()
+    check(loopSound.Parent == nil, "루프 핸들 stop은 Sound를 지움")
+    -- 얼음 채취: 홀드하는 동안 ice_mine_loop
+    local ice2 = Workspace.IceSites.Ice2
+    local icePrompt2 = ice2:FindFirstChildOfClass("ProximityPrompt")
+    signalFor(icePrompt2, "PromptButtonHoldBegan"):Fire(alice)
+    advance(0)
+    local mining = ice2:FindFirstChild("Sfx_ice_mine_loop")
+    check(mining ~= nil and mining.Looped == true, "채취 홀드 시작: 얼음에 ice_mine_loop")
+    signalFor(icePrompt2, "PromptButtonHoldEnded"):Fire(alice)
+    advance(0)
+    check(
+        ice2:FindFirstChild("Sfx_ice_mine_loop") == nil,
+        "홀드를 놓으면 채취 루프 정지"
+    )
+    rover.DriverSeat:Sit(humanoid)
+    advance(0)
+    ResourceState.patch(function(st)
+        st.rover.battery = st.rover.batteryMax
+    end)
+    newRover = rover
+end
+
 -- 건설 -----------------------------------------------------------------
 print("[건설]")
 local padAPrompt = base.ModulePads.PadA.Pad:FindFirstChildOfClass("ProximityPrompt")
@@ -2987,6 +3246,44 @@ advance(Config.DAY_SECONDS * 3)
 check(state().day == dayAtWin, "승리 후 시계 정지")
 
 -- 재시작과 타임아웃 -------------------------------------------------------
+do
+    -- 서버 효과음 연결 지점 (여기까지 흐름에서 한 번 이상 재생)
+    local missing = {}
+    for _, key in
+        {
+            "landing_thrust",
+            "interior_hum_loop",
+            "panel_install",
+            "panel_unfold",
+            "oxygen_rescue",
+            "rover_board",
+            "rover_engine_loop",
+            "ice_collected",
+            "ice_depleted",
+            "water_unload",
+            "water_processing",
+            "rover_recover",
+            "rover_hit",
+            "rover_broken",
+            "rover_repair",
+            "rover_battery_low",
+            "rover_dock",
+            "rover_charge_loop",
+            "rover_charge_full",
+            "build_start",
+            "build_loop",
+            "build_complete",
+        }
+    do
+        if not playedSound(key) then
+            table.insert(missing, key)
+        end
+    end
+    check(
+        #missing == 0,
+        "효과음 연결 지점 재생 (빠짐: " .. table.concat(missing, ", ") .. ")"
+    )
+end
 print("[재시작]")
 signalFor(restartRemote, "OnServerEvent"):Fire(bob)
 advance(0)
@@ -3023,6 +3320,10 @@ do
     )
 end
 check(Workspace:FindFirstChild("Base") == nil, "재시작: Base 제거")
+check(
+    loadModule(Server:FindFirstChild("Sfx")).loopCount() == 0,
+    "재시작: 효과음 루프 모두 정지"
+)
 check(
     lastSent("SiteSelectionOpen").args[1].chooserUserId == 1,
     "재시작: 권한자 다시 지정"
@@ -3130,9 +3431,11 @@ local function runAirlockChecks()
     signalFor(prompt, "Triggered"):Fire(alice)
     local n1, kind = toasts()
     check(isOpen(), "열기: 반투명 0.75, 충돌 꺼짐, 밝은 색, 프롬프트 숨김")
+    check(playedSound("airlock_open"), "문 열림 효과음 airlock_open")
     check(n1 == 1 and kind == "info", "처음 문을 열면 안내 토스트(info) 한 번")
     advance(Config.AIRLOCK.openSeconds + 0.1)
     check(isClosed(), "6초 뒤 다시 닫힘")
+    check(playedSound("airlock_close"), "문 닫힘 효과음 airlock_close")
     -- 문 범위에 캐릭터가 있으면 닫지 않는다
     signalFor(prompt, "Triggered"):Fire(alice)
     aliceRoot.CFrame = door.CFrame

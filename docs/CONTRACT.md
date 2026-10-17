@@ -131,6 +131,7 @@ export type GameOverInfo = {
 | SolarPanels.lua | InstallPad 프롬프트, 하루 설치 제한, 슬롯에 패널 복제 |
 | Construction.lua | PadA/B/C 프롬프트, 비용 검증, 건설 타이머, 고스트/완성 모델 전환, 선행 조건 |
 | WaterLoop.lua | 로버 탱크(Attribute "Tank"), 얼음 지점 프롬프트(매장량만큼 채움, 고갈 처리), 물탱크 프롬프트(하역, 로버가 TANK_UNLOAD_DISTANCE 안에 있을 때만, 하역 1 W당 WATER_PROCESS_ENERGY_PER_W 에너지 소모, 에너지가 모자라면 처리 가능한 만큼만), 로버 복구(수동 프롬프트 + 자동) |
+| Sfx.lua | 2026-10-18 추가. 서버 3D 효과음 재생 헬퍼. Shared.SoundIds의 키로 Sound를 만들어 파트에 붙여 재생(id 0이면 무음). 루프 사운드는 핸들을 돌려줘 멈출 수 있음 |
 | RoverBattery.lua | 2026-10-18 추가. 로버 배터리 소모(주행 중, 속도 > 1일 때만), 0이면 RoverDrive 속도 배율 0. 충전 패드 판정과 충전(기지 에너지 차감). 25% 이하 경고 Notify 1회(충전되면 리셋) |
 | RoverDamage.lua | 2026-10-18 추가. 바위(Attribute BoulderLayer)와 12 studs/s 이상 충돌 시 파손 +1(1초 중복 방지), 파손당 최고 속도 10% 감소(파손 1: 16.2, 파손 2: 14.4), 3이면 정지. 로버 섀시의 "수리" 프롬프트(키 R, 홀드 4초, 에너지 10, 좌석 비어 있을 때)로 복구. 탑승 프롬프트(E)와 같은 섀시라 키를 나눔. Config.ROVER_DAMAGE.enabled로 끌 수 있음 |
 | Oxygen.lua | 플레이어별 산소. 실내 판정(OxygenZone 파트 안 또는 VehicleSeat 착석). 0이면 리스폰과 페널티 |
@@ -178,7 +179,7 @@ ServerStorage
         Built (Model)               완공 모델. active 전에는 Parent를 ServerStorage로 빼두거나 투명
         OxygenZone (Part)           PadA에만 있음
     WaterTank (Part)                ProximityPrompt. ActionText "물 하역"
-    ChargePad (Part)                2026-10-18 추가. 로버 충전 패드. 로버 섀시가 패드 위(반경 ROVER.chargeRadius)에 있고 좌석이 비어 있으면 초당 ROVER.chargeRatePerSecond만큼 기지 에너지에서 로버 배터리로 이동. 기지 에너지가 0이면 충전 정지. 시작 시 로버는 이 패드 위에 주차
+    ChargePad (Part)                2026-10-18 추가. 로버 충전 패드. Attribute DockState(string): "empty" | "docked"(로버가 반경 안, 아직 충전 전: 탑승 중이거나 기지 에너지 0) | "charging" | "full". 서버가 갱신하고 색과 빛을 바꾸며, 클라이언트는 이 값으로 패드 위 표지판을 그린다. 로버 섀시가 패드 위(반경 ROVER.chargeRadius)에 있고 좌석이 비어 있으면 초당 ROVER.chargeRatePerSecond만큼 기지 에너지에서 로버 배터리로 이동. 기지 에너지가 0이면 충전 정지. 시작 시 로버는 이 패드 위에 주차
   PanelTemplate (Model)             태양광 패널 1장
 ```
 
@@ -196,6 +197,8 @@ ProximityPrompt 공통: `RequiresLineOfSight = false`, `MaxActivationDistance = 
 | OxygenBar.lua | OxygenUpdate 수신. 실외일 때 강조, 20 이하 경고 |
 | PromptUI.lua | 커스텀 ProximityPrompt 표시(키 아이콘, ObjectText, ActionText, 홀드 진행 바). 서버 프롬프트는 전부 Style Custom |
 | PadSignUI.lua | 모듈 패드 위 표지판(이름, 상태 배지, 진행 바, 비용). PadX의 ModuleId Attribute와 state.modules 사용 |
+| SoundFX.lua | 2026-10-18 추가. 클라이언트 2D 효과음: 호흡 루프(산소 비례), 산소 경고, UI 클릭, 토스트음, 미션 전진, 승패 스팅어, 로버 승하차와 엔진(자기 로버) |
+| DockSignUI.lua | 2026-10-18 추가. ChargePad 위 표지판: DockState와 state.rover.battery로 "도킹됨, 하차하면 충전 시작" / "충전 중 38/50" / "충전 완료" |
 | RadarUI.lua | 로컬 계산. 자신이 DriverSeat에 앉아 있을 때만 표시. Workspace.IceSites 각 파트까지 거리로 점 크기와 방향 표시, Config.RADAR_RANGE 안이면 비프(사운드 선택) |
 | ToastUI.lua | Notify 수신. 3초 표시 후 사라짐. 최대 3개 스택 |
 | ResultUI.lua | GameOver 수신. 승리/실패 공용. 요약 수치. 재도전 버튼(RequestRestart) |

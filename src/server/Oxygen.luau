@@ -13,6 +13,7 @@ local Simulation = require(ReplicatedStorage.Shared.Simulation)
 local LandingSite = require(script.Parent.LandingSite)
 local ResourceState = require(script.Parent.ResourceState)
 local ServerUtil = require(script.Parent.ServerUtil)
+local Sfx = require(script.Parent.Sfx)
 
 type GameState = Simulation.GameState
 type Record = {
@@ -104,6 +105,9 @@ end
 
 local function onDepleted(player: Player, record: Record, now: number)
     record.rescuing = true
+    -- 구조 효과음: 플레이어 몸에 붙여 착륙선으로 옮겨져도 따라간다
+    local character = player.Character
+    Sfx.play("oxygen_rescue", character and character:FindFirstChild("HumanoidRootPart"))
     local penalty = Config.OXYGEN.deathPenalty
     ResourceState.set(Simulation.applyOxygenDeath(ResourceState.get(), Config))
     ResourceState.notify(player, Config.TEXTS.oxygenDepleted, "warn")

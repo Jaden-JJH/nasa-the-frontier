@@ -11,6 +11,7 @@ local Remotes = require(ReplicatedStorage.Shared.Remotes)
 local Types = require(ReplicatedStorage.Shared.Types)
 local ResourceState = require(script.Parent.ResourceState)
 local ServerUtil = require(script.Parent.ServerUtil)
+local Sfx = require(script.Parent.Sfx)
 
 export type Handlers = {
     onBasePlaced: (base: Model) -> (), -- 기지 복제 직후 (각 시스템 연결)
@@ -189,6 +190,11 @@ function LandingSite.choose(requestedSiteId: number)
 
     local lander = ServerUtil.findModel(base, "Lander")
     local landerCFrame = if lander then lander:GetPivot() else base:GetPivot()
+    -- 착륙 연출 추진기 효과음 (착륙선 위치)
+    local landerPart = if lander
+        then lander.PrimaryPart or lander:FindFirstChildWhichIsA("BasePart", true)
+        else nil
+    Sfx.play("landing_thrust", landerPart)
     ResourceState.publish()
     Remotes.get("LandingSequence"):FireAllClients(siteId, landerCFrame)
 

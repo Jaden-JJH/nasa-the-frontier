@@ -12,6 +12,7 @@ local Simulation = require(ReplicatedStorage.Shared.Simulation)
 local KitImports = require(script.Parent.KitImports)
 local ResourceState = require(script.Parent.ResourceState)
 local ServerUtil = require(script.Parent.ServerUtil)
+local Sfx = require(script.Parent.Sfx)
 
 type GameState = Simulation.GameState
 
@@ -27,7 +28,16 @@ type PadEntry = {
     collide: { [BasePart]: boolean }, -- 올라오는 동안 끈 충돌의 원래 값
     offset: number, -- 지금 Built의 세로 오프셋 (0이면 완공 위치)
     moveToken: number, -- 진행 중인 부드러운 이동을 끊을 때 증가
+    buildLoop: Sfx.Handle?, -- 건설 중 공사 소리 (완공하면 멈춘다)
 }
+
+local function stopBuildLoop(entry: PadEntry)
+    local handle = entry.buildLoop
+    entry.buildLoop = nil
+    if handle then
+        handle.stop()
+    end
+end
 
 local Construction = {}
 
@@ -117,6 +127,9 @@ local function applyVisuals(entry: PadEntry, state: GameState)
     local built = entry.built
     if built then
         if m.status == "building" then
+            if not entry.buildLoop then
+                entry.buildLoop = Sfx.loop("build_loop", entry.pad)
+            end
             local wasHidden = built.Parent == nil
             disableCollision(entry)
             built.Parent = entry.model
@@ -127,11 +140,13 @@ local function applyVisuals(entry: PadEntry, state: GameState)
             end
             moveBuilt(entry, target)
         elseif m.status == "active" then
+            stopBuildLoop(entry)
             entry.moveToken += 1
             placeBuilt(entry, 0)
             restoreCollision(entry)
             built.Parent = entry.model
         else
+            stopBuildLoop(entry)
             entry.moveToken += 1
             placeBuilt(entry, 0)
             restoreCollision(entry)
@@ -160,6 +175,7 @@ function Construction.sync(prev: GameState?, new: GameState)
             local def = Config.MODULES[id]
             if before and after and before.status ~= after.status then
                 if after.status == "active" then
+                    Sfx.play("build_complete", entry and entry.pad)
                     ResourceState.notifyAll(
                         string.format(Config.TEXTS.buildDone, def.displayName),
                         "good"
@@ -197,6 +213,8 @@ local function onTriggered(player: Player, id: string)
         return
     end
     ResourceState.set(newState)
+    local entry = entries[id]
+    Sfx.play("build_start", entry and entry.pad)
     Construction.sync(prev, newState)
     ResourceState.notifyAll(message, "info")
     ResourceState.publish()
@@ -249,6 +267,7 @@ function Construction.attach(base: Model)
                 collide = {},
                 offset = 0,
                 moveToken = 0,
+                buildLoop = nil,
             }
             table.insert(
                 connections,
@@ -270,6 +289,7 @@ function Construction.detach()
     table.clear(connections)
     for _, entry in entries do
         entry.moveToken += 1
+        stopBuildLoop(entry)
         restoreCollision(entry)
         entry.prompt:Destroy()
         -- 빼 두었던 모델은 Base와 함께 사라지지 않으므로 직접 정리한다

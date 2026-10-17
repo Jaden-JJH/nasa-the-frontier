@@ -16,6 +16,7 @@ local RoverBattery = require(script.Parent.RoverBattery)
 local RoverDamage = require(script.Parent.RoverDamage)
 local RoverDrive = require(script.Parent.RoverDrive)
 local ServerUtil = require(script.Parent.ServerUtil)
+local Sfx = require(script.Parent.Sfx)
 local WaterLoop = require(script.Parent.WaterLoop)
 
 local RoverRecovery = {}
@@ -104,6 +105,8 @@ function RoverRecovery.recover(): boolean
         s.rover.broken = false
     end)
     RoverDamage.sync()
+    local recovered = ServerUtil.findModel(base, "Rover")
+    Sfx.play("rover_recover", recovered and recovered.PrimaryPart)
     -- 배터리: 방전된 로버를 끌어온 경우 최소 recoverBatteryRatio로 돌아와 바로 충전할 수 있게
     RoverBattery.onRecovered()
     WaterLoop.mirrorTank()

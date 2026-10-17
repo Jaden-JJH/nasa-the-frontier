@@ -17,6 +17,7 @@ local Simulation = require(ReplicatedStorage.Shared.Simulation)
 local ResourceState = require(script.Parent.ResourceState)
 local RoverDrive = require(script.Parent.RoverDrive)
 local ServerUtil = require(script.Parent.ServerUtil)
+local Sfx = require(script.Parent.Sfx)
 
 local RoverDamage = {}
 
@@ -46,10 +47,12 @@ function RoverDamage.refresh()
         return
     end
     local state = ResourceState.get()
-    local seat = currentSeat
-    prompt.Enabled = state.phase == "playing"
-        and state.rover.damage > 0
-        and (seat == nil or seat.Occupant == nil)
+    -- 로버를 다시 만드는 중이면 예전 좌석이 지워져 있으므로 매번 지금 로버의 좌석을 찾는다
+    local seat = ServerUtil.getRoverSeat()
+    if not seat then
+        return -- 로버가 사라졌다 (복구가 다시 만들고 attach를 다시 부른다)
+    end
+    prompt.Enabled = state.phase == "playing" and state.rover.damage > 0 and seat.Occupant == nil
 end
 
 -- 상태의 파손 값을 구동과 프롬프트에 반영한다 (상태를 바꾼 뒤 부른다)
@@ -92,12 +95,24 @@ function RoverDamage.registerHit(speed: number): boolean
     else
         ResourceState.notifyAll(string.format(t.roverHitOthers, damage, max), "warn")
     end
+    Sfx.play("rover_hit", chassis)
     if new.rover.broken then
         ResourceState.notifyAll(t.roverBroken, "warn")
+        Sfx.play("rover_broken", chassis)
     end
     RoverDamage.sync()
     ResourceState.publish()
     return true
+end
+
+-- 수리 홀드 동안 공구 소리 루프
+local repairLoop: Sfx.Handle? = nil
+local function stopRepairLoop()
+    local handle = repairLoop
+    repairLoop = nil
+    if handle then
+        handle.stop()
+    end
 end
 
 local function onTouched(hit: BasePart)
@@ -125,6 +140,8 @@ local function onRepair(player: Player)
     end
     ResourceState.set(new)
     ResourceState.notifyAll(message, ResourceState.kind(kind))
+    stopRepairLoop()
+    Sfx.play("rover_repair", chassis)
     RoverDamage.sync()
     ResourceState.publish()
 end
@@ -170,6 +187,14 @@ function RoverDamage.attach(base: Model)
     prompt.KeyboardKeyCode = (Enum.KeyCode :: any)[d.repairKey]
     repairPrompt = prompt
     table.insert(connections, prompt.Triggered:Connect(onRepair))
+    table.insert(
+        connections,
+        prompt.PromptButtonHoldBegan:Connect(function()
+            stopRepairLoop()
+            repairLoop = Sfx.loop("rover_repair", body)
+        end)
+    )
+    table.insert(connections, prompt.PromptButtonHoldEnded:Connect(stopRepairLoop))
     RoverDamage.sync()
 end
 
@@ -178,6 +203,7 @@ function RoverDamage.detach()
         connection:Disconnect()
     end
     table.clear(connections)
+    stopRepairLoop()
     if repairPrompt then
         repairPrompt:Destroy()
         repairPrompt = nil

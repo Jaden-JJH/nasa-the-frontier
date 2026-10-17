@@ -12,6 +12,7 @@ local Config = require(ReplicatedStorage.Shared.Config)
 local Simulation = require(ReplicatedStorage.Shared.Simulation)
 local ResourceState = require(script.Parent.ResourceState)
 local ServerUtil = require(script.Parent.ServerUtil)
+local Sfx = require(script.Parent.Sfx)
 
 local RoverDrive = {}
 
@@ -45,7 +46,14 @@ local function onBoardTriggered(player: Player, seat: VehicleSeat, anchor: BaseP
     seat:Sit(humanoid)
 end
 
+local wasOccupied = false -- 직전 좌석 상태 (승차, 하차 효과음)
+
 local function onOccupantChanged(seat: VehicleSeat)
+    local occupied = seat.Occupant ~= nil
+    if occupied ~= wasOccupied then
+        wasOccupied = occupied
+        Sfx.play(if occupied then "rover_board" else "rover_exit", seat)
+    end
     local current = boardPrompt
     if current then
         current.Enabled = seat.Occupant == nil
@@ -84,6 +92,7 @@ function RoverDrive.attach(base: Model)
         enabled = seat.Occupant == nil,
     })
     boardPrompt = prompt
+    wasOccupied = seat.Occupant ~= nil
     table.insert(
         connections,
         prompt.Triggered:Connect(function(player: Player)

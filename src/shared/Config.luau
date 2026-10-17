@@ -220,6 +220,31 @@ local Config = {
     -- 자원 값 반올림 자릿수 (일조율 곱셈의 부동소수 오차 제거용)
     RESOURCE_DECIMALS = 2,
 
+    -- 서버 효과음 (Sfx, 2026-10-18). 음원 id와 볼륨은 Shared.SoundIds. 여기는 재생 방식만
+    SFX = {
+        rollOffMaxDistance = 120, -- 3D 효과음 기본 최대 거리
+        interiorRollOff = 25, -- 건물 내부 허밍 최대 거리
+        oneShotLifetime = 15, -- 한 번 재생하는 소리가 Ended를 못 받아도 이 초 뒤에 지운다
+        engineMinSpeed = 0.8, -- 로버 주행 루프 PlaybackSpeed (정지 ~ 최고 속도)
+        engineMaxSpeed = 1.4,
+        engineIdleVolume = 0.1, -- 탑승 중 정지 상태 볼륨 (빈 로버는 0)
+        engineFade = 0.5, -- 배터리 주기마다 목표 볼륨으로 다가가는 비율
+    },
+
+    -- 충전 도크 표시 (2026-10-18): ChargePad Attribute DockState에 따라 테두리, 중앙 원판, SurfaceLight
+    CHARGE_DOCK = {
+        emptyColor = { 245, 200, 40 }, -- 비어 있음: 노란 테두리 (빛 없음)
+        dockedColor = { 120, 200, 255 }, -- 도킹(탑승 중이거나 기지 에너지 0): 하늘색 + 약한 빛
+        chargingColor = { 255, 210, 50 }, -- 충전 중: 노란 Neon 테두리와 중앙 원판이 펄스
+        fullColor = { 90, 220, 110 }, -- 완충: 초록 고정
+        dockedLight = 0.6,
+        chargingLightMax = 2.5,
+        fullLight = 1.2,
+        lightRange = 12,
+        pulsePeriod = 0.8, -- 충전 중 밝기 펄스 주기(초)
+        pulseHz = 10, -- 서버 펄스 갱신 주기
+    },
+
     -- ProximityPrompt 공통
     PROMPT = {
         maxDistance = 12,
@@ -418,6 +443,8 @@ local Config = {
         batteryLow = "로버 배터리가 %d%% 남았습니다. 기지로 돌아와 충전하세요",
         batteryFull = "로버 충전 완료",
         chargeNoEnergy = "기지 에너지가 없어 로버를 충전할 수 없습니다",
+        dockEntered = "충전 도크 도킹. 하차하면 충전이 시작됩니다",
+        chargeStarted = "충전 시작 (%d / %d)",
         tankAlreadyFull = "로버 탱크가 이미 가득 찼습니다",
         tankEmpty = "로버 탱크가 비어 있습니다",
         needDriver = "로버 운전석에 앉아 있어야 채취할 수 있습니다",

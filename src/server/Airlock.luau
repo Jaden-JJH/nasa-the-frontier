@@ -10,6 +10,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Config = require(ReplicatedStorage.Shared.Config)
 local ResourceState = require(script.Parent.ResourceState)
 local ServerUtil = require(script.Parent.ServerUtil)
+local Sfx = require(script.Parent.Sfx)
 
 local Airlock = {}
 
@@ -25,6 +26,10 @@ local doors: { Door } = {}
 local connections: { RBXScriptConnection } = {}
 local notified: { [Player]: boolean } = {}
 local generation = 0 -- attach/detach마다 증가. 이전 기지의 닫기 대기 스레드를 멈춘다
+-- 건물 내부 공조 허밍 (InteriorLight Attachment 자리). 착륙선은 늘, Habitat A는 완공된 뒤에만
+local landerHums: { Sfx.Handle } = {}
+local habitatLights: { Attachment } = {}
+local habitatHums: { Sfx.Handle } = {}
 
 local function setOpen(door: Door, open: boolean)
     local a = Config.AIRLOCK
@@ -52,6 +57,7 @@ local function openDoor(door: Door, player: Player?)
         return
     end
     setOpen(door, true)
+    Sfx.play("airlock_open", door.part)
     if player and not notified[player] then
         notified[player] = true
         ResourceState.notify(player, Config.TEXTS.airlockOpened, "info")
@@ -63,6 +69,7 @@ local function openDoor(door: Door, player: Player?)
         end
         if myGeneration == generation then
             setOpen(door, false)
+            Sfx.play("airlock_close", door.part)
         end
     end)
 end
@@ -101,6 +108,24 @@ function Airlock.attach(base: Model)
             )
         end
     end
+    -- 내부 허밍: InteriorLight Attachment마다. ModulePads 아래(Habitat A Built)는 syncHum이 켠다
+    local pads = base:FindFirstChild("ModulePads")
+    for _, descendant in base:GetDescendants() do
+        if descendant.Name == "InteriorLight" and descendant:IsA("Attachment") then
+            if pads and descendant:IsDescendantOf(pads) then
+                table.insert(habitatLights, descendant)
+            else
+                table.insert(
+                    landerHums,
+                    Sfx.loop(
+                        "interior_hum_loop",
+                        descendant,
+                        { rollOff = Config.SFX.interiorRollOff }
+                    )
+                )
+            end
+        end
+    end
     if #doors == 0 then
         warn(
             "[Airlock] 기지에서 Entry.Door를 찾지 못했습니다. 에어락 문 프롬프트가 없습니다"
@@ -119,6 +144,32 @@ function Airlock.detach()
     end
     table.clear(doors)
     table.clear(notified)
+    for _, handle in landerHums do
+        handle.stop()
+    end
+    table.clear(landerHums)
+    for _, handle in habitatHums do
+        handle.stop()
+    end
+    table.clear(habitatHums)
+    table.clear(habitatLights)
+end
+
+-- Habitat A 내부 허밍: 완공(active)이면 켜고 아니면 끈다 (GameFlow가 상태가 바뀔 때마다 부른다)
+function Airlock.syncHum(habitatActive: boolean)
+    if habitatActive and #habitatHums == 0 then
+        for _, light in habitatLights do
+            table.insert(
+                habitatHums,
+                Sfx.loop("interior_hum_loop", light, { rollOff = Config.SFX.interiorRollOff })
+            )
+        end
+    elseif not habitatActive and #habitatHums > 0 then
+        for _, handle in habitatHums do
+            handle.stop()
+        end
+        table.clear(habitatHums)
+    end
 end
 
 -- 테스트와 진단용: 지금 붙어 있는 문 수와 열린 문 수

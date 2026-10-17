@@ -11,6 +11,7 @@ local Config = require(ReplicatedStorage.Shared.Config)
 local Simulation = require(ReplicatedStorage.Shared.Simulation)
 local ResourceState = require(script.Parent.ResourceState)
 local ServerUtil = require(script.Parent.ServerUtil)
+local Sfx = require(script.Parent.Sfx)
 
 local SolarPanels = {}
 
@@ -86,6 +87,7 @@ local function animateUnfold(panel: Instance, slot: BasePart, final: CFrame)
     setPivot(panel, start)
     unfolding += 1
     SolarPanels.refresh()
+    Sfx.play("panel_unfold", slot)
     local myGeneration = generation
     task.spawn(function()
         local steps = math.max(1, math.ceil(Config.PANEL_UNFOLD_SECONDS * Config.ANIMATION_HZ))
@@ -164,6 +166,7 @@ local function onTriggered(player: Player)
         return
     end
     ResourceState.set(newState)
+    Sfx.play("panel_install", prompt and prompt.Parent)
     spawnPanel(newState.panelsInstalled, true)
     ResourceState.notify(player, message, "good")
     SolarPanels.refresh()

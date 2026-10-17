@@ -161,6 +161,9 @@ local WATER_TANK_POSITION = Vector3.new(-10, 0, -14)
 local CHARGE_PAD_SIZE = Vector3.new(12, 0.05, 12) -- 바닥 위로 보이는 크기 (아래로 EMBED만큼 묻는다)
 local CHARGE_PAD_TRIM = 0.6 -- 노란 테두리 폭
 local CHARGE_PAD_TRIM_HEIGHT = 0.06 -- 테두리 윗면 = 바닥 + 이 값 (로버 바퀴 여유 0.1보다 낮게)
+local CHARGE_PAD_RING_DIAMETER = 5 -- 중앙 원판 지름
+local CHARGE_PAD_RING_THICKNESS = 0.04
+local CHARGE_PAD_RING_RAISE = 0.05 -- 원판 중심 = 바닥 + 이 값 (윗면 0.07, 바퀴 여유 0.1보다 낮게)
 local WATER_TANK_SIZE = Vector3.new(6, 8, 6)
 -- 로버 복구 콘솔: 착륙선 왼쪽 앞 판 위에 선 주황 기둥. 문 중심에서 14 studs 넘게 떨어뜨려
 -- 문 앞에서는 콘솔 프롬프트(활성 거리 Config.ROVER_RECOVERY.promptDistance)가 뜨지 않게 한다
@@ -2293,6 +2296,23 @@ local function buildChargePad(kit: Model)
         })
         part.CanCollide = false
     end
+    -- 중앙 원판: 충전 중과 완충일 때만 보인다 (RoverBattery가 색과 투명도를 바꾼다)
+    local ring = makePart({
+        name = "ChargePadRing",
+        size = Vector3.new(
+            CHARGE_PAD_RING_THICKNESS,
+            CHARGE_PAD_RING_DIAMETER,
+            CHARGE_PAD_RING_DIAMETER
+        ),
+        cframe = CFrame.new(ROVER_CENTER.X, FLOOR_Y + CHARGE_PAD_RING_RAISE, ROVER_CENTER.Z)
+            * CFrame.Angles(0, 0, math.rad(90)),
+        color = COLORS.chargeTrim,
+        material = Enum.Material.Neon,
+        parent = pad,
+    })
+    ring.Shape = Enum.PartType.Cylinder
+    ring.CanCollide = false
+    ring.Transparency = 1
 end
 
 -- KitImports 장식: 착륙선 뒤 바닥에 상자 2 x 2 (cratesStart = 첫 상자 바닥 중심)

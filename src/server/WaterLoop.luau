@@ -11,6 +11,7 @@ local Config = require(ReplicatedStorage.Shared.Config)
 local Simulation = require(ReplicatedStorage.Shared.Simulation)
 local ResourceState = require(script.Parent.ResourceState)
 local ServerUtil = require(script.Parent.ServerUtil)
+local Sfx = require(script.Parent.Sfx)
 
 -- 얼음 하나의 외형 원본 (고갈 표시와 재시작 복원용)
 type IceEntry = {
@@ -27,6 +28,7 @@ type IceEntry = {
     crystalBottom: number,
     lights: { PointLight },
     patch: BasePart?,
+    mineLoop: Sfx.Handle?, -- 채취 홀드 동안 드릴 소리
 }
 
 local WaterLoop = {}
@@ -161,7 +163,16 @@ function WaterLoop.depositOf(name: string): number?
     return nil
 end
 
+local function stopMineLoop(entry: IceEntry)
+    local handle = entry.mineLoop
+    entry.mineLoop = nil
+    if handle then
+        handle.stop()
+    end
+end
+
 local function onIceTriggered(player: Player, entry: IceEntry)
+    stopMineLoop(entry)
     local seat = ServerUtil.getRoverSeat()
     if not isDriver(player, seat) then
         ResourceState.notify(player, Config.TEXTS.needDriver, "warn")
@@ -178,6 +189,10 @@ local function onIceTriggered(player: Player, entry: IceEntry)
     end
     entry.part:SetAttribute("Deposit", remaining)
     applyDepositVisual(entry)
+    Sfx.play("ice_collected", entry.part)
+    if remaining <= 0 then
+        Sfx.play("ice_depleted", entry.part)
+    end
     ResourceState.set(newState)
     WaterLoop.mirrorTank()
     WaterLoop.refresh()
@@ -208,6 +223,8 @@ local function onTankTriggered(player: Player)
         return
     end
     ResourceState.set(newState)
+    Sfx.play("water_unload", tankPart)
+    Sfx.play("water_processing", tankPart)
     WaterLoop.mirrorTank()
     WaterLoop.refresh()
     ResourceState.notifyAll(message, ResourceState.kind(kind))
@@ -286,6 +303,7 @@ local function makeEntry(part: BasePart, prompt: ProximityPrompt): IceEntry
         crystalBottom = if crystal then modelBottom(crystal) else 0,
         lights = lights,
         patch = nil,
+        mineLoop = nil,
     }
     return entry
 end
@@ -314,6 +332,14 @@ function WaterLoop.init()
             local entry = makeEntry(child, prompt)
             prompt.Triggered:Connect(function(player: Player)
                 onIceTriggered(player, entry)
+            end)
+            -- 홀드하는 동안 채취 소리 (홀드를 놓거나 끝나면 멈춘다)
+            prompt.PromptButtonHoldBegan:Connect(function()
+                stopMineLoop(entry)
+                entry.mineLoop = Sfx.loop("ice_mine_loop", entry.part)
+            end)
+            prompt.PromptButtonHoldEnded:Connect(function()
+                stopMineLoop(entry)
             end)
             table.insert(iceEntries, entry)
         end
@@ -360,6 +386,7 @@ function WaterLoop.detach()
     tankPart = nil
     for _, entry in iceEntries do
         entry.prompt.Enabled = false
+        stopMineLoop(entry)
     end
 end
 

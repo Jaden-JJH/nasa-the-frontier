@@ -20,6 +20,7 @@ local RoverDamage = require(script.Parent.RoverDamage)
 local RoverDrive = require(script.Parent.RoverDrive)
 local RoverRecovery = require(script.Parent.RoverRecovery)
 local ServerUtil = require(script.Parent.ServerUtil)
+local Sfx = require(script.Parent.Sfx)
 local SolarPanels = require(script.Parent.SolarPanels)
 local Spacesuit = require(script.Parent.Spacesuit)
 local WaterLoop = require(script.Parent.WaterLoop)
@@ -56,6 +57,8 @@ local function refreshPrompts(prev: Simulation.GameState?)
     WaterLoop.refresh()
     RoverRecovery.refresh()
     RoverDamage.refresh()
+    local habitat = state.modules[Config.OXYGEN.habitatModule]
+    Airlock.syncHum(habitat ~= nil and habitat.status == "active")
 end
 
 -- 착륙 연출이 끝나 playing이 되면 프롬프트를 켜고 시계를 시작한다
@@ -146,6 +149,7 @@ end
 -- 재시작: 전원 하차, 시스템 분리, 기지 제거, 상태 초기화 후 selecting으로
 local function restart(leaving: Player?)
     GameClock.stop()
+    Sfx.stopAll() -- 주행, 충전, 건설, 채취, 내부 허밍 루프를 모두 멈추고 지운다
     for _, player in Players:GetPlayers() do
         ServerUtil.unseatPlayer(player)
     end
