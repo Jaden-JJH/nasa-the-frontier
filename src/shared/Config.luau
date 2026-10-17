@@ -38,7 +38,9 @@ local Config = {
     DEFAULT_SITE_ID = 2,
 
     -- 시작 자원 (착륙선)
-    START = { energy = 0, water = 25, food = 30 },
+    -- energy 50 = 착륙선 잔여 배터리. 첫 물 원정(약 6일)에서 돌아오면 Habitat A(60E)를 바로 착공할 수 있게
+    -- (2026-10-17 밸런스 조정, tests/simulation.spec.luau 현실적 봇 기준)
+    START = { energy = 50, water = 25, food = 30 },
 
     -- 크루 생명유지 (매일)
     CREW = { food = 1, water = 1 },
@@ -72,7 +74,7 @@ local Config = {
         C = {
             name = "Research Lab",
             displayName = "Research Lab C",
-            cost = { energy = 150, water = 40 },
+            cost = { energy = 150, water = 30 }, -- 물 40 -> 30: 최적 착륙지 승리를 45일 안으로 (후반 병목은 여전히 물)
             buildDays = 7,
             upkeep = { energy = 8, water = 1 },
             requires = { "A", "B" },

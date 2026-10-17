@@ -635,8 +635,10 @@ check(
 
 advance(Config.DAY_SECONDS)
 check(
-    state().day == 2 and state().energy == 3 and state().panelsInstalledToday == 0,
-    "DayTick: day 2, energy 3, 오늘 설치 초기화"
+    state().day == 2
+        and state().energy == Config.START.energy + 3 * Config.PANEL_OUTPUT
+        and state().panelsInstalledToday == 0,
+    "DayTick: day 2, 시작 에너지 + 패널 3장 발전, 오늘 설치 초기화"
 )
 check(installPrompt.ActionText == "패널 설치", "다음 날 프롬프트 복귀")
 
@@ -773,6 +775,10 @@ print("[건설]")
 local padAPrompt = base.ModulePads.PadA.Pad:FindFirstChildOfClass("ProximityPrompt")
 local padBPrompt = base.ModulePads.PadB.Pad:FindFirstChildOfClass("ProximityPrompt")
 local padCPrompt = base.ModulePads.PadC.Pad:FindFirstChildOfClass("ProximityPrompt")
+-- 시작 에너지가 있으므로 부족 상황을 직접 만든다
+ResourceState.patch(function(s)
+    s.energy = Config.MODULES.A.cost.energy - 1
+end)
 signalFor(padAPrompt, "Triggered"):Fire(alice)
 advance(0)
 check(state().modules.A.status == "available", "에너지 부족이면 착공 안 됨")
@@ -867,7 +873,7 @@ signalFor(restartRemote, "OnServerEvent"):Fire(bob)
 advance(0)
 check(humanoid.Sit == false, "재시작 전 전원 하차")
 check(
-    state().phase == "selecting" and state().day == 0 and state().energy == 0,
+    state().phase == "selecting" and state().day == 0 and state().energy == Config.START.energy,
     "재시작: selecting, 상태 초기화"
 )
 check(Workspace:FindFirstChild("Base") == nil, "재시작: Base 제거")

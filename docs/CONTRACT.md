@@ -192,13 +192,13 @@ GDD 4절의 값. 키 이름을 이대로 쓴다.
 ```lua
 DAY_SECONDS = 10, TOTAL_DAYS = 90, SPEEDS = {1, 2},
 LANDING_SECONDS = 5, SITE_SELECT_TIMEOUT = 30, DEFAULT_SITE_ID = 2,
-START = { energy = 0, water = 25, food = 30 },
+START = { energy = 50, water = 25, food = 30 },  -- energy 50은 착륙선 잔여 배터리 (2026-10-17 플레이테스트 후 조정)
 CREW = { food = 1, water = 1 },
 PANELS_TOTAL = 30, PANELS_PER_DAY = 3, PANEL_OUTPUT = 1, PANEL_INSTALL_HOLD = 2,
 MODULES = {
   A = { name = "Habitat", cost = { energy = 60, water = 20 }, buildDays = 5, upkeep = { energy = 3, water = 1 }, requires = {} },
   B = { name = "Farm", cost = { energy = 80, water = 30 }, buildDays = 5, upkeep = { energy = 5, water = 2 }, requires = {"A"}, foodPerDay = 2 },
-  C = { name = "Research Lab", cost = { energy = 150, water = 40 }, buildDays = 7, upkeep = { energy = 8, water = 1 }, requires = {"A", "B"} },
+  C = { name = "Research Lab", cost = { energy = 150, water = 30 }, buildDays = 7, upkeep = { energy = 8, water = 1 }, requires = {"A", "B"} },
 },
 MODULE_ORDER = {"A", "B", "C"},
 ROVER = { tankMax = 40, fillHold = 3 }, ICE_PROMPT_DISTANCE = 20, RADAR_RANGE = 150,

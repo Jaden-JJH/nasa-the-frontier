@@ -45,23 +45,28 @@ return function(t)
         t.eq(s.missionText, Config.MISSION_TEXTS.selecting)
     end)
 
+    -- 기대값은 Config에서 계산한다. 현재 값(시작 50, 하루 3장, 장당 1)이면 53, 59, 68, 80, 95, 113
     t.test(
-        "100% 일조 워크스루: 하루 3장 설치 시 1..6일 에너지 3, 9, 18, 30, 45, 63",
+        "100% 일조 워크스루: 매일 패널을 한도까지 설치하면 에너지가 삼각수로 늘어난다",
         function()
-            local expected = { 3, 9, 18, 30, 45, 63 }
+            local perPanel = Config.PANEL_OUTPUT
+            local perDay = Config.PANELS_PER_DAY
             local s = playingState(1)
             for day = 1, 6 do
-                s = installMany(s, Config.PANELS_PER_DAY)
+                s = installMany(s, perDay)
                 s = Simulation.applyDay(s, Config)
-                t.near(s.energy, expected[day], "day " .. day .. " energy")
+                local expected = Config.START.energy + perPanel * perDay * day * (day + 1) / 2
+                t.near(s.energy, expected, "day " .. day .. " energy")
             end
-            t.eq(s.day, 7)
-            t.near(s.netEnergy, 18, "6일차 순증감")
-            t.near(s.water, 19, "물 25 - 6")
-            t.near(s.food, 24, "식량 30 - 6")
-            t.near(s.netWater, -1)
-            t.near(s.netFood, -1)
-            t.eq(s.panelsInstalled, 18)
+            do
+                t.eq(s.day, 7)
+                t.near(s.netEnergy, perPanel * perDay * 6, "6일차 순증감")
+                t.near(s.water, 19, "물 25 - 6")
+                t.near(s.food, 24, "식량 30 - 6")
+                t.near(s.netWater, -1)
+                t.near(s.netFood, -1)
+                t.eq(s.panelsInstalled, perDay * 6)
+            end
         end
     )
 
@@ -80,6 +85,7 @@ return function(t)
 
     t.test("일조율 0.85: 패널 3장 하루 발전 2.55, 부동소수 오차 없음", function()
         local s = installMany(playingState(0.85), 3)
+        s.energy = 0
         s = Simulation.applyDay(s, Config)
         t.eq(s.energy, 2.55)
         t.eq(s.netEnergy, 2.55)
@@ -394,46 +400,242 @@ return function(t)
         t.contains(Simulation.missionText(dry, Config), "물이 바닥났습니다")
     end)
 
-    -- 밸런스 스모크: 단순 봇 (매일 패널 3장, 일정 간격 물 원정, 가능하면 즉시 착공)
-    local function simulateBot(sunlight: number, tripEveryDays: number): (string, number)
-        local s = playingState(sunlight)
-        for _ = 1, Config.TOTAL_DAYS + 1 do
-            s = installMany(s, Config.PANELS_PER_DAY)
-            if s.day % tripEveryDays == 0 then
-                local _, filled = Simulation.fillTank(s, Config)
-                local _, unloaded = Simulation.unloadWater(filled, Config)
-                s = unloaded
-            end
-            for _, id in Config.MODULE_ORDER do
-                local ok, new = Simulation.startBuild(s, Config, id)
-                if ok then
-                    s = new
-                end
-            end
-            s = Simulation.applyDay(s, Config)
-            local result = Simulation.checkEnd(s, Config)
-            if result ~= "none" then
-                return result, Simulation.finishGame(s, Config, result).day
+    -- 현실적 플레이어 봇 (GDD 4절 밸런스 검증 메모) ----------------------------
+    -- 하루에 한 가지 행동만 한다. 우선순위:
+    --   1) 다음 모듈을 지을 수 있고 착공 뒤에도 원정 동안 버틸 물이 남으면 착공
+    --   2) 미션대로 둘째 날 첫 물 원정 (패널 설치 다음 미션)
+    --   3) 물이 원정 동안 버틸 만큼만 남았으면 원정
+    --   4) 에너지는 충분한데 물이 모자라거나, 깔 패널이 없는데 물이 모자라면 원정
+    --   5) 패널을 하루 한도까지 설치
+    --   6) 할 일이 없으면 대기
+    -- 원정은 TRIP_DAYS일 동안 다른 행동을 못 하고, 마지막 날 탱크를 채워 하역한다.
+    -- "원정 동안 버틸 물" = max(WATER_FLOOR, 하루 물 소비 x 원정 일수). 리드가 정한 "물 10 이하" 기준에
+    -- 소비량을 더한 것으로, 이것이 없으면 B 가동 뒤(하루 4W) 6일 원정 중에 물이 바닥나 봇이 진다.
+    local TRIP_DAYS = 6 -- 왕복 약 60초 (GDD 4절)
+    local FIRST_TRIP_DAY = 2
+    local WATER_FLOOR = 10
+    -- 참고용 추정: 얼음 거리(450, 300, 180, 100 studs)를 로버 18 studs/s로 왕복하고 채우기와 하역에 약 10초
+    local TRIP_DAYS_BY_DISTANCE = { 6, 5, 3, 3 }
+
+    type BotResult = {
+        result: string,
+        day: number,
+        aOnReturn: boolean,
+        maxBlocked: number, -- 에너지 막힘 최대 연속일 (다음 모듈이 열려 있고 물도 충분한데 에너지가 모자란 기지 체류일)
+        maxIdle: number, -- 완전 대기 최대 연속일 (아무 행동도 못 한 날)
+        minFood: number, -- Farm 가동 전 최저 식량
+        trips: number,
+    }
+
+    local function nextModule(s): string?
+        for _, id in Config.MODULE_ORDER do
+            local status = s.modules[id].status
+            if status == "available" or status == "locked" then
+                return id
             end
         end
-        return "none", s.day
+        return nil
     end
 
-    t.test(
-        "밸런스 스모크: 6일마다 물 원정이면 4곳 모두 90일 안에 승리",
-        function()
-            local days = {}
-            for _, site in Config.SITES do
-                local result, day = simulateBot(site.sunlight, 6)
-                t.eq(result, "won", site.name)
-                table.insert(days, string.format("%s %d일", site.name, day))
+    local function waterReserve(s, tripDays: number): number
+        local _, use = Simulation.dailyConsumption(s, Config)
+        return math.max(WATER_FLOOR, use * tripDays)
+    end
+
+    local function fetchWater(s)
+        local _, filled = Simulation.fillTank(s, Config)
+        local _, unloaded = Simulation.unloadWater(filled, Config)
+        return unloaded
+    end
+
+    local function simulatePlayer(sunlight: number, tripDays: number, noTrips: boolean?): BotResult
+        local s = playingState(sunlight)
+        local tripLeft = 0
+        local tripped, checkedReturn = false, false
+        local aOnReturn = false
+        local blocked, maxBlocked, idle, maxIdle = 0, 0, 0, 0
+        local minFood = math.huge
+        for _ = 1, Config.TOTAL_DAYS + 1 do
+            local busy = false -- 오늘 행동을 했는지
+            local onTrip = false
+            local id = nextModule(s)
+            if tripLeft > 0 then
+                tripLeft -= 1
+                busy, onTrip = true, true
+                if tripLeft == 0 then
+                    s = fetchWater(s)
+                end
+            else
+                if tripped and not checkedReturn then
+                    checkedReturn = true
+                    aOnReturn = (Simulation.canBuild(s, Config, "A"))
+                end
+                local reserve = waterReserve(s, tripDays)
+                local waterCost = if id then Config.MODULES[id].cost.water else 0
+                local canInstall = s.panelsInstalled < Config.PANELS_TOTAL
+                local waterShort = id ~= nil and s.water < waterCost + reserve
+                local energyReady = id ~= nil and s.energy >= Config.MODULES[id].cost.energy
+                if
+                    id
+                    and (Simulation.canBuild(s, Config, id))
+                    and s.water - waterCost >= reserve
+                then
+                    local _, built = Simulation.startBuild(s, Config, id)
+                    s = built
+                    busy = true
+                    id = nextModule(s)
+                elseif
+                    not noTrips
+                    and (
+                        (not tripped and s.day >= FIRST_TRIP_DAY)
+                        or s.water <= reserve
+                        or (waterShort and (energyReady or not canInstall))
+                    )
+                then
+                    tripped = true
+                    busy, onTrip = true, true
+                    tripLeft = tripDays - 1
+                    if tripLeft == 0 then
+                        s = fetchWater(s)
+                    end
+                elseif canInstall then
+                    s = installMany(s, Config.PANELS_PER_DAY)
+                    busy = true
+                end
             end
-            print("        승리 일수: " .. table.concat(days, ", "))
+            -- 대기 지표
+            if busy then
+                idle = 0
+            else
+                idle += 1
+                maxIdle = math.max(maxIdle, idle)
+            end
+            local def = id and Config.MODULES[id]
+            local isBlocked = not onTrip
+                and def ~= nil
+                and s.modules[id :: string].status == "available"
+                and s.water >= def.cost.water + waterReserve(s, tripDays)
+                and s.energy < def.cost.energy
+            if isBlocked then
+                blocked += 1
+                maxBlocked = math.max(maxBlocked, blocked)
+            else
+                blocked = 0
+            end
+            if s.modules.B.status ~= "active" then
+                minFood = math.min(minFood, s.food)
+            end
+            s = Simulation.applyDay(s, Config)
+            if s.modules.B.status ~= "active" then
+                minFood = math.min(minFood, s.food)
+            end
+            local result = Simulation.checkEnd(s, Config)
+            if result ~= "none" then
+                return {
+                    result = result,
+                    day = Simulation.finishGame(s, Config, result).day,
+                    aOnReturn = aOnReturn,
+                    maxBlocked = maxBlocked,
+                    maxIdle = maxIdle,
+                    minFood = minFood,
+                    trips = s.waterTrips,
+                }
+            end
+        end
+        return {
+            result = "none",
+            day = s.day,
+            aOnReturn = aOnReturn,
+            maxBlocked = maxBlocked,
+            maxIdle = maxIdle,
+            minFood = minFood,
+            trips = s.waterTrips,
+        }
+    end
+
+    local function runAllSites(tripDaysFor: (number) -> number): { BotResult }
+        local results = {}
+        for index, site in Config.SITES do
+            table.insert(results, simulatePlayer(site.sunlight, tripDaysFor(index)))
+        end
+        return results
+    end
+
+    local function summary(results: { BotResult }): string
+        local parts = {}
+        for index, r in results do
+            table.insert(
+                parts,
+                string.format(
+                    "%s %s %d일(원정 %d회, 에너지 막힘 최대 %d일, 완전 대기 최대 %d일, Farm 전 최저 식량 %d)",
+                    Config.SITES[index].name,
+                    if r.result == "won" then "승리" else r.result,
+                    r.day,
+                    r.trips,
+                    r.maxBlocked,
+                    r.maxIdle,
+                    r.minFood
+                )
+            )
+        end
+        return table.concat(parts, "\n        ")
+    end
+
+    local flat = runAllSites(function()
+        return TRIP_DAYS
+    end)
+
+    t.test(
+        "현실적 봇: 4곳 모두 90일 안에 승리, 최적 착륙지는 35~45일",
+        function()
+            local best = math.huge
+            for index, r in flat do
+                t.eq(r.result, "won", Config.SITES[index].name)
+                best = math.min(best, r.day)
+            end
+            t.truthy(best >= 35 and best <= 45, "최적 착륙지 승리 일수 " .. best)
+            print("        원정 6일 기준:\n        " .. summary(flat))
+            local estimated = runAllSites(function(index)
+                return TRIP_DAYS_BY_DISTANCE[index]
+            end)
+            print(
+                "        참고, 얼음 거리별 원정 일수(6, 5, 3, 3일):\n        "
+                    .. summary(estimated)
+            )
         end
     )
 
-    t.test("밸런스 스모크: 물 원정을 안 하면 실패", function()
-        local result = simulateBot(1, 1000)
-        t.eq(result, "lost")
+    t.test(
+        "현실적 봇: 첫 물 원정에서 돌아오면 Habitat A를 바로 착공할 수 있다",
+        function()
+            for index, r in flat do
+                t.truthy(r.aOnReturn, Config.SITES[index].name)
+            end
+        end
+    )
+
+    t.test(
+        "현실적 봇: C 완공 전까지 에너지 때문에 막힌 날이 연속 3일을 넘지 않는다",
+        function()
+            for index, r in flat do
+                t.truthy(
+                    r.maxBlocked <= 3,
+                    Config.SITES[index].name .. " 최대 " .. r.maxBlocked .. "일"
+                )
+            end
+        end
+    )
+
+    t.test("현실적 봇: Farm 가동 전에 식량이 바닥나지 않는다", function()
+        for index, r in flat do
+            t.truthy(r.minFood > 0, Config.SITES[index].name .. " 최저 식량 " .. r.minFood)
+        end
+    end)
+
+    t.test("현실적 봇: 물 원정을 안 하면 실패", function()
+        for _, site in Config.SITES do
+            local r = simulatePlayer(site.sunlight, TRIP_DAYS, true)
+            t.eq(r.result, "lost", site.name)
+        end
     end)
 end
