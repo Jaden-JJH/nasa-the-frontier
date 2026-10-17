@@ -33,7 +33,9 @@ local function nearestIce()
     local origin = root and root.Position
     local best, bestDist = nil, math.huge
     for _, part in ipairs(folder:GetChildren()) do
-        if part:IsA("BasePart") then
+        local deposit = part:GetAttribute("Deposit")
+        local depleted = type(deposit) == "number" and deposit <= 0
+        if part:IsA("BasePart") and not depleted then
             local dist = if origin then (part.Position - origin).Magnitude else 0
             if dist < bestDist then
                 best, bestDist = part, dist

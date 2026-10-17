@@ -28,16 +28,16 @@ end
 local function makeResourceRow(parent, order, name, color)
     local value = UI.create("TextLabel", {
         Name = "Value",
-        Position = UDim2.fromOffset(92, 0),
-        Size = UDim2.new(0, 54, 1, 0),
+        Position = UDim2.fromOffset(88, 0),
+        Size = UDim2.new(0, 100, 1, 0),
         Text = "0",
         Preset = "heading",
         TextXAlignment = Enum.TextXAlignment.Right,
     })
     local net = UI.create("TextLabel", {
         Name = "Net",
-        Position = UDim2.fromOffset(210, 0),
-        Size = UDim2.new(1, -210, 1, 0),
+        Position = UDim2.fromOffset(250, 0),
+        Size = UDim2.new(1, -250, 1, 0),
         Text = "0/일",
         TextColor3 = Colors.neutral,
         Preset = "caption",
@@ -45,8 +45,8 @@ local function makeResourceRow(parent, order, name, color)
     })
     local days = UI.create("TextLabel", {
         Name = "DaysLeft",
-        Position = UDim2.fromOffset(150, 0),
-        Size = UDim2.new(0, 56, 1, 0),
+        Position = UDim2.fromOffset(194, 0),
+        Size = UDim2.new(0, 52, 1, 0),
         Text = "",
         TextColor3 = Colors.textDim,
         Preset = "caption",
@@ -183,7 +183,7 @@ function HUD.init(ctx)
     local resources = UI.create("Frame", {
         Name = "Resources",
         Position = UDim2.fromOffset(12, 12),
-        Size = UDim2.fromOffset(280, 0),
+        Size = UDim2.fromOffset(330, 0),
         AutomaticSize = Enum.AutomaticSize.Y,
         BackgroundColor3 = Colors.panel,
         BackgroundTransparency = 0.12,
@@ -275,6 +275,8 @@ function HUD.init(ctx)
     }, { UI.corner(10), UI.padding(10), UI.list(Enum.FillDirection.Vertical, 2) })
     refs.panels = makeInfoRow(topRight, 1, "패널")
     refs.tank = makeInfoRow(topRight, 2, "로버 탱크")
+    refs.roverBadge = makeInfoRow(topRight, 3, "로버 상태")
+    refs.roverBadge.Parent.Visible = false
 
     -- 우측: 모듈 3개 (y=300, 토스트 영역을 피한다)
     local modulesPanel = UI.create("Frame", {
@@ -344,6 +346,17 @@ function HUD.update(state)
     refs.energy.value.Text = tostring(math.floor(state.energy))
     refs.water.value.Text = tostring(math.floor(state.water))
     refs.food.value.Text = tostring(math.floor(state.food))
+    -- 에너지: 상한이 있으면 "50 / 150", 95% 이상이면 노랑(넘치는 전력은 버려진다)
+    local energy = math.floor(state.energy)
+    local cap = state.energyCap
+    if type(cap) == "number" and cap > 0 then
+        refs.energy.value.Text = string.format("%d / %d", energy, math.floor(cap))
+        refs.energy.value.TextColor3 = if state.energy >= cap * 0.95
+            then Colors.energy
+            else Colors.text
+    else
+        refs.energy.value.TextColor3 = Colors.text
+    end
     setNet(refs.energy.net, state.netEnergy)
     setNet(refs.water.net, state.netWater)
     setNet(refs.food.net, state.netFood)
@@ -364,6 +377,20 @@ function HUD.update(state)
     )
     refs.tank.Text =
         string.format("%d/%d", roundInt(state.rover.tank), roundInt(state.rover.tankMax))
+
+    local damage = state.rover.damage
+    local badge = refs.roverBadge
+    if state.rover.broken then
+        badge.Text = "고장"
+        badge.TextColor3 = Colors.bad
+        badge.Parent.Visible = true
+    elseif type(damage) == "number" and damage > 0 then
+        badge.Text = string.format("파손 %d/3", damage)
+        badge.TextColor3 = Colors.energy
+        badge.Parent.Visible = true
+    else
+        badge.Parent.Visible = false
+    end
 
     for moduleId, row in pairs(refs.modules) do
         local moduleState = state.modules[moduleId]

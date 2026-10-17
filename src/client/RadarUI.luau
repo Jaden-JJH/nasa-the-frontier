@@ -16,6 +16,8 @@ local TICK_SECONDS = 0.1
 local DOT_FAR_SIZE = 6
 local DOT_NEAR_MIN = 10
 local DOT_NEAR_MAX = 28
+local AMOUNT_RANGE = 60 -- 이 거리 안이면 매장량 숫자를 표시
+local HARD_COLOR = Color3.fromRGB(255, 150, 50)
 
 local player = Players.LocalPlayer
 local config
@@ -45,7 +47,30 @@ local function getDot(part)
         AnchorPoint = Vector2.new(0.5, 0.5),
         BackgroundColor3 = Colors.water,
         Parent = dotsFrame,
-    }, { UI.roundCorner() })
+    }, {
+        UI.roundCorner(),
+        UI.create("TextLabel", {
+            Name = "Amount",
+            AnchorPoint = Vector2.new(0, 0.5),
+            Position = UDim2.new(1, 2, 0.5, 0),
+            Size = UDim2.fromOffset(32, 12),
+            Text = "",
+            TextColor3 = Colors.text,
+            TextSize = 11,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            Visible = false,
+        }),
+        UI.create("TextLabel", {
+            Name = "Mark",
+            AnchorPoint = Vector2.new(0.5, 0.5),
+            Position = UDim2.fromScale(0.5, 0.5),
+            Size = UDim2.fromOffset(12, 12),
+            Text = "x",
+            TextColor3 = Colors.neutral,
+            TextSize = 12,
+            Visible = false,
+        }),
+    })
     dots[part] = dot
     return dot
 end
@@ -72,15 +97,25 @@ local function step()
 
     local seen = {}
     local nearest = math.huge
+    local nearestDeposit = nil
+    local hasSites = false
     if iceFolder then
-        for _, part in ipairs(iceFolder:GetDescendants()) do
+        for _, part in ipairs(iceFolder:GetChildren()) do
             if part:IsA("BasePart") then
+                hasSites = true
                 seen[part] = true
                 local offset = part.Position - seat.Position
                 local ahead = offset:Dot(forward)
                 local side = offset:Dot(right)
                 local distance = math.sqrt(ahead * ahead + side * side)
-                nearest = math.min(nearest, distance)
+
+                -- Deposit Attribute가 없으면 기존처럼 남은 지점으로 취급
+                local deposit = part:GetAttribute("Deposit")
+                local depleted = type(deposit) == "number" and deposit <= 0
+                if not depleted and distance < nearest then
+                    nearest = distance
+                    nearestDeposit = if type(deposit) == "number" then deposit else nil
+                end
 
                 local inRange = distance <= range
                 local ratio = math.min(distance / range, 1)
@@ -90,15 +125,28 @@ local function step()
                 end
 
                 local dot = getDot(part)
+                local amountLabel = dot.Amount
+                dot.Mark.Visible = depleted
+                amountLabel.Visible = false
                 local size
-                if inRange then
+                if depleted then
+                    -- 고갈: 작은 회색 x
+                    size = 12
+                    dot.BackgroundTransparency = 1
+                elseif inRange then
                     size = DOT_NEAR_MIN + (1 - ratio) * (DOT_NEAR_MAX - DOT_NEAR_MIN)
                     dot.BackgroundTransparency = 0
-                    dot.BackgroundColor3 = Colors.water
+                    dot.BackgroundColor3 = if part:GetAttribute("Difficulty") == "hard"
+                        then HARD_COLOR
+                        else Colors.water
                 else
                     size = DOT_FAR_SIZE
                     dot.BackgroundTransparency = 0.6
                     dot.BackgroundColor3 = Colors.neutral
+                end
+                if not depleted and type(deposit) == "number" and distance <= AMOUNT_RANGE then
+                    amountLabel.Visible = true
+                    amountLabel.Text = tostring(math.floor(deposit + 0.5))
                 end
                 dot.Size = UDim2.fromOffset(size, size)
                 dot.Position =
@@ -115,7 +163,15 @@ local function step()
     end
 
     if nearest == math.huge then
-        distanceLabel.Text = "얼음 지점 탐색 중"
+        distanceLabel.Text = if hasSites
+            then "남은 얼음 지점 없음"
+            else "얼음 지점 탐색 중"
+    elseif nearestDeposit then
+        distanceLabel.Text = string.format(
+            "가장 가까운 얼음 %d studs, 매장량 %d",
+            math.floor(nearest + 0.5),
+            math.floor(nearestDeposit + 0.5)
+        )
     else
         distanceLabel.Text =
             string.format("가장 가까운 얼음 %d studs", math.floor(nearest + 0.5))
