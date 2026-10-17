@@ -1,6 +1,9 @@
 --!strict
--- 물 루프: 얼음 지점 프롬프트(만충), 기지 물탱크 프롬프트(하역), 로버 탱크 Attribute (CONTRACT 3절)
+-- 물 루프: 얼음 매장지 프롬프트(채취, 고갈), 기지 물탱크 프롬프트(하역, 처리 전력), 로버 탱크 Attribute (CONTRACT 3절)
 -- 탱크 값의 기준은 서버 GameState.rover.tank이고, Base.Rover.DriverSeat의 Attribute "Tank"에 그대로 비춘다.
+-- 매장량의 기준은 각 Ice 파트의 Attribute "Deposit"(남은 양)과 "DepositMax"(처음 양)이다 (2026-10-18).
+--   채취하면 Deposit이 줄고 결정 크기가 남은 / 처음 비율(하한 Config.ICE_VISUAL.minScale)로 줄어든다.
+--   0이 되면 결정과 빛을 치우고 프롬프트를 끄고 어두운 패치를 깐다. 재시작하면 처음 상태로 되돌린다.
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
@@ -9,7 +12,22 @@ local Simulation = require(ReplicatedStorage.Shared.Simulation)
 local ResourceState = require(script.Parent.ResourceState)
 local ServerUtil = require(script.Parent.ServerUtil)
 
-type IceEntry = { part: BasePart, prompt: ProximityPrompt }
+-- 얼음 하나의 외형 원본 (고갈 표시와 재시작 복원용)
+type IceEntry = {
+    part: BasePart,
+    prompt: ProximityPrompt,
+    depositMax: number,
+    partSize: Vector3, -- 그레이박스 파트 원래 크기 (결정 메시가 없을 때 이 파트가 결정 역할)
+    partCFrame: CFrame,
+    partTransparency: number,
+    partCanCollide: boolean,
+    crystal: Model?, -- KitImports 결정 메시 (없으면 nil)
+    crystalScale: number,
+    crystalPivot: CFrame,
+    crystalBottom: number,
+    lights: { PointLight },
+    patch: BasePart?,
+}
 
 local WaterLoop = {}
 
@@ -53,24 +71,117 @@ local function roverNear(seat: VehicleSeat?, ice: BasePart): boolean
     return ServerUtil.distanceToPart(ice, seat.CFrame.Position) <= Config.ICE_PROMPT_DISTANCE
 end
 
-local function onIceTriggered(player: Player, ice: BasePart)
+local function depositOf(entry: IceEntry): number
+    local value = entry.part:GetAttribute("Deposit")
+    return if typeof(value) == "number" then value else 0
+end
+
+-- 결정 모델 바닥 높이
+local function modelBottom(model: Model): number
+    local cframe, size = model:GetBoundingBox()
+    return cframe.Position.Y - size.Y / 2
+end
+
+-- 남은 매장량에 맞춰 결정 크기, 빛, 고갈 패치, 프롬프트 문구를 맞춘다
+local function applyDepositVisual(entry: IceEntry)
+    local remaining = depositOf(entry)
+    local visual = Config.ICE_VISUAL
+    local depleted = remaining <= 0
+    local ratio = if entry.depositMax > 0 then remaining / entry.depositMax else 0
+    local scale = math.max(visual.minScale, math.min(1, ratio))
+    local part = entry.part
+    local crystal = entry.crystal
+    if crystal then
+        if depleted then
+            crystal.Parent = nil
+        else
+            crystal.Parent = part
+            crystal:ScaleTo(entry.crystalScale * scale)
+            crystal:PivotTo(entry.crystalPivot)
+            -- 바닥을 지면에 붙인 채로 줄인다
+            local lift = entry.crystalBottom - modelBottom(crystal)
+            crystal:PivotTo(entry.crystalPivot + Vector3.new(0, lift, 0))
+        end
+    else
+        -- 그레이박스: 파트 자체가 얼음 덩어리. 바닥을 고정하고 크기를 줄인다. 고갈되면 숨긴다
+        local size = entry.partSize * scale
+        local bottom = entry.partCFrame.Position.Y - entry.partSize.Y / 2
+        part.Size = size
+        part.CFrame = entry.partCFrame
+            + Vector3.new(0, bottom + size.Y / 2 - entry.partCFrame.Position.Y, 0)
+        part.Transparency = if depleted then 1 else entry.partTransparency
+        part.CanCollide = if depleted then false else entry.partCanCollide
+    end
+    for _, light in entry.lights do
+        light.Enabled = not depleted
+    end
+    if depleted and not entry.patch then
+        local size = visual.patchSize
+        local color = visual.patchColor
+        local patch = Instance.new("Part")
+        patch.Name = "MinedPatch"
+        patch.Size = Vector3.new(size[1], size[2], size[3])
+        local bottom = entry.partCFrame.Position.Y - entry.partSize.Y / 2
+        patch.CFrame = CFrame.new(
+            entry.partCFrame.Position.X,
+            bottom + size[2] / 2,
+            entry.partCFrame.Position.Z
+        )
+        patch.Color = Color3.fromRGB(color[1], color[2], color[3])
+        patch.Material = Enum.Material.Slate
+        patch.Anchored = true
+        patch.CanCollide = false
+        patch.CanQuery = false
+        patch.Parent = part
+        entry.patch = patch
+    elseif not depleted and entry.patch then
+        entry.patch:Destroy()
+        entry.patch = nil
+    end
+    entry.prompt.ObjectText = if depleted
+        then Config.PROMPT_TEXTS.iceObject
+        else string.format(Config.PROMPT_TEXTS.iceObjectAmount, math.floor(remaining + 0.5))
+end
+
+-- 모든 매장지를 처음 매장량으로 되돌린다 (서버 시작, 재시작)
+function WaterLoop.resetDeposits()
+    for _, entry in iceEntries do
+        entry.part:SetAttribute("Deposit", entry.depositMax)
+        applyDepositVisual(entry)
+    end
+end
+
+-- 남은 매장량 (테스트와 디버그용). 없는 이름이면 nil
+function WaterLoop.depositOf(name: string): number?
+    for _, entry in iceEntries do
+        if entry.part.Name == name then
+            return depositOf(entry)
+        end
+    end
+    return nil
+end
+
+local function onIceTriggered(player: Player, entry: IceEntry)
     local seat = ServerUtil.getRoverSeat()
     if not isDriver(player, seat) then
         ResourceState.notify(player, Config.TEXTS.needDriver, "warn")
         return
     end
-    if not roverNear(seat, ice) then
+    if not roverNear(seat, entry.part) then
         return
     end
-    local ok, newState, message = Simulation.fillTank(ResourceState.get(), Config)
+    local ok, newState, remaining, message, kind =
+        Simulation.fillFromDeposit(ResourceState.get(), Config, depositOf(entry))
     if not ok then
-        ResourceState.notify(player, message, "info")
+        ResourceState.notify(player, message, ResourceState.kind(kind))
         return
     end
+    entry.part:SetAttribute("Deposit", remaining)
+    applyDepositVisual(entry)
     ResourceState.set(newState)
     WaterLoop.mirrorTank()
     WaterLoop.refresh()
-    ResourceState.notify(player, message, "good")
+    ResourceState.notify(player, message, ResourceState.kind(kind))
     ResourceState.publish()
 end
 
@@ -91,29 +202,92 @@ local function onTankTriggered(player: Player)
         ResourceState.notify(player, Config.TEXTS.needRoverAtTank, "warn")
         return
     end
-    local ok, newState, message = Simulation.unloadWater(state, Config)
+    local ok, newState, message, kind, warning = Simulation.unloadWater(state, Config)
     if not ok then
-        ResourceState.notify(player, message, "info")
+        ResourceState.notify(player, message, ResourceState.kind(kind))
         return
     end
     ResourceState.set(newState)
     WaterLoop.mirrorTank()
     WaterLoop.refresh()
-    ResourceState.notifyAll(message, "good")
+    ResourceState.notifyAll(message, ResourceState.kind(kind))
+    if warning then
+        ResourceState.notifyAll(warning, "warn")
+    end
     ResourceState.publish()
 end
 
--- 얼음 프롬프트 Enabled 갱신: 플레이 중 + 운전석에 누가 앉음 + 로버가 가까움
+-- 얼음 프롬프트 Enabled 갱신: 플레이 중 + 매장량 남음 + 운전석에 누가 앉음 + 로버가 가까움
 local function pollIcePrompts()
     local playing = ResourceState.get().phase == "playing"
     local seat = ServerUtil.getRoverSeat()
     local occupied = seat ~= nil and seat.Occupant ~= nil
     for _, entry in iceEntries do
-        local enabled = playing and occupied and roverNear(seat, entry.part)
+        local enabled = playing
+            and occupied
+            and depositOf(entry) > 0
+            and roverNear(seat, entry.part)
         if entry.prompt.Enabled ~= enabled then
             entry.prompt.Enabled = enabled
         end
     end
+end
+
+-- 얼음 파트 하나의 처음 매장량: Attribute DepositMax -> Deposit -> Config.ICE_SITES[번호] -> 기본값
+local function initialDeposit(part: BasePart): (number, string)
+    local index = tonumber(string.match(part.Name, "^Ice(%d+)$"))
+    local site = if index then Config.ICE_SITES[index] else nil
+    local difficulty = part:GetAttribute("Difficulty")
+    local label = if typeof(difficulty) == "string"
+        then difficulty
+        elseif site then site.difficulty
+        else "mid"
+    for _, key in { "DepositMax", "Deposit" } do
+        local value = part:GetAttribute(key)
+        if typeof(value) == "number" and value > 0 then
+            return value, label
+        end
+    end
+    if site then
+        return site.deposit, label
+    end
+    return Config.ICE_DEFAULT_DEPOSIT, label
+end
+
+local function makeEntry(part: BasePart, prompt: ProximityPrompt): IceEntry
+    local depositMax, difficulty = initialDeposit(part)
+    part:SetAttribute("DepositMax", depositMax)
+    part:SetAttribute("Deposit", depositMax)
+    part:SetAttribute("Difficulty", difficulty)
+    local crystal: Model? = nil
+    for _, child in part:GetChildren() do
+        if child:IsA("Model") then
+            crystal = child
+            break
+        end
+    end
+    local lights: { PointLight } = {}
+    for _, descendant in part:GetDescendants() do
+        if descendant:IsA("PointLight") then
+            table.insert(lights, descendant)
+        end
+    end
+    local entry: IceEntry = {
+        part = part,
+        prompt = prompt,
+        depositMax = depositMax,
+        partSize = part.Size,
+        partCFrame = part.CFrame,
+        partTransparency = part.Transparency,
+        partCanCollide = part.CanCollide,
+        crystal = crystal,
+        crystalScale = if crystal then crystal:GetScale() else 1,
+        crystalPivot = if crystal then crystal:GetPivot() else CFrame.identity,
+        crystalBottom = if crystal then modelBottom(crystal) else 0,
+        lights = lights,
+        patch = nil,
+    }
+    return entry
 end
 
 -- 서버 시작 시 한 번: Workspace.IceSites의 각 파트에 프롬프트를 붙이고 감시 루프를 돈다
@@ -137,12 +311,14 @@ function WaterLoop.init()
                 maxDistance = Config.ICE_PROMPT_DISTANCE,
                 enabled = false,
             })
+            local entry = makeEntry(child, prompt)
             prompt.Triggered:Connect(function(player: Player)
-                onIceTriggered(player, child)
+                onIceTriggered(player, entry)
             end)
-            table.insert(iceEntries, { part = child, prompt = prompt })
+            table.insert(iceEntries, entry)
         end
     end
+    WaterLoop.resetDeposits()
     task.spawn(function()
         while true do
             ServerUtil.safeCall("WaterLoop", pollIcePrompts)

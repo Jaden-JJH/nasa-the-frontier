@@ -1,5 +1,8 @@
 --!strict
 -- 태양광 패널 설치: Base.SolarField.InstallPad 프롬프트, 하루 설치 제한, 슬롯에 패널 복제 (CONTRACT 3절)
+-- 설치 연출 (2026-10-18): 홀드가 끝나면 패널이 슬롯 아래 PANEL_SINK_DEPTH에서 접힌 채(PANEL_FOLD_ANGLE)
+-- 나타나 PANEL_UNFOLD_SECONDS 동안 올라오며 펼쳐진다 (ANIMATION_HZ로 PivotTo 보간).
+-- 그동안 설치 프롬프트는 꺼지고 ActionText는 "설치 중"이다. 자원 반영은 홀드가 끝난 순간 바로 한다.
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerStorage = game:GetService("ServerStorage")
@@ -15,6 +18,8 @@ local prompt: ProximityPrompt? = nil
 local slots: { BasePart } = {}
 local panelsFolder: Folder? = nil
 local connections: { RBXScriptConnection } = {}
+local unfolding = 0 -- 펼치는 중인 패널 수 (0보다 크면 프롬프트를 끈다)
+local generation = 0 -- detach마다 증가. 이전 기지의 연출 루프가 새 기지 상태를 건드리지 않게
 
 -- Slots 폴더의 Slot1..SlotN을 번호 순서로 모은다
 local function collectSlots(field: Instance): { BasePart }
@@ -50,7 +55,56 @@ local function placeOnTop(item: Instance, slot: BasePart)
     end
 end
 
-local function spawnPanel(index: number)
+local function pivotOf(item: Instance): CFrame
+    if item:IsA("Model") then
+        return item:GetPivot()
+    elseif item:IsA("BasePart") then
+        return item.CFrame
+    end
+    return CFrame.identity
+end
+
+local function setPivot(item: Instance, cframe: CFrame)
+    if item:IsA("Model") then
+        item:PivotTo(cframe)
+    elseif item:IsA("BasePart") then
+        item.CFrame = cframe
+    end
+end
+
+-- 펼침 시작 자세: 최종 자세에서 슬롯 기준으로 PANEL_SINK_DEPTH 아래, 슬롯 x축으로 PANEL_FOLD_ANGLE 접힘
+function SolarPanels.unfoldStart(final: CFrame, slot: BasePart): CFrame
+    local slotTop = slot.CFrame * CFrame.new(0, slot.Size.Y / 2, 0)
+    local sunk = slotTop * CFrame.new(0, -Config.PANEL_SINK_DEPTH, 0)
+    local fold = CFrame.Angles(math.rad(Config.PANEL_FOLD_ANGLE), 0, 0)
+    return sunk * fold * slotTop:ToObjectSpace(final)
+end
+
+-- 패널 하나를 시작 자세에서 최종 자세로 보간한다. 끝나면 프롬프트를 다시 켠다
+local function animateUnfold(panel: Instance, slot: BasePart, final: CFrame)
+    local start = SolarPanels.unfoldStart(final, slot)
+    setPivot(panel, start)
+    unfolding += 1
+    SolarPanels.refresh()
+    local myGeneration = generation
+    task.spawn(function()
+        local steps = math.max(1, math.ceil(Config.PANEL_UNFOLD_SECONDS * Config.ANIMATION_HZ))
+        for step = 1, steps do
+            task.wait(Config.PANEL_UNFOLD_SECONDS / steps)
+            if myGeneration ~= generation or panel.Parent == nil then
+                return
+            end
+            local alpha = step / steps
+            local eased = 1 - (1 - alpha) * (1 - alpha) -- 끝에서 부드럽게 멈춘다
+            setPivot(panel, start:Lerp(final, eased))
+        end
+        setPivot(panel, final)
+        unfolding = math.max(0, unfolding - 1)
+        SolarPanels.refresh()
+    end)
+end
+
+local function spawnPanel(index: number, animate: boolean?)
     local slot = slots[index]
     local template = ServerStorage:FindFirstChild("PanelTemplate")
     local folder = panelsFolder
@@ -69,6 +123,14 @@ local function spawnPanel(index: number)
     end
     placeOnTop(panel, slot)
     panel.Parent = folder
+    if animate then
+        animateUnfold(panel, slot, pivotOf(panel))
+    end
+end
+
+-- 펼치는 중인지 (테스트용)
+function SolarPanels.isUnfolding(): boolean
+    return unfolding > 0
 end
 
 -- 프롬프트 문구와 활성 상태를 현재 상태에 맞춘다
@@ -79,22 +141,30 @@ function SolarPanels.refresh()
     end
     local s = ResourceState.get()
     local texts = Config.PROMPT_TEXTS
+    current.ObjectText = texts.solarObject
+    if unfolding > 0 then
+        current.Enabled = false
+        current.ActionText = texts.installing
+        return
+    end
     current.Enabled = s.phase == "playing" and s.panelsInstalled < s.panelsTotal
     local template = if s.panelsInstalledToday >= s.panelsPerDay
         then texts.installTomorrow
         else texts.installPanel
     current.ActionText = string.format(template, s.panelsInstalledToday, s.panelsPerDay)
-    current.ObjectText = texts.solarObject
 end
 
 local function onTriggered(player: Player)
+    if unfolding > 0 then
+        return
+    end
     local ok, newState, message = Simulation.installPanel(ResourceState.get(), Config)
     if not ok then
         ResourceState.notify(player, message, "warn")
         return
     end
     ResourceState.set(newState)
-    spawnPanel(newState.panelsInstalled)
+    spawnPanel(newState.panelsInstalled, true)
     ResourceState.notify(player, message, "good")
     SolarPanels.refresh()
     ResourceState.publish()
@@ -141,6 +211,8 @@ function SolarPanels.attach(base: Model)
 end
 
 function SolarPanels.detach()
+    generation += 1
+    unfolding = 0
     for _, connection in connections do
         connection:Disconnect()
     end

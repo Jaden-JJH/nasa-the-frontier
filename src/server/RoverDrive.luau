@@ -17,6 +17,8 @@ local RoverDrive = {}
 
 local connections: { RBXScriptConnection } = {}
 local boardPrompt: ProximityPrompt? = nil
+local speedMultiplier = 1 -- RoverDamage가 정하는 최고 속도 배율 (파손 3이면 0)
+local applyDrive: (() -> ())? = nil -- 현재 로버의 바퀴 갱신 함수
 -- 첫 탑승 안내를 이미 받은 플레이어 (서버 세션 동안 한 번, 나간 플레이어는 자동으로 빠진다)
 local boardedOnce: { [Player]: boolean } = setmetatable({}, { __mode = "k" }) :: any
 
@@ -121,7 +123,11 @@ function RoverDrive.attach(base: Model)
                 then radius
                 else rv.wheelRadius
             hinge.MotorMaxTorque = seat.Torque
-            hinge.AngularVelocity = throttle * seat.MaxSpeed / wheelRadius * rv.driveSign
+            hinge.AngularVelocity = throttle
+                * seat.MaxSpeed
+                * speedMultiplier
+                / wheelRadius
+                * rv.driveSign
         end
         for _, hinge in steerHinges do
             hinge.TargetAngle = steer * rv.steerAngle * rv.steerSign
@@ -131,7 +137,21 @@ function RoverDrive.attach(base: Model)
     table.insert(connections, seat:GetPropertyChangedSignal("ThrottleFloat"):Connect(update))
     table.insert(connections, seat:GetPropertyChangedSignal("SteerFloat"):Connect(update))
     table.insert(connections, seat:GetPropertyChangedSignal("Occupant"):Connect(update))
+    applyDrive = update
     update()
+end
+
+-- 파손에 따른 최고 속도 배율. 스로틀을 그대로 누르고 있어도 바로 반영되게 바퀴를 다시 맞춘다
+function RoverDrive.setSpeedMultiplier(multiplier: number)
+    speedMultiplier = math.clamp(multiplier, 0, 1)
+    local apply = applyDrive
+    if apply then
+        apply()
+    end
+end
+
+function RoverDrive.getSpeedMultiplier(): number
+    return speedMultiplier
 end
 
 function RoverDrive.detach()
@@ -139,6 +159,7 @@ function RoverDrive.detach()
         connection:Disconnect()
     end
     table.clear(connections)
+    applyDrive = nil
     if boardPrompt then
         boardPrompt:Destroy()
         boardPrompt = nil

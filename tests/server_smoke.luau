@@ -375,6 +375,15 @@ end)
 roblox.implementProperty("ProximityPrompt", "Triggered", function(inst)
     return signalFor(inst, "Triggered")
 end)
+-- 로버 파손 감지 (RoverDamage): 파트 Touched, RunService.Heartbeat (스모크에서는 직접 Fire한다)
+for _, className in { "Part", "VehicleSeat", "WedgePart", "MeshPart", "UnionOperation" } do
+    roblox.implementProperty(className, "Touched", function(inst)
+        return signalFor(inst, "Touched")
+    end)
+end
+roblox.implementProperty("RunService", "Heartbeat", function(inst)
+    return signalFor(inst, "Heartbeat")
+end)
 roblox.implementProperty("RemoteEvent", "OnServerEvent", function(inst)
     return signalFor(inst, "OnServerEvent")
 end)
@@ -565,7 +574,50 @@ end
 
 check(Workspace:FindFirstChild("LandingPads") ~= nil, "DevMap: LandingPads 생성")
 check(#Workspace.LandingPads:GetChildren() == 4, "DevMap: 패드 4개")
-check(#Workspace.IceSites:GetChildren() == 3, "DevMap: 얼음 3곳")
+check(
+    #Workspace.IceSites:GetChildren() == #Config.ICE_SITES and #Config.ICE_SITES == 8,
+    "DevMap: 얼음 매장지 8곳"
+)
+do
+    local attrsOk, total = true, 0
+    for index, def in Config.ICE_SITES do
+        local ice = Workspace.IceSites:FindFirstChild("Ice" .. index)
+        total += def.deposit
+        if
+            not ice
+            or ice:GetAttribute("Deposit") ~= def.deposit
+            or ice:GetAttribute("DepositMax") ~= def.deposit
+            or ice:GetAttribute("Difficulty") ~= def.difficulty
+            or math.abs(ice.CFrame.Position.X - def.x) > 1e-3
+            or math.abs(ice.CFrame.Position.Z - def.z) > 1e-3
+        then
+            attrsOk = false
+        end
+    end
+    check(
+        attrsOk,
+        "Ice1..Ice8 위치와 Attribute Deposit, DepositMax, Difficulty = Config.ICE_SITES"
+    )
+    check(total >= 390 and total <= 400, "매장량 합계 " .. total .. " W (390 ~ 400)")
+    -- mid는 어느 착륙 패드에서도 350 이상, hard는 500 이상 (패드 최근접 얼음은 예외: 첫 원정 설계)
+    local distOk = true
+    for index, def in Config.ICE_SITES do
+        local p = Vector3.new(def.x, 0, def.z)
+        for i = 1, 4 do
+            local pad = Workspace.LandingPads["Pad" .. i].CFrame.Position
+            local d = Vector3.new(pad.X - p.X, 0, pad.Z - p.Z).Magnitude
+            local isCorridor = Config.DEV_MAP.padLayout[i].ice == index
+            local minimum = if def.difficulty == "hard"
+                then 500
+                elseif def.difficulty == "mid" then 350
+                else 0
+            if not isCorridor and d < minimum - 1e-3 then
+                distOk = false
+            end
+        end
+    end
+    check(distOk, "mid 매장지는 모든 패드에서 350 이상, hard는 500 이상")
+end
 local kit = ServerStorage:FindFirstChild("BaseKit")
 check(
     kit ~= nil and kit.PrimaryPart ~= nil and kit.PrimaryPart.Name == "Origin",
@@ -862,6 +914,40 @@ local function runTerrainChecks()
         corridorHits == 0,
         "폭 24 주행 회랑에 크레이터와 언덕 없음 (침범 " .. corridorHits .. ")"
     )
+    -- 위험 경로 (2026-10-18): 각 패드에서 mid(650 안), hard(850 안) 매장지로 가는 직선 40 안의 크레이터
+    local routeCraters = 0
+    for _, crater in craterCircles do
+        local onRoute = false
+        for i = 1, 4 do
+            local pad = Workspace.LandingPads["Pad" .. i].CFrame.Position
+            for index, def in Config.ICE_SITES do
+                local reach = if def.difficulty == "mid"
+                    then Config.DEV_MAP.routeMidReach
+                    elseif def.difficulty == "hard" then Config.DEV_MAP.routeHardReach
+                    else 0
+                local to = Vector3.new(def.x, 0, def.z)
+                if
+                    reach > 0
+                    and Config.DEV_MAP.padLayout[i].ice ~= index
+                    and flatDistance(pad, to) <= reach
+                    and segmentDistance(crater.center, pad, to) <= 40
+                then
+                    onRoute = true
+                end
+            end
+        end
+        if onRoute then
+            routeCraters += 1
+        end
+    end
+    check(
+        craters >= 75 and routeCraters >= 20,
+        string.format(
+            "크레이터 %d개 (75 이상), mid/hard 경로 직선 40 안 %d개 (20 이상)",
+            craters,
+            routeCraters
+        )
+    )
     check(
         craters >= 45 and smallCraters == 0 and bigCraters == 0,
         "크레이터 "
@@ -981,7 +1067,8 @@ local function runTerrainChecks()
     -- 바위 3층 (약 220): 기지 둘레, 회랑 옆, 산포. 회랑 안과 판 + 6 안에 없음, 크레이터 밖, 약 10%는 2배 크기
     local boulders = Workspace.DevTerrain.Boulders:GetChildren()
     local dev = Config.DEV_MAP
-    local layers = { ring = 0, corridor = 0, scatter = 0, near = 0 }
+    local layers = { ring = 0, corridor = 0, scatter = 0, near = 0, hardRing = 0 }
+    local hardRingCount = {} -- hard 매장지별 고리 바위 (얼음 중심 25 ~ 45 + 여유)
     local ringBand = { 0, 0, 0, 0 } -- 착륙지별 판 + 6 ~ + 45 띠 안 바위 (층 무관)
     local nearBandRocks, coreFarRocks, outerRocks, outOfMap = 0, 0, 0, 0
     local inCorridor, blocked, inCrater, big, badRing = 0, 0, 0, 0, 0
@@ -1033,8 +1120,17 @@ local function runTerrainChecks()
             if flatDistance(p, ice) < 15 then
                 blocked += 1
             end
-            if flatDistance(p, ice) < dev.iceBoulderCapRadius then
+            -- hard 고리 바위는 얼음 주변 상한에 세지 않는다 (DevMap 5층)
+            if layer ~= "hardRing" and flatDistance(p, ice) < dev.iceBoulderCapRadius then
                 nearIce[index] += 1
+            end
+        end
+        if layer == "hardRing" then
+            for index, def in Config.ICE_SITES do
+                local d = flatDistance(p, Vector3.new(def.x, 0, def.z))
+                if def.difficulty == "hard" and d >= 25 - 1e-3 and d <= 45 + 1e-3 then
+                    hardRingCount[index] = (hardRingCount[index] or 0) + 1
+                end
             end
         end
         for _, crater in craterCircles do
@@ -1058,16 +1154,36 @@ local function runTerrainChecks()
             and layers.corridor >= sum(dev.boulderCountBySite) * 0.9
             and layers.scatter >= dev.scatterBoulders * 0.9
             and layers.near > 0
-            and #boulders == layers.ring + layers.corridor + layers.scatter + layers.near,
+            and #boulders
+                == layers.ring + layers.corridor + layers.scatter + layers.near + layers.hardRing,
         string.format(
-            "바위 %d개: 기지 둘레 %d, 회랑 옆 %d, 산포 %d, 기지 근처 산포 %d",
+            "바위 %d개: 기지 둘레 %d, 회랑 옆 %d, 산포 %d, 기지 근처 산포 %d, hard 고리 %d",
             #boulders,
             layers.ring,
             layers.corridor,
             layers.scatter,
-            layers.near
+            layers.near,
+            layers.hardRing
         )
     )
+    do
+        local ringsOk, parts = true, {}
+        for index, def in Config.ICE_SITES do
+            if def.difficulty == "hard" then
+                local n = hardRingCount[index] or 0
+                table.insert(parts, "Ice" .. index .. " " .. n)
+                if n < dev.hardRingRocks[1] or n > dev.hardRingRocks[2] then
+                    ringsOk = false
+                end
+            end
+        end
+        check(
+            ringsOk,
+            "hard 매장지마다 반지름 25 ~ 45 바위 고리 12 ~ 20개 ("
+                .. table.concat(parts, ", ")
+                .. ")"
+        )
+    end
     local ringOk = true
     for i = 1, 4 do
         if ringBand[i] < dev.baseRingBouldersBySite[i] or ringBand[i] < 35 then
@@ -1496,8 +1612,9 @@ check(
 )
 check(
     base.ModulePads.PadA:FindFirstChild("Built") == nil
-        and base.ModulePads.PadA:FindFirstChild("Ghost") == nil,
-    "Ghost, Built 숨김"
+        and base.ModulePads.PadA:FindFirstChild("Ghost") ~= nil
+        and base.ModulePads.PadB:FindFirstChild("Ghost") == nil,
+    "착공 가능한 A만 Ghost 미리보기, Built 숨김"
 )
 check(string.find(state().missionText, "패널", 1, true) ~= nil, "미션: " .. state().missionText)
 
@@ -1510,9 +1627,49 @@ check(
         and installPrompt.RequiresLineOfSight == false,
     "InstallPad 프롬프트 설정"
 )
-for _ = 1, 4 do
-    signalFor(installPrompt, "Triggered"):Fire(alice)
+-- 설치 연출 (2026-10-18): 홀드가 끝나면 패널이 슬롯 아래에서 접힌 채 올라와 PANEL_UNFOLD_SECONDS 동안 펼쳐진다
+local unfoldSpent = 0 -- 이 구간에서 쓴 시간 (아래 첫 DayTick 시점을 예전과 맞춘다)
+local function slotTopY(slot)
+    return slot.CFrame.Position.Y + slot.Size.Y / 2
 end
+signalFor(installPrompt, "Triggered"):Fire(alice)
+advance(0)
+check(state().panelsInstalled == 1, "홀드가 끝나면 바로 1장 반영")
+check(
+    installPrompt.Enabled == false and installPrompt.ActionText == Config.PROMPT_TEXTS.installing,
+    "펼치는 동안 설치 프롬프트 꺼짐, ActionText '설치 중'"
+)
+do
+    local slot = base.SolarField.Slots.Slot1
+    local frame = base.SolarField.Panels.Panel1.Frame
+    check(
+        frame.CFrame.Position.Y < slotTopY(slot) - 0.5,
+        string.format(
+            "펼치기 시작: 패널이 슬롯 윗면 아래에서 시작 (%.2f < %.2f)",
+            frame.CFrame.Position.Y,
+            slotTopY(slot)
+        )
+    )
+end
+signalFor(installPrompt, "Triggered"):Fire(alice)
+advance(0)
+check(state().panelsInstalled == 1, "펼치는 중 설치 요청은 무시")
+advance(Config.PANEL_UNFOLD_SECONDS / 2)
+unfoldSpent += Config.PANEL_UNFOLD_SECONDS / 2
+check(installPrompt.Enabled == false, "펼치는 중간에도 프롬프트 꺼짐")
+advance(Config.PANEL_UNFOLD_SECONDS / 2 + 0.1)
+unfoldSpent += Config.PANEL_UNFOLD_SECONDS / 2 + 0.1
+check(
+    installPrompt.Enabled == true
+        and installPrompt.ActionText == string.format(Config.PROMPT_TEXTS.installPanel, 1, 3),
+    "펼침이 끝나면 프롬프트 다시 켜짐 '" .. installPrompt.ActionText .. "'"
+)
+for _ = 1, 2 do
+    signalFor(installPrompt, "Triggered"):Fire(alice)
+    advance(Config.PANEL_UNFOLD_SECONDS + 0.1)
+    unfoldSpent += Config.PANEL_UNFOLD_SECONDS + 0.1
+end
+signalFor(installPrompt, "Triggered"):Fire(alice)
 advance(0)
 check(
     state().panelsInstalled == 3 and state().panelsInstalledToday == 3,
@@ -1544,8 +1701,13 @@ check(
             - panel1.Frame.Size.Y / 2
             - (slot1.CFrame.Position.Y + slot1.Size.Y / 2)
     ) < 0.01,
-    "패널이 슬롯 윗면에 놓임"
+    "펼침이 끝난 패널이 슬롯 윗면에 놓임 (최종 자세)"
 )
+do
+    -- 최종 자세는 슬롯과 같은 방향 (펼침 각도 0)
+    local look = panel1.Frame.CFrame.UpVector:Dot(slot1.CFrame.UpVector)
+    check(math.abs(look - 1) < 1e-4, "펼침이 끝난 패널이 슬롯과 평행")
+end
 do
     local fillX, fillZ = panelFill(panel1, slot1)
     check(
@@ -1558,7 +1720,7 @@ do
     )
 end
 
-advance(Config.DAY_SECONDS)
+advance(Config.DAY_SECONDS - unfoldSpent)
 check(
     state().day == 2
         and state().energy == Config.START.energy + 3 * Config.PANEL_OUTPUT
@@ -1674,13 +1836,95 @@ check(
 signalFor(icePrompt, "Triggered"):Fire(bob)
 advance(0)
 check(state().rover.tank == 0, "운전자가 아닌 Bob의 채취 거부")
+-- 매장량 (2026-10-18): Ice1은 mid 30 W. 탱크 빈 공간(40)보다 적으므로 30만 채우고 매장지가 고갈된다
+local ice1Deposit = Config.ICE_SITES[1].deposit
+check(
+    icePrompt.ObjectText == string.format(Config.PROMPT_TEXTS.iceObjectAmount, ice1Deposit),
+    "얼음 프롬프트 ObjectText에 남은 매장량 '" .. icePrompt.ObjectText .. "'"
+)
 signalFor(icePrompt, "Triggered"):Fire(alice)
 advance(0)
 check(
-    state().rover.tank == 40 and seat:GetAttribute("Tank") == 40,
-    "탱크 만충 40, Attribute 반영"
+    state().rover.tank == ice1Deposit and seat:GetAttribute("Tank") == ice1Deposit,
+    "채취량 = min(탱크 빈 공간, 매장량) = " .. ice1Deposit .. ", Attribute 반영"
 )
-check(state().missionStage == "unload", "만충하면 단계 unload")
+check(
+    lastSent("Notify").args[1] == string.format(Config.TEXTS.iceExtracted, ice1Deposit, 0)
+        and lastSent("Notify").args[2] == "good",
+    "채취 알림 '" .. tostring(lastSent("Notify").args[1]) .. "'"
+)
+check(
+    ice1:GetAttribute("Deposit") == 0 and ice1:GetAttribute("DepositMax") == ice1Deposit,
+    "Ice1 Deposit 0, DepositMax 유지"
+)
+do
+    local glow = ice1:FindFirstChild("IceGlow")
+    local light = glow and glow:FindFirstChildOfClass("PointLight")
+    local patch = ice1:FindFirstChild("MinedPatch")
+    check(
+        light ~= nil
+            and light.Enabled == false
+            and patch ~= nil
+            and math.abs(patch.Size.X - 10) < 1e-3
+            and math.abs(patch.Size.Y - 0.2) < 1e-3
+            and ice1.Transparency == 1,
+        "고갈: 빛 끔, 결정 숨김, 어두운 10 x 0.2 x 10 패치"
+    )
+end
+advance(1)
+check(
+    icePrompt.Enabled == false,
+    "고갈된 매장지는 운전 중 가까워도 프롬프트 꺼짐"
+)
+signalFor(icePrompt, "Triggered"):Fire(alice)
+advance(0)
+check(
+    state().rover.tank == ice1Deposit and lastSent("Notify").args[1] == Config.TEXTS.iceDepleted,
+    "고갈된 매장지 채취 요청 거부와 안내"
+)
+-- 결정 크기: 절반 남은 매장지는 원래 크기의 0.5배 (하한 0.35), 바닥은 그대로
+do
+    local ice2 = Workspace.IceSites.Ice2
+    local WaterLoop = loadModule(Server:FindFirstChild("WaterLoop"))
+    local size0, bottom0 = ice2.Size, ice2.CFrame.Position.Y - ice2.Size.Y / 2
+    seat.CFrame = ice2.CFrame * CFrame.new(0, 0, 12)
+    advance(1)
+    local prompt2 = ice2:FindFirstChildOfClass("ProximityPrompt")
+    -- 탱크를 비워 두고 반만 캔다: 매장량을 직접 맞춘 뒤 다시 채취
+    ResourceState.patch(function(st)
+        st.rover.tank = st.rover.tankMax - Config.ICE_SITES[2].deposit / 2
+    end)
+    signalFor(prompt2, "Triggered"):Fire(alice)
+    advance(0)
+    local half = ice2:GetAttribute("Deposit")
+    check(
+        half == Config.ICE_SITES[2].deposit / 2 and state().rover.tank == state().rover.tankMax,
+        "탱크 빈 공간만큼만 채취, 매장량 " .. tostring(half) .. " 남음"
+    )
+    check(
+        math.abs(ice2.Size.X - size0.X * 0.5) < 1e-3
+            and math.abs((ice2.CFrame.Position.Y - ice2.Size.Y / 2) - bottom0) < 1e-3,
+        string.format(
+            "남은 비율 0.5만큼 결정 크기 축소, 바닥 고정 (%.2f)",
+            ice2.Size.X / size0.X
+        )
+    )
+    -- 탱크가 가득 차면 채취 거부 (info)
+    signalFor(prompt2, "Triggered"):Fire(alice)
+    advance(0)
+    check(
+        lastSent("Notify").args[1] == Config.TEXTS.tankAlreadyFull
+            and lastSent("Notify").args[2] == "info",
+        "탱크가 가득 차 있으면 info 안내"
+    )
+    -- 원래대로 (아래 하역 검사는 Ice1의 30 W 기준)
+    ResourceState.patch(function(st)
+        st.rover.tank = ice1Deposit
+    end)
+    WaterLoop.mirrorTank()
+    ice2:SetAttribute("Deposit", Config.ICE_SITES[2].deposit)
+end
+check(state().missionStage == "unload", "물을 실으면(만충이 아니어도) 단계 unload")
 seat.CFrame = ice1.CFrame * CFrame.new(0, 0, 60)
 advance(1)
 check(icePrompt.Enabled == false, "멀어지면 비활성")
@@ -1695,7 +1939,7 @@ local water0 = state().water
 signalFor(tankPrompt, "Triggered"):Fire(bob)
 advance(0)
 check(
-    state().water == water0 and state().rover.tank == 40,
+    state().water == water0 and state().rover.tank == ice1Deposit,
     "로버가 멀리 있으면 하역 거부"
 )
 check(
@@ -1703,11 +1947,65 @@ check(
     "하역 거부 안내"
 )
 seat.CFrame = base.WaterTank.CFrame * CFrame.new(6, 0, 0)
+-- 처리 전력 부족: 에너지 5면 1 W당 0.5라 10 W만 처리하고 나머지는 탱크에 남긴다
+local energyBeforeUnload = state().energy
+ResourceState.patch(function(st)
+    st.energy = 5
+end)
 signalFor(tankPrompt, "Triggered"):Fire(bob)
 advance(0)
 check(
-    state().water == water0 + 40 and state().rover.tank == 0 and state().waterTrips == 1,
-    "하역: 물 +40, 탱크 0, 원정 1회"
+    state().water == water0 + 10
+        and state().rover.tank == ice1Deposit - 10
+        and state().energy == 0
+        and state().waterTrips == 1,
+    string.format(
+        "전력 5로 물 10 W만 처리, 탱크 %d 남음, 에너지 0",
+        state().rover.tank
+    )
+)
+do
+    local warned = false
+    for i = #sent, math.max(1, #sent - 4), -1 do
+        local s = sent[i]
+        if
+            s.name == "Notify"
+            and s.args[1] == string.format(Config.TEXTS.waterPartial, 10)
+            and s.args[2] == "warn"
+        then
+            warned = true
+        end
+    end
+    check(warned, "일부만 처리하면 warn 알림")
+end
+-- 에너지 0이면 처리할 수 없다
+signalFor(tankPrompt, "Triggered"):Fire(bob)
+advance(0)
+check(
+    state().rover.tank == ice1Deposit - 10
+        and lastSent("Notify").args[2] == "warn"
+        and string.find(lastSent("Notify").args[1], "전력이 부족해", 1, true) ~= nil,
+    "에너지 0이면 하역 거부 (warn)"
+)
+ResourceState.patch(function(st)
+    st.energy = energyBeforeUnload
+end)
+signalFor(tankPrompt, "Triggered"):Fire(bob)
+advance(0)
+check(
+    state().water == water0 + ice1Deposit
+        and state().rover.tank == 0
+        and state().waterTrips == 2
+        and math.abs(
+                state().energy
+                    - (energyBeforeUnload - (ice1Deposit - 10) * Config.WATER_PROCESS_ENERGY_PER_W)
+            )
+            < 1e-6,
+    string.format(
+        "나머지 하역: 물 합계 +%d, 탱크 0, 하역 2회, 1 W당 전력 %.1f",
+        ice1Deposit,
+        Config.WATER_PROCESS_ENERGY_PER_W
+    )
 )
 check(seat:GetAttribute("Tank") == 0, "Tank Attribute 0")
 check(state().missionStage == "build_A", "하역하면 단계 build_A")
@@ -1963,6 +2261,204 @@ do
     check(signs == 0, "모듈 패드에 서버 BillboardGui 표지판 없음")
 end
 
+-- 로버 파손과 수리 (2026-10-18) --------------------------------------------
+print("[로버 파손]")
+do
+    local RoverDamage = loadModule(Server:FindFirstChild("RoverDamage"))
+    local RoverDrive = loadModule(Server:FindFirstChild("RoverDrive"))
+    local d = Config.ROVER_DAMAGE
+    local rock = nil
+    for _, b in Workspace.DevTerrain.Boulders:GetChildren() do
+        if b:IsA("BasePart") then
+            rock = b
+            break
+        end
+    end
+    check(rock ~= nil and rock:GetAttribute("BoulderLayer") ~= nil, "바위 파트에 BoulderLayer")
+    local function repairPromptOf(rover)
+        for _, p in rover.Chassis:GetChildren() do
+            if p:IsA("ProximityPrompt") and p.ActionText == Config.PROMPT_TEXTS.repairRover then
+                return p
+            end
+        end
+        return nil
+    end
+    local rover = newRover
+    local repair = repairPromptOf(rover)
+    check(
+        repair ~= nil
+            and repair.ObjectText == "로버"
+            and repair.HoldDuration == d.repairHold
+            and repair.MaxActivationDistance == d.promptDistance
+            and repair.KeyboardKeyCode == roblox.Enum.KeyCode.R
+            and repair.Style == roblox.Enum.ProximityPromptStyle.Custom
+            and repair.Enabled == false,
+        "섀시에 수리 프롬프트 (로버, 수리, R, 홀드 4, 거리 8, Custom), 파손 0이면 꺼짐"
+    )
+    local function hitWith(part, speed)
+        rover.Chassis.AssemblyLinearVelocity = Vector3.new(speed, 0, 0)
+        signalFor(part, "Touched"):Fire(rock)
+        advance(0)
+        rover.Chassis.AssemblyLinearVelocity = Vector3.zero
+    end
+    hitWith(rover.Chassis, 10)
+    check(state().rover.damage == 0, "속도 10 충돌은 파손 없음")
+    hitWith(rover.Chassis, 16)
+    check(state().rover.damage == 1, "속도 16 충돌은 파손 1")
+    do
+        local toDriver, toOthers = false, false
+        for i = #sent, math.max(1, #sent - 6), -1 do
+            local s = sent[i]
+            if s.name == "Notify" and s.target == alice and s.args[1] == "로버 파손 1/3" then
+                toDriver = s.args[2] == "warn"
+            end
+            if
+                s.name == "Notify"
+                and s.target == bob
+                and s.args[1] == "로버가 바위에 부딪혔습니다 (파손 1/3)"
+            then
+                toOthers = s.args[2] == "warn"
+            end
+        end
+        check(
+            toDriver and toOthers,
+            "운전자에게 '로버 파손 1/3', 다른 대원에게 충돌 알림 (warn)"
+        )
+    end
+    check(
+        math.abs(RoverDrive.getSpeedMultiplier() - (1 - d.speedPenaltyPerDamage)) < 1e-9,
+        "파손 1이면 최고 속도 0.8배"
+    )
+    hitWith(rover.Chassis, 16)
+    check(state().rover.damage == 1, "1초 안의 두 번째 충돌은 한 번으로 셈")
+    advance(d.hitCooldown + 0.1)
+    -- 바위가 아닌 파트와의 접촉은 무시
+    rover.Chassis.AssemblyLinearVelocity = Vector3.new(30, 0, 0)
+    signalFor(rover.Chassis, "Touched"):Fire(Workspace.LandingPads.Pad1)
+    advance(0)
+    check(state().rover.damage == 1, "바위가 아닌 파트와 충돌은 무시")
+    -- 바퀴로 부딪혀도 센다
+    local wheel = nil
+    for _, part in rover:GetChildren() do
+        if part:IsA("BasePart") and string.sub(part.Name, 1, 5) == "Wheel" then
+            wheel = part
+            break
+        end
+    end
+    hitWith(wheel, 16)
+    check(state().rover.damage == 2, "바퀴 충돌도 파손 2")
+    advance(d.hitCooldown + 0.1)
+    hitWith(rover.Chassis, 16)
+    check(
+        state().rover.damage == 3
+            and state().rover.broken == true
+            and RoverDrive.getSpeedMultiplier() == 0
+            and lastSent("StateUpdate").args[1].rover.broken == true
+            and lastSent("StateUpdate").args[1].rover.damage == 3,
+        "세 번째 충돌: 파손 3, broken, 속도 배율 0, StateUpdate 반영"
+    )
+    check(
+        state().missionText == string.format(Config.MISSION_TEXTS.roverBroken, d.repairEnergy),
+        "고장이면 미션 '" .. state().missionText .. "'"
+    )
+    do
+        local brokenNotice = false
+        for i = #sent, math.max(1, #sent - 6), -1 do
+            if sent[i].name == "Notify" and sent[i].args[1] == Config.TEXTS.roverBroken then
+                brokenNotice = true
+            end
+        end
+        check(brokenNotice, "고장 알림 '로버 고장. 수리가 필요합니다'")
+    end
+    advance(d.hitCooldown + 0.1)
+    hitWith(rover.Chassis, 25)
+    check(state().rover.damage == 3, "파손은 3을 넘지 않음")
+    check(repair.Enabled == false, "탑승 중에는 수리 프롬프트 꺼짐")
+    signalFor(repair, "Triggered"):Fire(alice)
+    advance(0)
+    check(
+        state().rover.damage == 3 and lastSent("Notify").args[1] == Config.TEXTS.repairOccupied,
+        "탑승 중 수리 요청 거부"
+    )
+    -- 복구하면 파손 0 (Lune은 Occupant에 nil을 넣을 수 없어 로버를 지워 재복제 경로로 복구)
+    rover:Destroy()
+    advance(Config.ROVER_RECOVERY.checkSeconds + 0.1)
+    rover = base:FindFirstChild("Rover")
+    check(
+        rover ~= nil
+            and state().rover.damage == 0
+            and state().rover.broken == false
+            and RoverDrive.getSpeedMultiplier() == 1,
+        "로버 복구는 파손을 0으로 되돌림"
+    )
+    repair = repairPromptOf(rover)
+    check(
+        repair ~= nil and repair.Enabled == false,
+        "재복제한 로버에도 수리 프롬프트 (파손 0이면 꺼짐)"
+    )
+    -- 빈 로버: 운전자가 없으면 모두에게 충돌 알림
+    hitWith(rover.Chassis, 18)
+    check(
+        state().rover.damage == 1
+            and lastSent("Notify").target == "all"
+            and lastSent("Notify").args[1]
+                == "로버가 바위에 부딪혔습니다 (파손 1/3)",
+        "운전자 없는 충돌은 전원에게 알림"
+    )
+    check(repair.Enabled == true, "파손 > 0, 좌석 비어 있으면 수리 프롬프트 켜짐")
+    local energyBefore = state().energy
+    ResourceState.patch(function(st)
+        st.energy = d.repairEnergy - 1
+    end)
+    signalFor(repair, "Triggered"):Fire(bob)
+    advance(0)
+    check(
+        state().rover.damage == 1
+            and lastSent("Notify").args[1] == string.format(
+                Config.TEXTS.repairNeedEnergy,
+                d.repairEnergy
+            )
+            and lastSent("Notify").args[2] == "warn",
+        "전력 부족이면 수리 거부 '" .. lastSent("Notify").args[1] .. "'"
+    )
+    ResourceState.patch(function(st)
+        st.energy = 50
+    end)
+    signalFor(repair, "Triggered"):Fire(bob)
+    advance(0)
+    check(
+        state().rover.damage == 0
+            and state().energy == 50 - d.repairEnergy
+            and lastSent("Notify").args[1] == Config.TEXTS.repairDone
+            and lastSent("Notify").args[2] == "good"
+            and repair.Enabled == false
+            and RoverDrive.getSpeedMultiplier() == 1,
+        "수리 성공: 전력 -10, 파손 0, 알림, 프롬프트 꺼짐"
+    )
+    ResourceState.patch(function(st)
+        st.energy = energyBefore
+    end)
+    -- 끄기: Config.ROVER_DAMAGE.enabled = false면 감지, 프롬프트, 속도 감소가 모두 없다
+    d.enabled = false
+    RoverDamage.attach(base)
+    check(repairPromptOf(rover) == nil, "끄면 수리 프롬프트 없음")
+    advance(d.hitCooldown + 0.1)
+    hitWith(rover.Chassis, 30)
+    check(
+        state().rover.damage == 0
+            and RoverDamage.registerHit(30) == false
+            and RoverDrive.getSpeedMultiplier() == 1,
+        "끄면 충돌해도 파손 없음, 속도 배율 1"
+    )
+    d.enabled = true
+    RoverDamage.attach(base)
+    check(repairPromptOf(rover) ~= nil, "다시 켜면 수리 프롬프트")
+    -- 다음 단계는 Alice가 로버에 탄 상태를 이어 쓴다
+    rover.DriverSeat:Sit(humanoid)
+    advance(0)
+    newRover = rover
+end
+
 -- 건설 -----------------------------------------------------------------
 print("[건설]")
 local padAPrompt = base.ModulePads.PadA.Pad:FindFirstChildOfClass("ProximityPrompt")
@@ -1990,11 +2486,89 @@ check(
     state().modules.A.status == "building" and state().energy == 940 and state().water == 980,
     "A 착공, 비용 차감"
 )
-check(base.ModulePads.PadA:FindFirstChild("Ghost") ~= nil, "건설 중 Ghost 표시")
+local wasteSentBefore = 0
+for _, s in sent do
+    if s.name == "Notify" and s.args[1] == Config.TEXTS.energyWasted then
+        wasteSentBefore += 1
+    end
+end
 check(padAPrompt.Enabled == false, "건설 중 프롬프트 비활성")
+-- 건설 연출 (2026-10-18): 착공하면 Ghost를 숨기고 Built가 완전히 묻힌 자리(바닥 = 지면 - 높이)에서 진행률만큼 올라온다
+local Construction = loadModule(Server:FindFirstChild("Construction"))
+local risingBuiltA = base.ModulePads.PadA:FindFirstChild("Built")
+local builtHeightA = 0
+do
+    local _, size = risingBuiltA:GetBoundingBox()
+    builtHeightA = size.Y
+end
+check(
+    base.ModulePads.PadA:FindFirstChild("Ghost") == nil
+        and risingBuiltA ~= nil
+        and risingBuiltA.Parent ~= nil,
+    "착공하면 Ghost 숨기고 Built가 나타남"
+)
+check(
+    math.abs(Construction.builtOffset("A") + builtHeightA) < 1e-6,
+    string.format(
+        "착공 직후 Built 완전히 묻힘 (오프셋 %.2f, 높이 %.2f)",
+        Construction.builtOffset("A"),
+        builtHeightA
+    )
+)
+do
+    local anyCollide = false
+    for _, d in risingBuiltA:GetDescendants() do
+        if d:IsA("BasePart") and d.CanCollide then
+            anyCollide = true
+        end
+    end
+    check(not anyCollide, "올라오는 동안 Built 충돌 꺼짐")
+end
+check(
+    math.abs(Construction.riseOffset(10, 0.5) + 5) < 1e-9
+        and Construction.riseOffset(10, 0) == -10
+        and Construction.riseOffset(10, 1) == 0,
+    "riseOffset: 진행률 50%면 높이의 절반만큼 묻힘"
+)
 local dayStart = state().day
-advance(Config.DAY_SECONDS * Config.MODULES.A.buildDays)
+advance(Config.DAY_SECONDS * 2 + Config.BUILD_RISE_SECONDS + 0.1)
+do
+    local progress = state().modules.A.progress
+    local expected = -builtHeightA * (1 - progress)
+    check(
+        state().modules.A.status == "building"
+            and math.abs(progress - 0.4) < 1e-6
+            and math.abs(Construction.builtOffset("A") - expected) < 1e-6,
+        string.format(
+            "진행률 %.0f%%: Built 오프셋 %.2f (기대 %.2f)",
+            progress * 100,
+            Construction.builtOffset("A"),
+            expected
+        )
+    )
+end
+advance(
+    Config.DAY_SECONDS * Config.MODULES.A.buildDays
+        - (Config.DAY_SECONDS * 2 + Config.BUILD_RISE_SECONDS + 0.1)
+)
 check(state().day == dayStart + 5 and state().modules.A.status == "active", "5일 뒤 A 가동")
+check(Construction.builtOffset("A") == 0, "완공하면 Built 최종 위치")
+do
+    -- 저장 상한: 940을 들고 있으면 첫 DayTick에 상한(150)으로 잘리고 한 번 알린다. 계속 버려지면 5일마다
+    local wasteSent = -wasteSentBefore
+    for _, s in sent do
+        if s.name == "Notify" and s.args[1] == Config.TEXTS.energyWasted then
+            wasteSent += 1
+            if s.args[2] ~= "warn" then
+                wasteSent = -100
+            end
+        end
+    end
+    check(
+        wasteSent >= 1 and wasteSent <= 2,
+        "배터리 가득 참 알림 (warn) " .. wasteSent .. "회 (5일 동안 1 ~ 2회)"
+    )
+end
 check(
     base.ModulePads.PadA:FindFirstChild("Built") ~= nil
         and base.ModulePads.PadA:FindFirstChild("Ghost") == nil,
@@ -2070,6 +2644,20 @@ end
 
 -- 승리 ------------------------------------------------------------------
 print("[승리]")
+-- 저장 상한 (2026-10-18): A, B 가동이면 150 + 2 x 100. 위에서 넣은 1000은 DayTick마다 상한으로 잘렸다
+check(
+    state().energyCap == Config.ENERGY_CAP_BASE + 2 * Config.ENERGY_CAP_PER_MODULE
+        and state().energy <= state().energyCap
+        and lastSent("StateUpdate").args[1].energyCap == state().energyCap,
+    string.format(
+        "에너지 상한 %d (A, B 가동), 에너지 %.1f",
+        state().energyCap,
+        state().energy
+    )
+)
+ResourceState.patch(function(s)
+    s.energy = Config.MODULES.C.cost.energy + 50
+end)
 signalFor(padCPrompt, "Triggered"):Fire(alice)
 advance(0)
 check(state().modules.C.status == "building", "C 착공")
@@ -2084,7 +2672,7 @@ local over = lastSent("GameOver")
 check(countSent("GameOver") == overBefore + 1 and over.args[1].won == true, "GameOver won")
 check(
     over.args[1].siteName == "Shackleton Rim"
-        and over.args[1].waterTrips == 1
+        and over.args[1].waterTrips == 2
         and over.args[1].oxygenDeaths == 2,
     "결과 요약 수치 (산소 고갈 1 + 초기화 1)"
 )
@@ -2132,6 +2720,22 @@ check(
     state().phase == "selecting" and state().day == 0 and state().energy == Config.START.energy,
     "재시작: selecting, 상태 초기화"
 )
+do
+    local ice1r = Workspace.IceSites.Ice1
+    local ice2r = Workspace.IceSites.Ice2
+    local glow = ice1r:FindFirstChild("IceGlow")
+    local light = glow and glow:FindFirstChildOfClass("PointLight")
+    check(
+        ice1r:GetAttribute("Deposit") == Config.ICE_SITES[1].deposit
+            and ice1r:FindFirstChild("MinedPatch") == nil
+            and light ~= nil
+            and light.Enabled == true
+            and ice1r.Transparency < 1
+            and math.abs(ice2r.Size.X - 14) < 1e-3
+            and state().rover.damage == 0,
+        "재시작: 매장량, 결정, 빛, 패치, 로버 파손 초기화"
+    )
+end
 check(Workspace:FindFirstChild("Base") == nil, "재시작: Base 제거")
 check(
     lastSent("SiteSelectionOpen").args[1].chooserUserId == 1,
@@ -3139,7 +3743,7 @@ local function runDecorScenario()
         signalFor(field.InstallPad:FindFirstChildOfClass("ProximityPrompt"), "Triggered"):Fire(
             carol
         )
-        advance(0)
+        advance(Config.PANEL_UNFOLD_SECONDS + 0.1) -- 펼침 연출이 끝난 최종 자세를 잰다
         local placed = field.Panels:FindFirstChild("Panel1")
         check(placed ~= nil, "KitImports 패널 1장 설치")
         local fillX, fillZ = panelFill(placed, field.Slots.Slot1)
@@ -3248,7 +3852,10 @@ local function runDecorScenario()
         end
     end
     check(cropsOk, "작물: 크기 2 이하, 앞쪽 반원, 고정, CanCollide 꺼짐")
-    -- C까지 완공: B-C 대각선 통로
+    -- C까지 완공: B-C 대각선 통로 (에너지 저장 상한 때문에 C 비용을 다시 채운다)
+    ResourceState2.patch(function(st)
+        st.energy = Config.MODULES.C.cost.energy
+    end)
     signalFor(padPrompt("C"), "Triggered"):Fire(carol)
     advance(Config.DAY_SECONDS * Config.MODULES.C.buildDays)
     check(ResourceState2.get().phase == "won", "C 완공으로 승리")

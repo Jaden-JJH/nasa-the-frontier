@@ -15,6 +15,16 @@ export type ModuleDef = {
     foodPerDay: number, -- 가동 중 하루 식량 생산 (Farm만 0보다 큼)
 }
 
+export type IceDifficulty = "easy" | "mid" | "hard"
+
+-- 얼음 매장지 하나. 위치(x, z)는 로버 왕복 시간을 정하므로 게임 수치로 본다 (그레이박스 DevMap과 봇 테스트가 같이 쓴다)
+export type IceSiteDef = {
+    x: number,
+    z: number,
+    deposit: number, -- 처음 매장량(W). 채취하면 줄고 0이면 고갈
+    difficulty: IceDifficulty,
+}
+
 export type SiteDef = {
     id: number,
     name: string,
@@ -50,6 +60,18 @@ local Config = {
     PANELS_PER_DAY = 3,
     PANEL_OUTPUT = 1, -- E/일/장, 착륙지 일조율을 곱한다
     PANEL_INSTALL_HOLD = 2,
+    -- 설치 연출: 홀드가 끝나면 패널이 슬롯 아래 PANEL_SINK_DEPTH에서 올라오며 펼쳐진다. 그동안 설치 프롬프트는 꺼진다
+    PANEL_UNFOLD_SECONDS = 1.5,
+    PANEL_SINK_DEPTH = 2,
+    PANEL_FOLD_ANGLE = 70, -- 펼침 시작 각도(도). 슬롯 x축으로 접힌 채 올라와 0도로 펼쳐진다
+    ANIMATION_HZ = 30, -- 서버 위치 보간 주기 (패널 펼침, 모듈 상승)
+
+    -- 에너지 저장 상한 (2026-10-18): 기본 + 가동 모듈 수 x 모듈당. 넘치는 발전은 버려진다
+    ENERGY_CAP_BASE = 150,
+    ENERGY_CAP_PER_MODULE = 100,
+    ENERGY_WASTE_NOTIFY_DAYS = 5, -- 계속 버려지면 이 일수마다 다시 알린다 (매일 토스트는 시끄럽다)
+    -- 물 처리 전력: 하역한 물 1 W당 에너지. 모자라면 처리 가능한 만큼만 하역하고 나머지는 탱크에 남긴다
+    WATER_PROCESS_ENERGY_PER_W = 0.5,
 
     -- 모듈 (건설 순서 A -> B -> C)
     MODULES = {
@@ -83,10 +105,38 @@ local Config = {
     } :: { [string]: ModuleDef },
     MODULE_ORDER = { "A", "B", "C" },
     WIN_MODULE = "C", -- 이 모듈이 가동되면 즉시 승리
+    -- 건설 연출: building 동안 완성 모델이 지면 아래에서 진행률만큼 올라온다. DayTick마다 이 시간 동안 부드럽게
+    BUILD_RISE_SECONDS = 1,
+
+    -- 얼음 매장지 8곳 (2026-10-18: 3곳 고정 무한에서 매장량과 고갈로). 합계 395 W.
+    -- Ice1 ~ Ice3은 착륙 패드별 최근접 얼음(DEV_MAP.iceDistanceBySite, 첫 원정 거리)이라 위치를 바꾸지 않는다.
+    -- Ice1은 Pad1에서 450이라 어느 패드에서도 350 이상 떨어져 mid로 둔다. easy는 Ice2(Pad2, Pad4 공용), Ice3(Pad3)
+    -- mid는 모든 패드에서 350 이상, hard는 500 이상이며 바위 고리와 크레이터 사이에 있다.
+    -- 패드가 남, 동, 서로 흩어져 한 패드가 닿는 매장량이 합계보다 훨씬 적다. 처음 안(합계 275, 탱크 40)은
+    -- Farm 뒤 하루 4 W 소비를 8 ~ 10일 원정으로 메우지 못해 봇이 네 곳 모두 졌다. 매장량 약 1.4배와 탱크 60으로
+    -- 네 곳 모두 41 ~ 50일 승리. Ice3(Malapert 첫 원정)은 30으로 올려 Farm 전 식량 여유 5 이상을 지킨다
+    -- (tests/simulation.spec.luau 현실적 봇)
+    ICE_SITES = {
+        { x = -75, z = 50, deposit = 40, difficulty = "mid" }, -- Ice1: Pad1 450, Pad2 500, Pad3 481
+        { x = 425, z = 350, deposit = 30, difficulty = "easy" }, -- Ice2: Pad2 300, Pad4 100
+        { x = -525, z = 400, deposit = 30, difficulty = "easy" }, -- Ice3: Pad3 180
+        { x = 80, z = 160, deposit = 50, difficulty = "mid" }, -- Ice4: Pad2 362, Pad4 484, Pad1 581, Pad3 608
+        { x = -560, z = -200, deposit = 40, difficulty = "mid" }, -- Ice5: Pad3 421, Pad1 525
+        { x = -20, z = 290, deposit = 70, difficulty = "hard" }, -- Ice6: Pad2 506, Pad3 510, Pad4 548
+        { x = 380, z = -650, deposit = 70, difficulty = "hard" }, -- Ice7: Pad1 519, Pad2 701
+        { x = 950, z = 650, deposit = 65, difficulty = "hard" }, -- Ice8: Pad4 520, Pad2 797
+    } :: { IceSiteDef },
+    ICE_DEFAULT_DEPOSIT = 30, -- 디자이너 맵 얼음에 Deposit Attribute도 없고 번호도 ICE_SITES 밖일 때
+    -- 고갈 표시: 결정 크기 = 남은 / 처음 (하한 minScale). 0이면 결정과 빛을 없애고 어두운 패치를 깐다
+    ICE_VISUAL = {
+        minScale = 0.35,
+        patchSize = { 10, 0.2, 10 },
+        patchColor = { 45, 45, 50 },
+    },
 
     -- 로버와 물
     ROVER = {
-        tankMax = 40,
+        tankMax = 60, -- 40 -> 60 (2026-10-18): hard 매장지(65 ~ 70)를 한 번에 거의 비우고, 8 ~ 10일 원정이 Farm 뒤 소비를 넘게
         fillHold = 3, -- 얼음 지점 E 홀드 시간(초)
         maxSpeed = 18, -- studs/s. VehicleSeat.MaxSpeed 초기값
         -- 바퀴 모터 최대 토크. VehicleSeat.Torque 초기값
@@ -107,6 +157,20 @@ local Config = {
     ICE_PROMPT_DISTANCE = 20, -- 로버와 얼음 파트 표면 사이 거리 기준
     ICE_PROMPT_POLL_SECONDS = 0.5,
     TANK_UNLOAD_DISTANCE = 15, -- 하역하려면 DriverSeat가 WaterTank 파트 표면에서 이 거리 안에 있어야 한다
+
+    -- 로버 파손 (2026-10-18, RoverDamage): 바위(BoulderLayer Attribute)에 speedThreshold 이상으로 부딪히면 +1.
+    -- 파손당 최고 속도 speedPenaltyPerDamage 감소, maxDamage면 정지. 로버 섀시의 "수리" 프롬프트(R 홀드)로 복구
+    ROVER_DAMAGE = {
+        enabled = true,
+        speedThreshold = 15, -- studs/s, 충돌 순간 섀시 AssemblyLinearVelocity 크기
+        hitCooldown = 1, -- 초. 이 안의 연속 접촉은 한 번으로 센다
+        maxDamage = 3,
+        speedPenaltyPerDamage = 0.2,
+        repairHold = 4,
+        repairEnergy = 10,
+        promptDistance = 8,
+        repairKey = "R", -- 탑승 프롬프트(E)와 같은 섀시에 붙으므로 키를 나눈다 (Enum.KeyCode 이름)
+    },
 
     -- 로버 복구 (뒤집힘, 추락, 소실)
     ROVER_RECOVERY = {
@@ -245,6 +309,20 @@ local Config = {
     -- 그레이박스 맵(DevMap) 게임 영향 수치. 레이아웃 좌표는 DevMap.luau 상단 상수에 있다
     DEV_MAP = {
         iceDistanceBySite = { 450, 300, 180, 100 }, -- 패드 중심에서 가장 가까운 얼음 지점까지 studs
+        -- 패드 위치 = ICE_SITES[ice] 위치 + (dirX, dirZ) x iceDistanceBySite (봇 테스트도 이 값으로 거리를 잰다)
+        padLayout = {
+            { ice = 1, dirX = 0, dirZ = -1 },
+            { ice = 2, dirX = 0, dirZ = -1 },
+            { ice = 3, dirX = 0, dirZ = -1 },
+            { ice = 2, dirX = 1, dirZ = 0 },
+        },
+        -- hard 매장지 둘레 바위 고리 (그 지점 iceBoulderCap 대상에서 빠진다)
+        hardRingRocks = { 12, 20 }, -- 지점마다 개수 범위 (시드로 결정)
+        hardRingRadius = { 25, 45 }, -- 얼음 중심에서 바위 중심까지
+        -- 위험 경로 크레이터: 각 패드에서 mid, hard 매장지로 가는 직선 위 (회랑, 판 + 25, 얼음 30 안은 제외)
+        routeCraters = 26, -- hard 양옆 2개씩 포함. 전체 약 80개 (예전 54 + 이것)
+        routeMidReach = 650, -- 이 거리 안의 mid 매장지 경로에 놓는다
+        routeHardReach = 850, -- 이 거리 안의 hard 매장지 경로에 놓는다
         -- 바위 4층 (4차 추가, 합계 약 560): 기지 둘레 고리 + 주행 회랑 양옆 무더기 + 맵 전체 산포 + 기지 근처 추가 산포
         baseRingBouldersBySite = { 36, 40, 40, 46 }, -- 착륙지별 기지 판 둘레 (판 가장자리 + 6 ~ + 45). 어느 기지에서도 약 40개
         boulderCountBySite = { 16, 26, 26, 40 }, -- 착륙지별 주행 회랑 양옆 바위 무더기 (지형 위험)
@@ -273,6 +351,7 @@ local Config = {
             C = "Research Lab C를 착공하세요 (Energy %d, Water %d 필요)",
         } :: { [string]: string },
         building = "%s 건설 중: %d일 남음. 패널과 물을 계속 모으세요",
+        roverBroken = "로버를 수리하세요 (전력 %d)",
         shortage = "경고: %s이 바닥났습니다. %d일 안에 보충하지 않으면 실패합니다",
         won = "임무 성공! 달 기지를 완성했습니다",
         lost = "임무 실패. 재도전으로 다시 시작하세요",
@@ -304,6 +383,18 @@ local Config = {
         moduleUnlocked = "%s 착공 가능",
 
         tankFilled = "로버 탱크 만충 (%dW)",
+        iceExtracted = "얼음 %d W 채취 (남은 매장량 %d)",
+        iceDepleted = "이 얼음 지점은 다 캤습니다. 레이더로 다른 지점을 찾으세요",
+        waterPartial = "전력이 부족해 물 %d W만 처리했습니다. 나머지는 탱크에 남습니다",
+        waterNoEnergy = "전력이 부족해 물을 처리할 수 없습니다. 1 W에 전력 %s이 필요합니다",
+        energyWasted = "배터리가 가득 차 전력이 버려지고 있습니다. 건설을 시작하세요",
+        roverHitDriver = "로버 파손 %d/%d",
+        roverHitOthers = "로버가 바위에 부딪혔습니다 (파손 %d/%d)",
+        roverBroken = "로버 고장. 수리가 필요합니다",
+        repairNeedEnergy = "수리에 전력 %d이 필요합니다",
+        repairDone = "로버 수리 완료",
+        repairNotNeeded = "로버가 멀쩡합니다",
+        repairOccupied = "탑승 중에는 수리할 수 없습니다",
         tankAlreadyFull = "로버 탱크가 이미 가득 찼습니다",
         tankEmpty = "로버 탱크가 비어 있습니다",
         needDriver = "로버 운전석에 앉아 있어야 채취할 수 있습니다",
@@ -347,6 +438,7 @@ local Config = {
         solarObject = "태양광 필드",
         buildObject = "%s 패드",
         iceObject = "얼음",
+        iceObjectAmount = "얼음 (남은 %d W)",
         tankObject = "물탱크",
         recoverObject = "착륙선 콘솔",
         roverObject = "로버",
@@ -359,6 +451,8 @@ local Config = {
         unload = "물 하역",
         recoverRover = "로버 복구",
         recoverCooldown = "로버 복구 (%d초 뒤)",
+        repairRover = "수리",
+        installing = "설치 중",
         board = "탑승",
         openDoor = "열기",
     },

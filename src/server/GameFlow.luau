@@ -15,6 +15,7 @@ local KitImports = require(script.Parent.KitImports)
 local LandingSite = require(script.Parent.LandingSite)
 local Oxygen = require(script.Parent.Oxygen)
 local ResourceState = require(script.Parent.ResourceState)
+local RoverDamage = require(script.Parent.RoverDamage)
 local RoverDrive = require(script.Parent.RoverDrive)
 local RoverRecovery = require(script.Parent.RoverRecovery)
 local ServerUtil = require(script.Parent.ServerUtil)
@@ -27,6 +28,7 @@ local GameFlow = {}
 local started = false
 local lastGameOver: Types.GameOverInfo? = nil -- 결과 화면 정보 (재시작 게이트와 권한자 변경 재송신)
 local lastSpeedRequest: { [Player]: number } = {} -- 플레이어별 마지막 SetSpeed 수락 시각 (os.clock)
+local lastWasteNoticeDay: number? = nil -- 저장 상한으로 전력이 버려진다고 마지막으로 알린 날 (계속 버려지는 동안만 유지)
 
 -- 기지가 놓이면 각 시스템을 연결한다.
 -- Oxygen과 Airlock은 Construction이 Ghost/Built를 빼기 전에 구역과 문을 모아야 하고,
@@ -39,6 +41,7 @@ local function onBasePlaced(base: Model)
     Construction.attach(base)
     WaterLoop.attach(base)
     RoverDrive.attach(base)
+    RoverDamage.attach(base)
     -- 행성을 이 기지에서 가장 가까운 얼음 쪽 하늘로
     ServerUtil.safeCall("KitImports Planet", KitImports.aimPlanetFrom, base:GetPivot().Position)
 end
@@ -50,6 +53,7 @@ local function refreshPrompts(prev: Simulation.GameState?)
     SolarPanels.refresh()
     WaterLoop.refresh()
     RoverRecovery.refresh()
+    RoverDamage.refresh()
 end
 
 -- 착륙 연출이 끝나 playing이 되면 프롬프트를 켜고 시계를 시작한다
@@ -98,6 +102,16 @@ local function onDayTick()
     if new.modulesStalled and not prev.modulesStalled then
         ResourceState.notifyAll(t.modulesStalled, "warn")
     end
+    -- 저장 상한: 버려지기 시작한 날, 그리고 계속 버려지면 ENERGY_WASTE_NOTIFY_DAYS일마다 알린다
+    if new.energyWasted > 0 then
+        local last = lastWasteNoticeDay
+        if last == nil or new.day - last >= Config.ENERGY_WASTE_NOTIFY_DAYS then
+            lastWasteNoticeDay = new.day
+            ResourceState.notifyAll(t.energyWasted, "warn")
+        end
+    else
+        lastWasteNoticeDay = nil
+    end
 
     local result: Simulation.EndResult, reason: string = Simulation.checkEnd(new, Config)
     if result == "won" or result == "lost" then
@@ -119,7 +133,9 @@ end
 -- 새 게임: 상태 초기화 후 착륙지 선택 단계로. leaving은 지금 나가는 중이라 권한자에서 뺄 플레이어
 local function beginNewGame(leaving: Player?)
     lastGameOver = nil
+    lastWasteNoticeDay = nil
     ResourceState.reset()
+    WaterLoop.resetDeposits()
     Oxygen.resetAll()
     ResourceState.publish()
     LandingSite.beginSelection(handlers, leaving)
@@ -136,6 +152,7 @@ local function restart(leaving: Player?)
     SolarPanels.detach()
     Construction.detach()
     WaterLoop.detach()
+    RoverDamage.detach()
     RoverDrive.detach()
     Oxygen.detach()
     local base = ServerUtil.getBase()

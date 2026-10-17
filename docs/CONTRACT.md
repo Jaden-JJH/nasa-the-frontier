@@ -53,7 +53,9 @@ export type GameState = {
     panelsTotal: number,      -- Config.PANELS_TOTAL
     panelsPerDay: number,     -- Config.PANELS_PER_DAY
     modules: { A: ModuleState, B: ModuleState, C: ModuleState },
-    rover: { tank: number, tankMax: number },
+    rover: { tank: number, tankMax: number, damage: number, broken: boolean },  -- damage 0..3 (2026-10-18 추가), broken은 damage >= 3
+    energyCap: number,        -- 2026-10-18 추가. 에너지 저장 상한 = ENERGY_CAP_BASE(150) + 가동 모듈 수 x ENERGY_CAP_PER_MODULE(100)
+    energyWasted: number,     -- 2026-10-18 추가. 오늘 상한 때문에 버려진 전력
     siteId: number?,          -- 선택된 착륙 패드 1..4. selecting 중 nil
     siteName: string?,
     sunlight: number?,        -- 0..1
@@ -127,7 +129,8 @@ export type GameOverInfo = {
 | LandingSite.lua | 선택 단계, 권한자, 타임아웃, BaseKit 복제와 배치 |
 | SolarPanels.lua | InstallPad 프롬프트, 하루 설치 제한, 슬롯에 패널 복제 |
 | Construction.lua | PadA/B/C 프롬프트, 비용 검증, 건설 타이머, 고스트/완성 모델 전환, 선행 조건 |
-| WaterLoop.lua | 로버 탱크(Attribute "Tank"), 얼음 지점 프롬프트(만충), 물탱크 프롬프트(하역, 로버가 TANK_UNLOAD_DISTANCE 안에 있을 때만), 로버 복구(수동 프롬프트 + 자동) |
+| WaterLoop.lua | 로버 탱크(Attribute "Tank"), 얼음 지점 프롬프트(매장량만큼 채움, 고갈 처리), 물탱크 프롬프트(하역, 로버가 TANK_UNLOAD_DISTANCE 안에 있을 때만, 하역 1 W당 WATER_PROCESS_ENERGY_PER_W 에너지 소모, 에너지가 모자라면 처리 가능한 만큼만), 로버 복구(수동 프롬프트 + 자동) |
+| RoverDamage.lua | 2026-10-18 추가. 바위(Attribute BoulderLayer)와 임계 속도 이상 충돌 시 파손 +1(1초 중복 방지), 파손당 최고 속도 감소, 3이면 정지. 로버 섀시의 "수리" 프롬프트(키 R, 홀드 4초, 에너지 10, 좌석 비어 있을 때)로 복구. 탑승 프롬프트(E)와 같은 섀시라 키를 나눔. Config.ROVER_DAMAGE.enabled로 끌 수 있음 |
 | Oxygen.lua | 플레이어별 산소. 실내 판정(OxygenZone 파트 안 또는 VehicleSeat 착석). 0이면 리스폰과 페널티 |
 | GameFlow.lua | phase 전이, 승리/실패 판정, 재시작 |
 | DevMap.lua | Workspace.LandingPads가 없으면 그레이박스 맵과 ServerStorage.BaseKit을 Part로 생성 |
@@ -137,6 +140,7 @@ export type GameOverInfo = {
 - `Simulation.dailyConsumption(state, config) -> energy, water, food` (크루 + 가동 모듈)
 - `Simulation.applyDay(state, config) -> newState` (하루 처리. 에너지 0이면 모듈 정지 규칙 포함)
 - `Simulation.canBuild(state, config, moduleId) -> ok, reasonText`
+- `Simulation.fillFromDeposit(tank, tankMax, deposit) -> fill, newTank, newDeposit` (2026-10-18 추가)
 - `Simulation.checkEnd(state, config) -> "none" | "won" | "lost", reasonText`
 
 ## 4. 맵 인스턴스 계약 (Workspace, ServerStorage)
@@ -149,7 +153,8 @@ Workspace
     Pad1 .. Pad4 (Part, Anchored)   Attributes: SiteName(string), Sunlight(number 0..1),
                                      IceDistanceLabel(string), HazardLabel(string), Description(string)
   IceSites (Folder)
-    Ice1 .. Ice3 (Part, Anchored)   얼음 지점. 로버가 150 studs 안에 오면 레이더 반응
+    Ice1 .. Ice8 (Part, Anchored)   얼음 지점(2026-10-18: 3곳에서 8곳으로, 위치와 매장량은 Config.ICE_SITES). 매장량 easy 30, 30 / mid 40, 50, 40 / hard 70, 70, 65 (합계 395). Attributes: Deposit(number, 남은 매장량 W), DepositMax(number), Difficulty(string: "easy" | "mid" | "hard"). hard 지점은 바위 고리(입구 60도)로 둘러싸임.
+                                     채취하면 Deposit이 줄고 0이면 결정이 사라지며 프롬프트가 꺼진다(Part는 남음). 클라이언트 레이더는 Deposit > 0인 지점만 표시하고 60 studs 안에서 매장량 숫자를 보여 준다
   Base (Model)                      LandingSite가 BaseKit을 복제해 선택 패드 위에 놓은 결과. 시작 시 없음
 
 ServerStorage
@@ -167,7 +172,7 @@ ServerStorage
     ModulePads (Folder)
       PadA, PadB, PadC (Model)    Attribute ModuleId(string, A/B/C). 클라이언트 표지판이 이걸로 찾는다
         Pad (Part)                  ProximityPrompt 부착 대상. ActionText "건설 시작"
-        Ghost (Model)               반투명 미리보기. building 중 표시
+        Ghost (Model)               반투명 미리보기. 착공 가능할 때 표시, 착공하면 숨김(2026-10-18 변경). 건설 중에는 Built가 진행률만큼 땅에서 솟아오름
         Built (Model)               완공 모델. active 전에는 Parent를 ServerStorage로 빼두거나 투명
         OxygenZone (Part)           PadA에만 있음
     WaterTank (Part)                ProximityPrompt. ActionText "물 하역"
@@ -210,7 +215,7 @@ MODULES = {
   C = { name = "Research Lab", cost = { energy = 150, water = 30 }, buildDays = 7, upkeep = { energy = 8, water = 1 }, requires = {"A", "B"} },
 },
 MODULE_ORDER = {"A", "B", "C"},
-ROVER = { tankMax = 40, fillHold = 3 }, ICE_PROMPT_DISTANCE = 20, RADAR_RANGE = 150,
+ROVER = { tankMax = 60, fillHold = 3 }  -- 2026-10-18: 40 -> 60 (매장량 차등과 함께), ICE_PROMPT_DISTANCE = 20, RADAR_RANGE = 150,
 OXYGEN = { max = 100, drainPerSecond = 100 / 60, refillPerSecond = 10, deathPenalty = { food = 1, water = 2 } },
 SHORTAGE_DAYS_TO_LOSE = 3,
 SITES = {

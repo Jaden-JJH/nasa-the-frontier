@@ -1,7 +1,7 @@
 --!strict
 -- 그레이박스 맵 생성기 (CONTRACT 4절)
 -- 디자이너 맵이 없으면 빈 Baseplate에서도 끝까지 플레이할 수 있게 Part로 맵을 만든다.
---   Workspace.LandingPads가 없으면: 지면, 착륙 패드 4곳, 얼음 지점 3곳, 바위, 조명
+--   Workspace.LandingPads가 없으면: 지면, 착륙 패드 4곳, 얼음 매장지 8곳(Config.ICE_SITES), 바위, 조명
 --   ServerStorage.BaseKit이 없으면: 착륙선, 로버, 솔라 필드, 모듈 패드 3개, 물탱크
 --   ServerStorage.PanelTemplate이 없으면: 태양광 패널 1장
 -- 게임 수치(얼음 거리, 바위 수, 로버 성능)는 Config에서 오고, 아래 상수는 배치와 모양만 정한다.
@@ -76,21 +76,29 @@ local RAMP_LANE_HALF = RAMP_WIDTH / 2 + 4 -- 경사로 앞 바위 금지 차선�
 local greyboxTerrainBuilt = false -- 이번 세션에 지형을 켠 그레이박스 맵을 만들었는지 (콘크리트 판 여부)
 local groundStats: GroundStats? = nil -- 이번 세션에 만든 그레이박스 지면 요약 (시작 로그용)
 
--- 얼음 지점 위치 (x, z)
-local ICE_POSITIONS = {
-    Vector3.new(-75, 0, 50),
-    Vector3.new(425, 0, 350),
-    Vector3.new(-525, 0, 400),
-}
+-- 얼음 매장지 위치 (x, z). 왕복 시간이 게임 수치라 Config.ICE_SITES에서 온다 (2026-10-18: 8곳)
+local ICE_POSITIONS: { Vector3 } = {}
+for _, site in Config.ICE_SITES do
+    table.insert(ICE_POSITIONS, Vector3.new(site.x, 0, site.z))
+end
 
--- 각 패드가 기준으로 삼는 얼음 지점과 그 얼음에서 패드 쪽 방향.
+-- 각 패드가 기준으로 삼는 얼음 지점과 그 얼음에서 패드 쪽 방향 (Config.DEV_MAP.padLayout).
 -- 패드 위치 = 얼음 위치 + 방향 x Config.DEV_MAP.iceDistanceBySite[i]
-local PAD_LAYOUT = {
-    { ice = 1, direction = Vector3.new(0, 0, -1) },
-    { ice = 2, direction = Vector3.new(0, 0, -1) },
-    { ice = 3, direction = Vector3.new(0, 0, -1) },
-    { ice = 2, direction = Vector3.new(1, 0, 0) },
-}
+local PAD_LAYOUT: { { ice: number, direction: Vector3 } } = {}
+for _, layout in Config.DEV_MAP.padLayout do
+    table.insert(
+        PAD_LAYOUT,
+        { ice = layout.ice, direction = Vector3.new(layout.dirX, 0, layout.dirZ) }
+    )
+end
+
+-- hard 매장지 둘레 바위 고리와 위험 경로 크레이터 (개수와 범위는 Config.DEV_MAP)
+local HARD_RING_SEED_OFFSET = 2 -- 다른 바위 층과 독립된 난수 흐름 (기존 층 배치를 흔들지 않는다)
+local ROUTE_SEED_OFFSET = 3
+local ROUTE_T_MIN, ROUTE_T_MAX = 0.2, 0.85 -- 패드 -> 매장지 직선에서 크레이터를 놓는 구간 (비율)
+local ROUTE_LATERAL = 35 -- 직선에서 옆으로 벗어나는 최대 거리 (직선 위를 막아 돌아가게)
+local ROUTE_CRATER_RADIUS_MAX = 32
+local HARD_FLANK_DISTANCE = { 85, 115 } -- hard 매장지 중심에서 양옆 크레이터 중심까지 (바위 고리 바깥)
 
 -- 바위 3층: 기지 둘레 고리, 주행 회랑 양옆 무더기, 맵 전체 산포 (개수는 Config.DEV_MAP)
 local APRON_ROCK_GAP = 6 -- 콘크리트 판 가장자리에서 바위 가장자리까지 최소 거리
@@ -405,6 +413,15 @@ local function dressIce(ice: BasePart)
     light.Parent = glow
 end
 
+-- 얼음 매장지 Attribute (CONTRACT 4절): Deposit(남은 양), DepositMax(처음 양), Difficulty
+local function setIceAttributes(ice: BasePart, index: number)
+    local def = Config.ICE_SITES[index]
+    local amount = if def then def.deposit else Config.ICE_DEFAULT_DEPOSIT
+    ice:SetAttribute("Deposit", amount)
+    ice:SetAttribute("DepositMax", amount)
+    ice:SetAttribute("Difficulty", if def then def.difficulty else "mid")
+end
+
 -- 바닥에 놓이는 슬래브: 윗면이 floorY + height, 아래로 EMBED만큼 묻힌다
 local function slabCFrame(base: CFrame, position: Vector3, height: number): (CFrame, number)
     local total = height + EMBED
@@ -533,14 +550,16 @@ type Footprint = { x: number, z: number, r: number }
 type Rect = { minX: number, maxX: number, minZ: number, maxZ: number }
 -- 착륙지 하나: 패드 중심(y 0), 얼음 쪽을 보는 수평 프레임, 가장 가까운 얼음
 type Site = { position: Vector3, frame: CFrame, ice: Vector3 }
-type RockLayer = "ring" | "corridor" | "scatter" | "near"
+type RockLayer = "ring" | "corridor" | "scatter" | "near" | "hardRing"
 type GroundStats = {
     craters: number,
+    routeCraters: number,
     hills: number,
     ring: number,
     corridor: number,
     scatter: number,
     near: number,
+    hardRing: number,
 }
 
 -- xz 평면 거리
@@ -765,23 +784,31 @@ local function buildBoulders(
     local function radiusOf(scale: number): number
         return BOULDER_MAX * ROCK_RADIUS_RATIO * scale
     end
-    local function place(position: Vector3, layer: RockLayer, scale: number): boolean
+    -- source: 바위 모양에 쓸 난수 (hard 고리는 별도 흐름). hard 고리 바위는 얼음 주변 상한에 세지 않는다
+    local function place(
+        position: Vector3,
+        layer: RockLayer,
+        scale: number,
+        source: Random?
+    ): boolean
         if not isClear(position, radiusOf(scale), sites, rect, footprints) then
             return false
         end
-        local nearIce: { number } = {}
-        for index, ice in ICE_POSITIONS do
-            if flatDistance(position, ice) < dev.iceBoulderCapRadius then
-                if iceCounts[index] >= dev.iceBoulderCap then
-                    return false
+        if layer ~= "hardRing" then
+            local nearIce: { number } = {}
+            for index, ice in ICE_POSITIONS do
+                if flatDistance(position, ice) < dev.iceBoulderCapRadius then
+                    if iceCounts[index] >= dev.iceBoulderCap then
+                        return false
+                    end
+                    table.insert(nearIce, index)
                 end
-                table.insert(nearIce, index)
+            end
+            for _, index in nearIce do
+                iceCounts[index] += 1
             end
         end
-        for _, index in nearIce do
-            iceCounts[index] += 1
-        end
-        local rock = makeBoulder(rng, position, folder, rocks, scale)
+        local rock = makeBoulder(source or rng, position, folder, rocks, scale)
         rock:SetAttribute("BoulderLayer", layer)
         stats[layer] += 1
         return true
@@ -878,11 +905,53 @@ local function buildBoulders(
             end
         end
     end
+
+    -- 5) hard 매장지 바위 고리: 얼음 중심에서 hardRingRadius 사이에 hardRingRocks개.
+    --    가장 가까운 착륙지 반대쪽에 60도 입구를 남겨 돌아 들어가게 한다 (얼음 중심 ICE_CLEARANCE 안은 isClear가 막는다)
+    local ringRng = Random.new(dev.seed + HARD_RING_SEED_OFFSET)
+    local minRocks, maxRocks = dev.hardRingRocks[1], dev.hardRingRocks[2]
+    local minRadius, maxRadius = dev.hardRingRadius[1], dev.hardRingRadius[2]
+    local gapHalf = math.rad(30)
+    for index, def in Config.ICE_SITES do
+        if def.difficulty == "hard" then
+            local center = ICE_POSITIONS[index]
+            local nearestPad, best = center, math.huge
+            for _, site in sites do
+                local d = flatDistance(site.position, center)
+                if d < best then
+                    nearestPad, best = site.position, d
+                end
+            end
+            local away = Vector3.new(center.X - nearestPad.X, 0, center.Z - nearestPad.Z)
+            local gapAngle = math.atan2(away.Z, away.X)
+            local count = math.min(maxRocks, math.floor(ringRng:NextNumber(minRocks, maxRocks + 1)))
+            local span = 2 * math.pi - 2 * gapHalf
+            for k = 1, count do
+                for _ = 1, BOULDER_ATTEMPTS do
+                    local angle = gapAngle
+                        + gapHalf
+                        + span * (k - 0.5 + ringRng:NextNumber(-0.35, 0.35)) / count
+                    local radius = ringRng:NextNumber(minRadius, maxRadius)
+                    local point = center
+                        + Vector3.new(math.cos(angle) * radius, 0, math.sin(angle) * radius)
+                    if place(point, "hardRing", 1, ringRng) then
+                        break
+                    end
+                end
+            end
+        end
+    end
 end
 
 -- 달 지형 계획 -----------------------------------------------------------
 type Ball = { center: Vector3, radius: number, air: boolean }
-type TerrainPlan = { balls: { Ball }, footprints: { Footprint }, craters: number, hills: number }
+type TerrainPlan = {
+    balls: { Ball },
+    footprints: { Footprint },
+    craters: number,
+    routeCraters: number,
+    hills: number,
+}
 
 -- 공이 지표면(TERRAIN_TOP)과 만나는 원의 반지름 (안 만나면 0)
 local function surfaceRadius(ball: Ball): number
@@ -955,7 +1024,8 @@ end
 -- 언덕과 크레이터 배치 (결정적). Terrain이 없어도 계산해서 바위 배치가 두 환경에서 같게 한다
 local function planTerrain(sites: { Site }, rect: Rect): TerrainPlan
     local rng = Random.new(Config.DEV_MAP.seed + TERRAIN_SEED_OFFSET)
-    local plan: TerrainPlan = { balls = {}, footprints = {}, craters = 0, hills = 0 }
+    local plan: TerrainPlan =
+        { balls = {}, footprints = {}, craters = 0, routeCraters = 0, hills = 0 }
     local halfX, halfZ = GROUND_SIZE.X / 2, GROUND_SIZE.Z / 2
     local function tryAdd(balls: { Ball }, footprint: number, cx: number, cz: number): boolean
         for _, ball in balls do
@@ -1007,7 +1077,7 @@ local function planTerrain(sites: { Site }, rect: Rect): TerrainPlan
             end
         end
     end
-    -- 맵 전체
+    -- 맵 전체 (아래 위험 경로 크레이터는 이 뒤에 별도 난수로 더한다)
     for _ = 1, CRATERS_SCATTERED do
         for _ = 1, FEATURE_ATTEMPTS do
             local cx, cz = rng:NextNumber(-halfX, halfX), rng:NextNumber(-halfZ, halfZ)
@@ -1019,6 +1089,92 @@ local function planTerrain(sites: { Site }, rect: Rect): TerrainPlan
             if tryAdd(balls, footprint, cx, cz) then
                 plan.craters += 1
                 break
+            end
+        end
+    end
+    -- 위험 경로 (2026-10-18): 각 착륙지에서 mid, hard 매장지로 가는 직선 위와 hard 매장지 양옆.
+    -- 회랑(최근접 얼음), 판 + 25, 얼음 30 안은 ballAllowed가 막는다
+    local dev = Config.DEV_MAP
+    local routeRng = Random.new(dev.seed + ROUTE_SEED_OFFSET)
+    local function addCrater(cx: number, cz: number, radius: number): boolean
+        local balls, footprint = planCrater(cx, cz, radius)
+        if tryAdd(balls, footprint, cx, cz) then
+            plan.craters += 1
+            plan.routeCraters += 1
+            return true
+        end
+        return false
+    end
+    -- hard 매장지 양옆: 가장 가까운 착륙지 방향의 수직 양쪽
+    for index, def in Config.ICE_SITES do
+        if def.difficulty == "hard" then
+            local center = ICE_POSITIONS[index]
+            local nearestPad, best = center, math.huge
+            for _, site in sites do
+                local d = flatDistance(site.position, center)
+                if d < best then
+                    nearestPad, best = site.position, d
+                end
+            end
+            local toward = Vector3.new(nearestPad.X - center.X, 0, nearestPad.Z - center.Z).Unit
+            local side = Vector3.new(-toward.Z, 0, toward.X)
+            for _, sign in { -1, 1 } do
+                for _ = 1, FEATURE_ATTEMPTS do
+                    local distance =
+                        routeRng:NextNumber(HARD_FLANK_DISTANCE[1], HARD_FLANK_DISTANCE[2])
+                    local p = center
+                        + side * sign * distance
+                        + toward * routeRng:NextNumber(0, HARD_FLANK_DISTANCE[1] / 2)
+                    if
+                        addCrater(
+                            p.X,
+                            p.Z,
+                            routeRng:NextNumber(CRATER_RADIUS_MIN, ROUTE_CRATER_RADIUS_MAX)
+                        )
+                    then
+                        break
+                    end
+                end
+            end
+        end
+    end
+    -- 경로 목록: (착륙지, mid 또는 hard 매장지), 회랑 얼음은 뺀다
+    local routes: { { from: Vector3, to: Vector3 } } = {}
+    for padIndex, site in sites do
+        for index, def in Config.ICE_SITES do
+            local reach = if def.difficulty == "mid"
+                then dev.routeMidReach
+                elseif def.difficulty == "hard" then dev.routeHardReach
+                else 0
+            local to = ICE_POSITIONS[index]
+            if
+                reach > 0
+                and PAD_LAYOUT[padIndex].ice ~= index
+                and flatDistance(site.position, to) <= reach
+            then
+                table.insert(routes, { from = site.position, to = to })
+            end
+        end
+    end
+    local target = dev.routeCraters - plan.routeCraters
+    if #routes > 0 then
+        for k = 1, math.max(0, target) do
+            local route = routes[(k - 1) % #routes + 1]
+            local dir = Vector3.new(route.to.X - route.from.X, 0, route.to.Z - route.from.Z)
+            local side = Vector3.new(-dir.Unit.Z, 0, dir.Unit.X)
+            for _ = 1, FEATURE_ATTEMPTS do
+                local p = route.from
+                    + dir * routeRng:NextNumber(ROUTE_T_MIN, ROUTE_T_MAX)
+                    + side * routeRng:NextNumber(-ROUTE_LATERAL, ROUTE_LATERAL)
+                if
+                    addCrater(
+                        p.X,
+                        p.Z,
+                        routeRng:NextNumber(CRATER_RADIUS_MIN, ROUTE_CRATER_RADIUS_MAX)
+                    )
+                then
+                    break
+                end
             end
         end
     end
@@ -1120,7 +1276,7 @@ local function buildTerrainAndSites(rect: Rect): GroundStats
     end
     local plan: TerrainPlan = if TERRAIN_ENABLED
         then planTerrain(sites, rect)
-        else { balls = {}, footprints = {}, craters = 0, hills = 0 }
+        else { balls = {}, footprints = {}, craters = 0, routeCraters = 0, hills = 0 }
     applyTerrain(plan, terrain)
 
     local iceFolder = makeFolder("IceSites", workspace)
@@ -1134,6 +1290,7 @@ local function buildTerrainAndSites(rect: Rect): GroundStats
             material = Enum.Material.Ice,
             parent = iceFolder,
         })
+        setIceAttributes(ice, index)
         ServerUtil.safeCall("DevMap IceCrystal", dressIce, ice)
     end
 
@@ -1161,11 +1318,13 @@ local function buildTerrainAndSites(rect: Rect): GroundStats
     verifyDistances(padPositions)
     local stats: GroundStats = {
         craters = plan.craters,
+        routeCraters = plan.routeCraters,
         hills = plan.hills,
         ring = 0,
         corridor = 0,
         scatter = 0,
         near = 0,
+        hardRing = 0,
     }
     buildBoulders(terrain, sites, rect, plan.footprints, stats)
     buildLighting()
@@ -1183,6 +1342,7 @@ local function buildIceOnly()
             material = Enum.Material.Ice,
             parent = iceFolder,
         })
+        setIceAttributes(ice, index)
         ServerUtil.safeCall("DevMap IceCrystal", dressIce, ice)
     end
 end
@@ -2065,18 +2225,20 @@ function DevMap.ensure()
     if stats then
         print(
             string.format(
-                "[DevMap] 지면: 판 윗면 y %.1f, 지형 윗면 y %.1f, 범위 %d x %d, 크레이터 %d, 언덕 %d, 바위 %d(기지 둘레 %d, 회랑 옆 %d, 산포 %d, 기지 근처 산포 %d)",
+                "[DevMap] 지면: 판 윗면 y %.1f, 지형 윗면 y %.1f, 범위 %d x %d, 크레이터 %d(위험 경로 %d), 언덕 %d, 바위 %d(기지 둘레 %d, 회랑 옆 %d, 산포 %d, 기지 근처 산포 %d, hard 고리 %d)",
                 GROUND_TOP,
                 SURFACE_Y,
                 GROUND_SIZE.X,
                 GROUND_SIZE.Z,
                 stats.craters,
+                stats.routeCraters,
                 stats.hills,
-                stats.ring + stats.corridor + stats.scatter + stats.near,
+                stats.ring + stats.corridor + stats.scatter + stats.near + stats.hardRing,
                 stats.ring,
                 stats.corridor,
                 stats.scatter,
-                stats.near
+                stats.near,
+                stats.hardRing
             )
         )
     else

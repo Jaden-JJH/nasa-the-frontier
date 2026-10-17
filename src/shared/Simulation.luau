@@ -9,6 +9,7 @@ type Config = typeof(require("./Config"))
 export type Phase = "selecting" | "landing" | "playing" | "won" | "lost"
 export type ModuleStatus = "locked" | "available" | "building" | "active"
 export type EndResult = "none" | "won" | "lost"
+export type NoticeKind = "info" | "warn" | "good" -- Types.NotifyKind와 같은 값 (순환 require를 피해 여기 둔다)
 
 -- 튜토리얼과 목표 단계 (CONTRACT missionStage). 클라이언트가 목표 대상 Highlight에 쓴다
 export type MissionStage =
@@ -35,7 +36,8 @@ export type ModuleState = {
 -- 키는 "A", "B", "C" (CONTRACT: { A: ModuleState, B: ModuleState, C: ModuleState })
 export type Modules = { [string]: ModuleState }
 
-export type RoverState = { tank: number, tankMax: number }
+-- damage 0..ROVER_DAMAGE.maxDamage, broken = damage >= maxDamage (CONTRACT 2026-10-18)
+export type RoverState = { tank: number, tankMax: number, damage: number, broken: boolean }
 
 export type GameState = {
     phase: Phase,
@@ -65,6 +67,8 @@ export type GameState = {
     missionStage: MissionStage, -- 현재 목표 단계. missionText는 이 값에서 파생
     daysLeft: DaysLeft, -- 지금 순소비율로 버틸 수 있는 일수 (내림 정수, 순소비 0 이하이면 NO_DEPLETION_DAYS)
     stallReason: string, -- 모듈 정지 사유 한 줄, 정지 아니면 ""
+    energyCap: number, -- 에너지 저장 상한 = ENERGY_CAP_BASE + 가동 모듈 수 x ENERGY_CAP_PER_MODULE
+    energyWasted: number, -- 서버 추가 필드: 마지막 DayTick에 상한 때문에 버려진 발전량 (없으면 0)
 }
 
 local Simulation = {}
@@ -138,7 +142,12 @@ function Simulation.copy(state: GameState): GameState
         panelsTotal = state.panelsTotal,
         panelsPerDay = state.panelsPerDay,
         modules = copyModules(state.modules),
-        rover = { tank = state.rover.tank, tankMax = state.rover.tankMax },
+        rover = {
+            tank = state.rover.tank,
+            tankMax = state.rover.tankMax,
+            damage = state.rover.damage,
+            broken = state.rover.broken,
+        },
         siteId = state.siteId,
         siteName = state.siteName,
         sunlight = state.sunlight,
@@ -150,6 +159,8 @@ function Simulation.copy(state: GameState): GameState
         missionStage = state.missionStage,
         daysLeft = { water = state.daysLeft.water, food = state.daysLeft.food },
         stallReason = state.stallReason,
+        energyCap = state.energyCap,
+        energyWasted = state.energyWasted,
     }
 end
 
@@ -190,6 +201,18 @@ end
 
 local function panelEnergy(state: GameState, config: Config): number
     return state.panelsInstalled * config.PANEL_OUTPUT * (state.sunlight or 0)
+end
+
+-- 에너지 저장 상한: 기본 + 가동 모듈 수 x 모듈당
+function Simulation.energyCap(state: GameState, config: Config): number
+    local active = 0
+    for _, id in config.MODULE_ORDER do
+        local m = state.modules[id]
+        if m and m.status == "active" then
+            active += 1
+        end
+    end
+    return config.ENERGY_CAP_BASE + active * config.ENERGY_CAP_PER_MODULE
 end
 
 -- 오늘 모듈 유지 에너지를 내면 0 아래로 내려가는지 (모듈 정지 규칙)
@@ -233,7 +256,7 @@ function Simulation.newState(config: Config): GameState
         panelsTotal = config.PANELS_TOTAL,
         panelsPerDay = config.PANELS_PER_DAY,
         modules = modules,
-        rover = { tank = 0, tankMax = config.ROVER.tankMax },
+        rover = { tank = 0, tankMax = config.ROVER.tankMax, damage = 0, broken = false },
         siteId = nil,
         siteName = nil,
         sunlight = nil,
@@ -245,6 +268,8 @@ function Simulation.newState(config: Config): GameState
         missionStage = "panels",
         daysLeft = { water = 0, food = 0 },
         stallReason = "",
+        energyCap = config.ENERGY_CAP_BASE,
+        energyWasted = 0,
     }
     refreshLocks(state, config)
     Simulation.refreshDerived(state, config)
@@ -287,7 +312,8 @@ end
 
 -- 하루 처리 (DayTick 1회). 순서:
 -- 1) 생산 계산 2) 소비 계산 (에너지가 0 아래로 가면 모듈 정지) 3) 자원 반영과 0 클램프
--- 4) 건설 중 모듈 하루 진행, 완료 시 가동 5) 잠금 해제 6) 부족 연속 일수 7) 순증감, 다음 날
+-- 4) 건설 중 모듈 하루 진행, 완료 시 가동 5) 잠금 해제 6) 에너지 상한(오늘 완공한 모듈 포함) 클램프
+-- 7) 부족 연속 일수 8) 순증감, 다음 날
 function Simulation.applyDay(state: GameState, config: Config): GameState
     local new = Simulation.copy(state)
     if state.phase ~= "playing" then
@@ -318,6 +344,12 @@ function Simulation.applyDay(state: GameState, config: Config): GameState
         end
     end
     refreshLocks(new, config)
+
+    -- 저장 상한: 넘친 발전은 버린다 (energyWasted로 알림)
+    local cap = Simulation.energyCap(new, config)
+    new.energyCap = cap
+    new.energyWasted = roundResource(math.max(0, new.energy - cap), config)
+    new.energy = math.min(new.energy, cap)
 
     if new.water <= 0 or new.food <= 0 then
         new.shortageDays = math.min(state.shortageDays + 1, config.SHORTAGE_DAYS_TO_LOSE)
@@ -441,22 +473,121 @@ function Simulation.fillTank(state: GameState, config: Config): (boolean, GameSt
     return true, new, string.format(t.tankFilled, int(new.rover.tankMax))
 end
 
--- 로버 탱크를 기지 물에 하역
-function Simulation.unloadWater(state: GameState, config: Config): (boolean, GameState, string)
+-- 얼음 매장지에서 채취: fill = min(탱크 빈 공간, 매장량), 매장량 -= fill.
+-- 반환: 성공 여부, 새 상태, 남은 매장량, 토스트 문구, 토스트 종류
+function Simulation.fillFromDeposit(
+    state: GameState,
+    config: Config,
+    deposit: number
+): (boolean, GameState, number, string, NoticeKind)
+    local t = config.TEXTS
+    local remaining = math.max(0, deposit)
+    if state.phase ~= "playing" then
+        return false, Simulation.copy(state), remaining, t.notPlaying, "info"
+    end
+    local space = state.rover.tankMax - state.rover.tank
+    if space <= 0 then
+        return false, Simulation.copy(state), remaining, t.tankAlreadyFull, "info"
+    end
+    if remaining <= 0 then
+        return false, Simulation.copy(state), 0, t.iceDepleted, "info"
+    end
+    local fill = math.min(space, remaining)
+    local new = Simulation.copy(state)
+    new.rover.tank = roundResource(new.rover.tank + fill, config)
+    remaining = roundResource(remaining - fill, config)
+    Simulation.refreshDerived(new, config)
+    return true, new, remaining, string.format(t.iceExtracted, int(fill), int(remaining)), "good"
+end
+
+-- 하역할 때 처리할 수 있는 물: 1 W당 WATER_PROCESS_ENERGY_PER_W 에너지
+function Simulation.processableWater(state: GameState, config: Config): number
+    local per = config.WATER_PROCESS_ENERGY_PER_W
+    local amount = state.rover.tank
+    if per > 0 then
+        amount = math.min(amount, math.floor(state.energy / per + 1e-9))
+    end
+    return math.max(0, amount)
+end
+
+-- 로버 탱크를 기지 물에 하역. 처리 전력이 모자라면 처리 가능한 만큼만 하역하고 나머지는 탱크에 남긴다.
+-- 반환: 성공 여부, 새 상태, 토스트 문구, 토스트 종류, 일부만 처리했을 때 경고 문구(아니면 nil)
+function Simulation.unloadWater(
+    state: GameState,
+    config: Config
+): (boolean, GameState, string, NoticeKind, string?)
     local t = config.TEXTS
     if state.phase ~= "playing" then
-        return false, Simulation.copy(state), t.notPlaying
+        return false, Simulation.copy(state), t.notPlaying, "info", nil
     end
     local amount = state.rover.tank
     if amount <= 0 then
-        return false, Simulation.copy(state), t.tankEmpty
+        return false, Simulation.copy(state), t.tankEmpty, "info", nil
+    end
+    local processed = Simulation.processableWater(state, config)
+    if processed <= 0 then
+        local message = string.format(t.waterNoEnergy, tostring(config.WATER_PROCESS_ENERGY_PER_W))
+        return false, Simulation.copy(state), message, "warn", nil
     end
     local new = Simulation.copy(state)
-    new.water = roundResource(new.water + amount, config)
-    new.rover.tank = 0
+    new.energy =
+        clampMin0(roundResource(new.energy - processed * config.WATER_PROCESS_ENERGY_PER_W, config))
+    new.water = roundResource(new.water + processed, config)
+    new.rover.tank = roundResource(amount - processed, config)
     new.waterTrips += 1
     Simulation.refreshDerived(new, config)
-    return true, new, string.format(t.waterUnloaded, int(amount))
+    local warning = if processed < amount
+        then string.format(t.waterPartial, int(processed))
+        else nil
+    return true, new, string.format(t.waterUnloaded, int(processed)), "good", warning
+end
+
+-- 로버 파손 -------------------------------------------------------------
+
+-- 파손 단계에 따른 최고 속도 배율 (maxDamage면 0)
+function Simulation.roverSpeedMultiplier(damage: number, config: Config): number
+    local d = config.ROVER_DAMAGE
+    if damage >= d.maxDamage then
+        return 0
+    end
+    return math.max(0, 1 - d.speedPenaltyPerDamage * damage)
+end
+
+-- 바위 충돌 1회: damage + 1 (최대 maxDamage). 반환: 새 상태, 실제로 늘었는지
+function Simulation.applyRoverHit(state: GameState, config: Config): (GameState, boolean)
+    local new = Simulation.copy(state)
+    if state.rover.damage >= config.ROVER_DAMAGE.maxDamage then
+        return new, false
+    end
+    new.rover.damage = state.rover.damage + 1
+    Simulation.refreshDerived(new, config)
+    return new, true
+end
+
+-- 수리: 에너지 repairEnergy를 내고 damage 0. 반환: 성공 여부, 새 상태, 토스트 문구, 토스트 종류
+function Simulation.repairRover(
+    state: GameState,
+    config: Config
+): (boolean, GameState, string, NoticeKind)
+    local t = config.TEXTS
+    local d = config.ROVER_DAMAGE
+    if state.phase ~= "playing" then
+        return false, Simulation.copy(state), t.notPlaying, "info"
+    end
+    if state.rover.damage <= 0 then
+        return false, Simulation.copy(state), t.repairNotNeeded, "info"
+    end
+    if state.energy < d.repairEnergy then
+        return false,
+            Simulation.copy(state),
+            string.format(t.repairNeedEnergy, int(d.repairEnergy)),
+            "warn"
+    end
+    local new = Simulation.copy(state)
+    new.energy = clampMin0(roundResource(new.energy - d.repairEnergy, config))
+    new.rover.damage = 0
+    Simulation.refreshDerived(new, config)
+    return true, new, t.repairDone, "good"
 end
 
 -- 산소 고갈 페널티: 기지 Food, Water 차감 (0 클램프), 고갈 횟수 증가
@@ -518,7 +649,8 @@ local function stageFloor(state: GameState, config: Config): MissionStage
         return "build_B"
     elseif state.waterTrips > 0 then
         return "build_A"
-    elseif state.rover.tank >= state.rover.tankMax and state.rover.tankMax > 0 then
+    elseif state.rover.tank > 0 then
+        -- 매장량이 탱크보다 적으면 만충이 아니어도 물을 실었으면 하역 단계
         return "unload"
     elseif state.panelsInstalled >= config.PANELS_PER_DAY then
         return "board_rover"
@@ -555,6 +687,8 @@ function Simulation.refreshDerived(state: GameState, config: Config)
         food = daysOf(state.food, useFood - prodFood),
     }
     state.stallReason = if state.modulesStalled then config.TEXTS.stallReason else ""
+    state.energyCap = Simulation.energyCap(state, config)
+    state.rover.broken = state.rover.damage >= config.ROVER_DAMAGE.maxDamage
 
     for _, id in config.MODULE_ORDER do
         local m = state.modules[id]
@@ -620,6 +754,10 @@ function Simulation.missionText(state: GameState, config: Config): string
     if state.water <= 0 or state.food <= 0 then
         local daysLeft = math.max(0, config.SHORTAGE_DAYS_TO_LOSE - state.shortageDays)
         return string.format(texts.shortage, Simulation.shortageName(state, config), int(daysLeft))
+    end
+    -- 로버 고장은 단계 문구보다 먼저 (부족 경고 다음)
+    if state.rover.broken then
+        return string.format(texts.roverBroken, int(config.ROVER_DAMAGE.repairEnergy))
     end
 
     local stage = state.missionStage

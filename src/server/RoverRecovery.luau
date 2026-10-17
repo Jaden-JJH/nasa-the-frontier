@@ -5,12 +5,14 @@
 --   소실: DriverSeat가 사라졌으면(FallenPartsDestroyHeight 등) ServerStorage.BaseKit.Rover를 다시 복제
 -- 악용 차단 (리뷰 I01): 복구하면 탱크의 물은 잃고(물 순간 운송 금지), 복구 뒤 cooldownSeconds 동안은
 -- 수동과 자동 모두 다시 복구하지 않는다. 쿨다운 중 프롬프트 ActionText에 남은 초를 보인다.
+-- 복구하면 로버 파손(RoverDamage)도 0으로 되돌린다 (2026-10-18). 탱크와 쿨다운 규칙은 그대로.
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerStorage = game:GetService("ServerStorage")
 
 local Config = require(ReplicatedStorage.Shared.Config)
 local ResourceState = require(script.Parent.ResourceState)
+local RoverDamage = require(script.Parent.RoverDamage)
 local RoverDrive = require(script.Parent.RoverDrive)
 local ServerUtil = require(script.Parent.ServerUtil)
 local WaterLoop = require(script.Parent.WaterLoop)
@@ -91,14 +93,16 @@ function RoverRecovery.recover(): boolean
         fresh:PivotTo(home)
         fresh.Parent = base
         RoverDrive.attach(base)
+        RoverDamage.attach(base)
     end
-    -- 물 유실: 복구는 물을 기지로 옮겨 주지 않는다
+    -- 물 유실: 복구는 물을 기지로 옮겨 주지 않는다. 파손은 복구와 함께 고쳐진다
     local lostWater = ResourceState.get().rover.tank > 0
-    if lostWater then
-        ResourceState.patch(function(s)
-            s.rover.tank = 0
-        end)
-    end
+    ResourceState.patch(function(s)
+        s.rover.tank = 0
+        s.rover.damage = 0
+        s.rover.broken = false
+    end)
+    RoverDamage.sync()
     WaterLoop.mirrorTank()
     WaterLoop.refresh()
     flippedSince = nil

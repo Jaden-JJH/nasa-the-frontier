@@ -53,6 +53,16 @@ end
 
 -- 토스트 알림 ------------------------------------------------------------
 
+-- Simulation이 돌려준 종류 문자열을 Notify 종류로 (모르는 값은 info)
+function ResourceState.kind(value: string): Types.NotifyKind
+    if value == "good" then
+        return "good"
+    elseif value == "warn" then
+        return "warn"
+    end
+    return "info"
+end
+
 function ResourceState.notify(player: Player, text: string, kind: Types.NotifyKind)
     Remotes.get("Notify"):FireClient(player, text, kind)
 end
