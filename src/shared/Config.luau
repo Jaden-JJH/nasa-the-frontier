@@ -13,6 +13,7 @@ export type ModuleDef = {
     upkeep: Cost, -- 가동 중 매일 유지 소비
     requires: { string }, -- 선행 모듈 id 목록
     foodPerDay: number, -- 가동 중 하루 식량 생산 (Farm만 0보다 큼)
+    canPause: boolean, -- 완공 뒤 패드 프롬프트로 가동 중지/재개 가능 (2026-10-18, Farm만)
 }
 
 export type IceDifficulty = "easy" | "mid" | "hard"
@@ -85,6 +86,7 @@ local Config = {
             upkeep = { energy = 3, water = 1 },
             requires = {},
             foodPerDay = 0,
+            canPause = false,
         },
         B = {
             name = "Farm",
@@ -98,6 +100,7 @@ local Config = {
             upkeep = { energy = 6, water = 2 },
             requires = { "A" },
             foodPerDay = 2,
+            canPause = true,
         },
         C = {
             name = "Research Lab",
@@ -107,6 +110,7 @@ local Config = {
             upkeep = { energy = 8, water = 3 }, -- 물 1 -> 3 (완공 = 승리라 체감은 없지만 일관성)
             requires = { "A", "B" },
             foodPerDay = 0,
+            canPause = false,
         },
     } :: { [string]: ModuleDef },
     MODULE_ORDER = { "A", "B", "C" },
@@ -170,6 +174,13 @@ local Config = {
         awayDistance = 60, -- 섀시가 충전 패드에서 이보다 멀면 "기지 밖" (미션 문구)
         batteryTickSeconds = 0.25, -- 서버 배터리 계산 주기
         batteryPublishSeconds = 0.5, -- 배터리 값만 바뀌었을 때 StateUpdate 최소 간격 (초당 최대 2회)
+        -- 부스터 (2026-10-18, RoverBoost Remote): 운전자가 켜면 속도 x boostSpeedMultiplier, 배터리 소모 x boostDrainMultiplier.
+        -- 연속 boostMaxSeconds면 과열로 꺼지고 boostCooldownSeconds 동안 식는다. 배터리가 boostMinBatteryRatio 미만이면 못 켠다
+        boostSpeedMultiplier = 1.6,
+        boostDrainMultiplier = 3,
+        boostMaxSeconds = 4,
+        boostCooldownSeconds = 6,
+        boostMinBatteryRatio = 0.2,
     },
     SPAWN_HEIGHT_OFFSET = 3, -- SpawnPoint 윗면에서 캐릭터 중심까지 높이(studs)
     CHARACTER_LOAD_TIMEOUT = 5, -- 리스폰 후 HumanoidRootPart를 기다리는 최대 시간(초)
@@ -231,6 +242,7 @@ local Config = {
         oneShotLifetime = 15, -- 한 번 재생하는 소리가 Ended를 못 받아도 이 초 뒤에 지운다
         engineMinSpeed = 0.8, -- 로버 주행 루프 PlaybackSpeed (정지 ~ 최고 속도)
         engineMaxSpeed = 1.4,
+        engineBoostMaxSpeed = 1.8, -- 부스트 중 PlaybackSpeed 상한
         engineIdleVolume = 0.1, -- 탑승 중 정지 상태 볼륨 (빈 로버는 0)
         engineFade = 0.5, -- 배터리 주기마다 목표 볼륨으로 다가가는 비율
     },
@@ -255,6 +267,7 @@ local Config = {
         buildHold = 0.5, -- 건설 시작 홀드 시간(초)
         unloadHold = 0, -- 물 하역은 즉시
         boardDistance = 10, -- 로버 탑승 프롬프트 활성 거리
+        pauseDistance = 8, -- 모듈 가동 중지/재개 프롬프트 활성 거리
         serverDistanceSlack = 6, -- 서버가 탑승 요청 거리를 검사할 때 지연을 감안한 여유
     },
 
@@ -428,6 +441,18 @@ local Config = {
 
         buildStarted = "%s 착공 (%d일 소요)",
         buildDone = "%s 완공",
+        -- 모듈별 완공 알림 (유지비 포함, %d 자리는 Construction이 Config 값으로 채운다). 없는 모듈은 buildDone
+        buildDoneBy = {
+            A = "Habitat A 가동. 물 -%d/일, 전력 -%d/일. 안에서 산소가 회복됩니다",
+            B = "Farm 가동 시작. 식량 +%d/일, 물 -%d/일, 전력 -%d/일. 물이 모자라면 Farm 패드에서 끌 수 있습니다",
+        } :: { [string]: string },
+        modulePaused = "%s 가동 중지. 식량 생산과 물, 전력 소비가 멈춥니다",
+        moduleResumed = "%s 가동 재개",
+        cannotPause = "지금은 가동을 멈출 수 없습니다",
+        upkeepWater = "물 -%d/일",
+        upkeepEnergy = "전력 -%d/일",
+        upkeepFood = "식량 +%d/일",
+        upkeepPaused = "대기 중",
         moduleUnlocked = "%s 착공 가능",
 
         tankFilled = "로버 탱크 만충 (%dW)",
@@ -452,7 +477,7 @@ local Config = {
         tankAlreadyFull = "로버 탱크가 이미 가득 찼습니다",
         tankEmpty = "로버 탱크가 비어 있습니다",
         needDriver = "로버 운전석에 앉아 있어야 채취할 수 있습니다",
-        firstBoard = "W A S D 이동, Space 하차. 레이더의 점을 따라가세요",
+        firstBoard = "W A S D 이동, Space 하차, Shift 부스터(배터리 %d배 소모). 레이더의 점을 따라가세요",
         waterUnloaded = "물 %dW 하역 완료",
         needRoverAtTank = "로버를 물탱크 옆에 세워야 하역할 수 있습니다",
         roverRecovered = "로버가 복구되었습니다",
@@ -509,6 +534,8 @@ local Config = {
         installing = "설치 중",
         board = "탑승",
         openDoor = "열기",
+        pauseModule = "가동 중지",
+        resumeModule = "가동 재개",
     },
 }
 

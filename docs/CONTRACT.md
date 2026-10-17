@@ -35,6 +35,8 @@ export type ModuleState = {
     progress: number,     -- 0..1, building일 때만 의미
     daysLeft: number,     -- building일 때 남은 일수, 아니면 0
     unlocked: boolean,    -- 2026-10-18 추가. 선행 조건 충족 여부(비용과 무관)
+    paused: boolean,      -- 2026-10-18 추가. 가동 중지(현재 Farm만 지원). true면 유지비와 생산 모두 없음
+    upkeepText: string,   -- 2026-10-18 추가. 가동 중 유지비 요약 한 줄(예: "물 -2/일, 전력 -6/일, 식량 +2/일"), paused면 "대기 중", 미가동이면 ""
     shortfall: { energy: number, water: number },  -- 2026-10-18 추가. 착공에 부족한 양, 충분하면 0
 }
 export type GameState = {
@@ -54,7 +56,8 @@ export type GameState = {
     panelsPerDay: number,     -- Config.PANELS_PER_DAY
     modules: { A: ModuleState, B: ModuleState, C: ModuleState },
     rover: { tank: number, tankMax: number, damage: number, broken: boolean,
-             battery: number, batteryMax: number, charging: boolean, away: boolean },  -- damage 0..3, broken은 damage >= 3. battery(2026-10-18 추가): 주행 중 초당 ROVER.batteryDrainPerSecond(0.3) 소모, 0이면 정지. charging은 충전 패드 위에서 빈 좌석일 때 true. away는 로버가 기지에서 ROVER.awayDistance(60) 밖에 있을 때 true(미션 문구용)
+             battery: number, batteryMax: number, charging: boolean, away: boolean,
+             boosting: boolean, boostHeat: number },  -- 2026-10-18 추가. boosting은 부스터 작동 중, boostHeat는 0..1 과열 게이지(1이면 쿨다운)  -- damage 0..3, broken은 damage >= 3. battery(2026-10-18 추가): 주행 중 초당 ROVER.batteryDrainPerSecond(0.3) 소모, 0이면 정지. charging은 충전 패드 위에서 빈 좌석일 때 true. away는 로버가 기지에서 ROVER.awayDistance(60) 밖에 있을 때 true(미션 문구용)
     energyCap: number,        -- 2026-10-18 추가. 에너지 저장 상한 = ENERGY_CAP_BASE(150) + 가동 모듈 수 x ENERGY_CAP_PER_MODULE(100)
     energyWasted: number,     -- 2026-10-18 추가. 오늘 상한 때문에 버려진 전력
     siteId: number?,          -- 선택된 착륙 패드 1..4. selecting 중 nil
@@ -118,6 +121,8 @@ export type GameOverInfo = {
 
 **SetSpeed** `(speed: number)` - 1 또는 2만 수락. 아무나 보낼 수 있음.
 
+**RoverBoost** `(on: boolean)` - 2026-10-18 추가. 운전자(DriverSeat 탑승자)만 수락. 서버가 배터리 >= ROVER.boostMinBatteryRatio(0.2)와 과열 상태를 검증. 부스터 중 속도 x ROVER.boostSpeedMultiplier(1.6), 배터리 소모 x ROVER.boostDrainMultiplier(3). 연속 ROVER.boostMaxSeconds(4) 뒤 ROVER.boostCooldownSeconds(6) 쿨다운. 하차하면 자동 해제.
+
 **RequestRestart** `()` - phase가 won 또는 lost이고 결과 화면이 뜬 지 Config.RESULT_MIN_SECONDS(10) 이상 지났을 때, 선택 권한자(chooser)만 수락(2026-10-18 리뷰 반영). 서버가 상태 리셋 후 selecting으로.
 
 ## 3. 서버 전용 모듈 경계 (src/server)
@@ -174,7 +179,7 @@ ServerStorage
         Slot1 .. Slot25 (Part)      패널이 놓일 자리(2026-10-18: 30 -> 25, 5 x 5). 설치되면 PanelTemplate 복제본이 위에 생김
     ModulePads (Folder)
       PadA, PadB, PadC (Model)    Attribute ModuleId(string, A/B/C). 클라이언트 표지판이 이걸로 찾는다
-        Pad (Part)                  ProximityPrompt 부착 대상. ActionText "건설 시작"
+        Pad (Part)                  ProximityPrompt 부착 대상. ActionText "건설 시작". PadB는 완공 후 두 번째 프롬프트 "가동 중지" / "가동 재개"(2026-10-18 추가, 서버 Construction이 관리)
         Ghost (Model)               반투명 미리보기. 착공 가능할 때 표시, 착공하면 숨김(2026-10-18 변경). 건설 중에는 Built가 진행률만큼 땅에서 솟아오름
         Built (Model)               완공 모델. active 전에는 Parent를 ServerStorage로 빼두거나 투명
         OxygenZone (Part)           PadA에만 있음

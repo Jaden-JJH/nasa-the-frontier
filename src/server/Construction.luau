@@ -23,6 +23,7 @@ type PadEntry = {
     ghost: Instance?,
     built: Instance?,
     prompt: ProximityPrompt,
+    pausePrompt: ProximityPrompt?, -- 완공 뒤 가동 중지/재개 (Config.MODULES[id].canPause인 모듈만)
     builtPivot: CFrame, -- 완공 위치
     builtHeight: number, -- Built 경계 상자 높이 (완전히 묻힌 깊이)
     collide: { [BasePart]: boolean }, -- 올라오는 동안 끈 충돌의 원래 값
@@ -154,6 +155,13 @@ local function applyVisuals(entry: PadEntry, state: GameState)
         end
     end
     entry.prompt.Enabled = m.status == "available" and state.phase == "playing"
+    local pausePrompt = entry.pausePrompt
+    if pausePrompt then
+        pausePrompt.Enabled = m.status == "active" and state.phase == "playing"
+        pausePrompt.ActionText = if m.paused
+            then Config.PROMPT_TEXTS.resumeModule
+            else Config.PROMPT_TEXTS.pauseModule
+    end
 end
 
 -- 테스트용: 모듈 Built의 지금 세로 오프셋 (없으면 nil)
@@ -176,10 +184,7 @@ function Construction.sync(prev: GameState?, new: GameState)
             if before and after and before.status ~= after.status then
                 if after.status == "active" then
                     Sfx.play("build_complete", entry and entry.pad)
-                    ResourceState.notifyAll(
-                        string.format(Config.TEXTS.buildDone, def.displayName),
-                        "good"
-                    )
+                    ResourceState.notifyAll(Construction.doneText(id), "good")
                     -- KitImports 장식 (연결 통로, 작물). 메시가 없으면 아무 것도 하지 않는다
                     local base = currentBase
                     if base then
@@ -203,6 +208,36 @@ function Construction.sync(prev: GameState?, new: GameState)
             end
         end
     end
+end
+
+-- 완공 알림: 모듈별 문구(유지비와 생산 포함)가 있으면 그것, 없으면 "%s 완공"
+function Construction.doneText(id: string): string
+    local def = Config.MODULES[id]
+    local template = Config.TEXTS.buildDoneBy[id]
+    if id == "A" and template then
+        return string.format(template, def.upkeep.water, def.upkeep.energy)
+    elseif id == "B" and template then
+        return string.format(template, def.foodPerDay, def.upkeep.water, def.upkeep.energy)
+    end
+    return string.format(Config.TEXTS.buildDone, def.displayName)
+end
+
+-- 가동 중지/재개 토글
+local function onPauseTriggered(player: Player, id: string)
+    local prev = ResourceState.get()
+    local m = prev.modules[id]
+    if not m then
+        return
+    end
+    local ok, newState, message = Simulation.setPaused(prev, Config, id, not m.paused)
+    if not ok then
+        ResourceState.notify(player, message, "info")
+        return
+    end
+    ResourceState.set(newState)
+    Construction.sync(prev, newState)
+    ResourceState.notifyAll(message, "info")
+    ResourceState.publish()
 end
 
 local function onTriggered(player: Player, id: string)
@@ -268,6 +303,7 @@ function Construction.attach(base: Model)
                 offset = 0,
                 moveToken = 0,
                 buildLoop = nil,
+                pausePrompt = nil,
             }
             table.insert(
                 connections,
@@ -275,6 +311,24 @@ function Construction.attach(base: Model)
                     onTriggered(player, id)
                 end)
             )
+            -- 가동 중지 프롬프트 (Farm): 같은 Pad 파트의 두 번째 프롬프트. 완공 뒤에만 켜진다
+            if def.canPause then
+                local pausePrompt = ServerUtil.makePrompt(padPart, {
+                    actionText = Config.PROMPT_TEXTS.pauseModule,
+                    objectText = def.name,
+                    holdDuration = 0,
+                    maxDistance = Config.PROMPT.pauseDistance,
+                    enabled = false,
+                })
+                pausePrompt.Name = "PausePrompt"
+                entries[id].pausePrompt = pausePrompt
+                table.insert(
+                    connections,
+                    pausePrompt.Triggered:Connect(function(player: Player)
+                        onPauseTriggered(player, id)
+                    end)
+                )
+            end
         else
             warn("[Construction] Base.ModulePads.Pad" .. id .. ".Pad를 찾지 못했습니다")
         end
@@ -292,6 +346,9 @@ function Construction.detach()
         stopBuildLoop(entry)
         restoreCollision(entry)
         entry.prompt:Destroy()
+        if entry.pausePrompt then
+            entry.pausePrompt:Destroy()
+        end
         -- 빼 두었던 모델은 Base와 함께 사라지지 않으므로 직접 정리한다
         if entry.ghost and entry.ghost.Parent == nil then
             entry.ghost:Destroy()

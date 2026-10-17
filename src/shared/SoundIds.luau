@@ -46,6 +46,14 @@ local SoundIds = {
     rover_charge_loop = spec(9114246115, 0.3, 0, true, "충전 중 전기 허밍 루프"),
     rover_charge_full = spec(9126073938, 0.6, 0, false, "충전 완료 차임"),
     rover_battery_low = spec(9113085764, 0.6, 0, false, "배터리 부족 경고음"),
+    rover_boost_loop = spec(
+        0,
+        0.45,
+        0,
+        true,
+        "부스터 작동 루프(전기 모터 고회전), id 미정"
+    ),
+    rover_boost_ready = spec(0, 0.5, 0, false, "부스터 쿨다운 완료 비프, id 미정"),
     -- 물
     ice_mine_loop = spec(
         9117875538,

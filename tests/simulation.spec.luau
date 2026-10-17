@@ -774,6 +774,90 @@ return function(t)
         end
     )
 
+    t.test(
+        "Farm 가동 중지: 유지비와 생산 모두 0, daysLeft 반영, C 해금과 저장 상한은 그대로",
+        function()
+            local s = installMany(playingState(1), 3)
+            setActive(s, "A")
+            setActive(s, "B")
+            s.energy = 100
+            s.water = 60
+            local okPause, paused, message = Simulation.setPaused(s, Config, "B", true)
+            t.truthy(okPause)
+            t.truthy(paused.modules.B.paused)
+            t.eq(message, string.format(Config.TEXTS.modulePaused, "Farm"))
+            t.eq(paused.modules.B.upkeepText, Config.TEXTS.upkeepPaused, "대기 중")
+            local A = Config.MODULES.A
+            local after = Simulation.applyDay(paused, Config)
+            t.near(after.energy, 100 + 3 - A.upkeep.energy, "Farm 전력 유지 없음")
+            t.eq(after.water, 60 - Config.CREW.water - A.upkeep.water, "Farm 물 유지 없음")
+            t.eq(after.food, paused.food - Config.CREW.food, "Farm 식량 생산 없음")
+            t.eq(
+                paused.daysLeft.water,
+                math.floor(60 / (Config.CREW.water + A.upkeep.water)),
+                "daysLeft는 Farm 물 유지를 빼고 계산"
+            )
+            t.truthy(paused.modules.C.unlocked, "B가 멈춰도 C 선행 조건 충족")
+            t.eq(
+                after.modules.C.status,
+                "available",
+                "멈춘 Farm으로도 하루가 지나면 C 착공 가능"
+            )
+            t.eq(
+                paused.energyCap,
+                Config.ENERGY_CAP_BASE + 2 * Config.ENERGY_CAP_PER_MODULE,
+                "저장 상한은 완공 수 기준"
+            )
+            local okResume, resumed, message2 = Simulation.setPaused(paused, Config, "B", false)
+            t.truthy(okResume)
+            t.falsy(resumed.modules.B.paused)
+            t.eq(message2, string.format(Config.TEXTS.moduleResumed, "Farm"))
+            local B = Config.MODULES.B
+            t.eq(
+                resumed.modules.B.upkeepText,
+                string.format(
+                    "물 -%d/일, 전력 -%d/일, 식량 +%d/일",
+                    B.upkeep.water,
+                    B.upkeep.energy,
+                    B.foodPerDay
+                )
+            )
+            t.falsy((Simulation.setPaused(s, Config, "A", true)), "Habitat A는 멈출 수 없음")
+            local building = Simulation.copy(s)
+            building.modules.B = moduleState("building", 0.2, 4)
+            t.falsy(
+                (Simulation.setPaused(building, Config, "B", true)),
+                "건설 중에는 멈출 수 없음"
+            )
+        end
+    )
+
+    t.test(
+        "로버 부스터: 배터리 20% 이상, 과열 4초에 꺼지고 6초 동안 식는다",
+        function()
+            local rv = Config.ROVER
+            local s = playingState(1)
+            t.truthy(Simulation.canBoost(s, Config, false))
+            t.falsy(Simulation.canBoost(s, Config, true), "과열 중 거부")
+            local low = Simulation.copy(s)
+            low.rover.battery = rv.batteryMax * rv.boostMinBatteryRatio - 0.01
+            t.falsy(Simulation.canBoost(low, Config, false), "배터리 부족 거부")
+            s.rover.boosting = true
+            local heated, over = Simulation.boostTick(s, Config, rv.boostMaxSeconds / 2)
+            t.near(heated.rover.boostHeat, 0.5)
+            t.falsy(over)
+            t.truthy(heated.rover.boosting)
+            local hot, over2 = Simulation.boostTick(heated, Config, rv.boostMaxSeconds / 2)
+            t.eq(hot.rover.boostHeat, 1)
+            t.truthy(over2, "1에 닿으면 과열")
+            t.falsy(hot.rover.boosting, "과열이면 꺼짐")
+            local cooled = Simulation.boostTick(hot, Config, rv.boostCooldownSeconds / 2)
+            t.near(cooled.rover.boostHeat, 0.5)
+            local cold = Simulation.boostTick(cooled, Config, rv.boostCooldownSeconds)
+            t.eq(cold.rover.boostHeat, 0, "0 아래로 내려가지 않음")
+        end
+    )
+
     -- 현실적 플레이어 봇 (GDD 4절 밸런스 검증 메모, 2026-10-18 매장량과 전력 제약 반영) -----------
     -- 하루에 한 가지 행동만 한다. 우선순위:
     --   0) 기지에 있고 탱크에 물이 남아 있으면 하역 (행동 소모 없음, 전력이 모자라면 처리 가능한 만큼)

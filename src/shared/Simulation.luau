@@ -5,6 +5,7 @@
 -- 아래 typeof(require(...))는 타입 검사 전용이며 실행 시에는 평가되지 않는다.
 
 type Config = typeof(require("./Config"))
+type ModuleDef = typeof(require("./Config").MODULES.A)
 
 export type Phase = "selecting" | "landing" | "playing" | "won" | "lost"
 export type ModuleStatus = "locked" | "available" | "building" | "active"
@@ -31,6 +32,8 @@ export type ModuleState = {
     daysLeft: number, -- building일 때 남은 일수, 아니면 0
     unlocked: boolean, -- 선행 조건(앞 모듈 완공) 충족 여부. 비용과 무관
     shortfall: Shortfall, -- 착공 비용 대비 부족량 (충분하거나 이미 착공, 완공했으면 0)
+    paused: boolean, -- 가동 중지 (2026-10-18, 현재 Farm만). true면 유지비와 생산 모두 없음. 선행 조건과 저장 상한은 그대로
+    upkeepText: string, -- 표지판용 한 줄 "물 -2/일, 전력 -6/일, 식량 +2/일", 가동 중지면 "대기 중"
 }
 
 -- 키는 "A", "B", "C" (CONTRACT: { A: ModuleState, B: ModuleState, C: ModuleState })
@@ -48,6 +51,8 @@ export type RoverState = {
     batteryMax: number,
     charging: boolean,
     away: boolean,
+    boosting: boolean, -- 부스터 작동 중 (2026-10-18)
+    boostHeat: number, -- 0..1 과열 게이지. 1에 닿으면 부스트가 꺼지고 0까지 식어야 다시 쓸 수 있다
 }
 
 export type GameState = {
@@ -114,6 +119,8 @@ local function newModule(status: ModuleStatus, progress: number, daysLeft: numbe
         daysLeft = daysLeft,
         unlocked = false,
         shortfall = { energy = 0, water = 0 },
+        paused = false,
+        upkeepText = "",
     }
 end
 
@@ -126,9 +133,16 @@ local function copyModules(modules: Modules): Modules
             daysLeft = m.daysLeft,
             unlocked = m.unlocked,
             shortfall = { energy = m.shortfall.energy, water = m.shortfall.water },
+            paused = m.paused,
+            upkeepText = m.upkeepText,
         }
     end
     return out
+end
+
+-- 가동 중이고 멈추지 않은 모듈 (유지비와 생산이 있는 모듈)
+local function running(m: ModuleState?): boolean
+    return m ~= nil and m.status == "active" and not m.paused
 end
 
 local function stageIndex(stage: MissionStage): number
@@ -162,6 +176,8 @@ function Simulation.copy(state: GameState): GameState
             batteryMax = state.rover.batteryMax,
             charging = state.rover.charging,
             away = state.rover.away,
+            boosting = state.rover.boosting,
+            boostHeat = state.rover.boostHeat,
         },
         siteId = state.siteId,
         siteName = state.siteName,
@@ -205,7 +221,7 @@ local function activeUpkeep(state: GameState, config: Config): (number, number)
     local energy, water = 0, 0
     for _, id in config.MODULE_ORDER do
         local m = state.modules[id]
-        if m and m.status == "active" then
+        if running(m) then
             local def = config.MODULES[id]
             energy += def.upkeep.energy
             water += def.upkeep.water
@@ -280,6 +296,8 @@ function Simulation.newState(config: Config): GameState
             batteryMax = config.ROVER.batteryMax,
             charging = false,
             away = false,
+            boosting = false,
+            boostHeat = 0,
         },
         siteId = nil,
         siteName = nil,
@@ -311,8 +329,7 @@ function Simulation.dailyProduction(state: GameState, config: Config): (number, 
         local waterNeedMet = state.water + water >= config.CREW.water + upkeepWater
         if waterNeedMet then
             for _, id in config.MODULE_ORDER do
-                local m = state.modules[id]
-                if m and m.status == "active" then
+                if running(state.modules[id]) then
                     food += config.MODULES[id].foodPerDay
                 end
             end
@@ -606,6 +623,35 @@ function Simulation.batteryLow(state: GameState, config: Config): boolean
     return r.battery > 0 and r.battery <= r.batteryMax * config.ROVER.lowBatteryRatio
 end
 
+-- 로버 부스터 (2026-10-18) -----------------------------------------------
+
+-- 부스트를 켤 수 있는지 (운전자 검사는 서버가 한다). overheated = 과열 뒤 아직 0까지 식지 않음
+function Simulation.canBoost(state: GameState, config: Config, overheated: boolean): boolean
+    local r = state.rover
+    return state.phase == "playing"
+        and not overheated
+        and r.battery >= r.batteryMax * config.ROVER.boostMinBatteryRatio
+end
+
+-- 과열 게이지 dt초 진행: 부스트 중이면 초당 1/boostMaxSeconds 증가, 아니면 초당 1/boostCooldownSeconds 감소.
+-- 1에 닿으면 부스트를 끈다. 반환: 새 상태, 이번에 과열로 꺼졌는지
+function Simulation.boostTick(state: GameState, config: Config, dt: number): (GameState, boolean)
+    local r = config.ROVER
+    local new = Simulation.copy(state)
+    local overheatedNow = false
+    if state.rover.boosting then
+        new.rover.boostHeat = math.min(1, state.rover.boostHeat + dt / r.boostMaxSeconds)
+        if new.rover.boostHeat >= 1 - 1e-9 then
+            new.rover.boostHeat = 1
+            new.rover.boosting = false
+            overheatedNow = true
+        end
+    else
+        new.rover.boostHeat = math.max(0, state.rover.boostHeat - dt / r.boostCooldownSeconds)
+    end
+    return new, overheatedNow
+end
+
 -- 로버 파손 -------------------------------------------------------------
 
 -- 파손 단계에 따른 최고 속도 배율 (maxDamage면 0)
@@ -767,9 +813,52 @@ function Simulation.refreshDerived(state: GameState, config: Config)
                     water = roundResource(math.max(0, def.cost.water - state.water), config),
                 }
             end
+            m.upkeepText = Simulation.upkeepText(m, def, config)
         end
     end
     state.missionText = Simulation.missionText(state, config)
+end
+
+-- 모듈 표지판 한 줄: 유지비와 생산 ("물 -2/일, 전력 -6/일, 식량 +2/일"), 가동 중지면 "대기 중"
+function Simulation.upkeepText(m: ModuleState, def: ModuleDef, config: Config): string
+    local t = config.TEXTS
+    if m.paused then
+        return t.upkeepPaused
+    end
+    local parts: { string } = {}
+    if def.upkeep.water > 0 then
+        table.insert(parts, string.format(t.upkeepWater, int(def.upkeep.water)))
+    end
+    if def.upkeep.energy > 0 then
+        table.insert(parts, string.format(t.upkeepEnergy, int(def.upkeep.energy)))
+    end
+    if def.foodPerDay > 0 then
+        table.insert(parts, string.format(t.upkeepFood, int(def.foodPerDay)))
+    end
+    return table.concat(parts, t.listSeparator)
+end
+
+-- 가동 중지 토글: canPause인 가동 중 모듈만. 반환: 성공 여부, 새 상태, 토스트 문구
+function Simulation.setPaused(
+    state: GameState,
+    config: Config,
+    moduleId: string,
+    paused: boolean
+): (boolean, GameState, string)
+    local t = config.TEXTS
+    local def = config.MODULES[moduleId]
+    local m = state.modules[moduleId]
+    if state.phase ~= "playing" then
+        return false, Simulation.copy(state), t.notPlaying
+    end
+    if not def or not m or not def.canPause or m.status ~= "active" then
+        return false, Simulation.copy(state), t.cannotPause
+    end
+    local new = Simulation.copy(state)
+    new.modules[moduleId].paused = paused
+    Simulation.refreshDerived(new, config)
+    local template = if paused then t.modulePaused else t.moduleResumed
+    return true, new, string.format(template, def.name)
 end
 
 -- 로버에 처음 탑승: board_rover 이전 단계면 find_ice로 올린다

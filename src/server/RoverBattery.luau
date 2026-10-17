@@ -22,6 +22,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Config = require(ReplicatedStorage.Shared.Config)
 local Simulation = require(ReplicatedStorage.Shared.Simulation)
 local ResourceState = require(script.Parent.ResourceState)
+local RoverBoost = require(script.Parent.RoverBoost)
 local RoverDrive = require(script.Parent.RoverDrive)
 local ServerUtil = require(script.Parent.ServerUtil)
 local Sfx = require(script.Parent.Sfx)
@@ -153,7 +154,7 @@ local function stopEngine()
 end
 
 -- 주행 루프: 섀시에 붙이고(로버를 다시 만들면 새 섀시로 옮긴다) 속도에 비례한 PlaybackSpeed, 정지하면 작게
-local function updateEngine(chassis: BasePart, speed: number, occupied: boolean)
+local function updateEngine(chassis: BasePart, speed: number, occupied: boolean, boosting: boolean)
     local s = Config.SFX
     if engineChassis ~= chassis then
         stopEngine()
@@ -166,9 +167,12 @@ local function updateEngine(chassis: BasePart, speed: number, occupied: boolean)
         elseif moving then Sfx.baseVolume("rover_engine_loop")
         else s.engineIdleVolume
     engineVolume += (target - engineVolume) * s.engineFade
-    local ratio = math.clamp(speed / Config.ROVER.maxSpeed, 0, 1)
+    -- 부스트 중에는 더 빠른 최고 속도까지 PlaybackSpeed 상한을 engineBoostMaxSpeed로 올린다
+    local top = Config.ROVER.maxSpeed * (if boosting then Config.ROVER.boostSpeedMultiplier else 1)
+    local maxPitch = if boosting then s.engineBoostMaxSpeed else s.engineMaxSpeed
+    local ratio = math.clamp(speed / top, 0, 1)
     Sfx.setLoopVolume(engineLoop, engineVolume)
-    Sfx.setLoopSpeed(engineLoop, s.engineMinSpeed + (s.engineMaxSpeed - s.engineMinSpeed) * ratio)
+    Sfx.setLoopSpeed(engineLoop, s.engineMinSpeed + (maxPitch - s.engineMinSpeed) * ratio)
 end
 
 -- 지금 도크 상태 (테스트와 진단용)
@@ -197,10 +201,16 @@ function RoverBattery.step(dt: number)
     lastPosition = position
     local speed = if previous and dt > 0 then (position - previous).Magnitude / dt else 0
     local seatEmpty = seat.Occupant == nil
-    updateEngine(chassis, speed, not seatEmpty)
+    local boostingNow = state.rover.boosting
+    updateEngine(chassis, speed, not seatEmpty, boostingNow)
     if speed > r.movingSpeed and new.rover.battery > 0 then
-        new, emptied = Simulation.drainBattery(new, Config, dt)
+        -- 부스트 중 소모는 boostDrainMultiplier배
+        local drainSeconds = dt * (if boostingNow then r.boostDrainMultiplier else 1)
+        new, emptied = Simulation.drainBattery(new, Config, drainSeconds)
     end
+    -- 부스터: 자동 해제(하차, 배터리 부족)와 과열 게이지
+    local boostChanged
+    new, boostChanged = RoverBoost.tick(new, dt, seatEmpty, chassis)
 
     local pad = padPart
     local padDistance = if pad then flatDistance(position, pad.CFrame.Position) else math.huge
@@ -250,8 +260,11 @@ function RoverBattery.step(dt: number)
         end
     end
 
-    local flagsChanged = charging ~= state.rover.charging or away ~= state.rover.away
+    local flagsChanged = charging ~= state.rover.charging
+        or away ~= state.rover.away
+        or boostChanged
     local batteryChanged = new.rover.battery ~= state.rover.battery
+        or new.rover.boostHeat ~= state.rover.boostHeat
     if not flagsChanged and not batteryChanged then
         return
     end
@@ -285,6 +298,9 @@ function RoverBattery.step(dt: number)
     end
     if (state.rover.battery > 0) ~= (new.rover.battery > 0) then
         applyDriveFactor(new)
+    end
+    if boostChanged then
+        RoverBoost.apply(new)
     end
 
     local now = os.clock()
@@ -333,6 +349,7 @@ function RoverBattery.attach(base: Model)
 end
 
 function RoverBattery.detach()
+    RoverBoost.reset()
     dockGeneration += 1
     stopChargeLoop()
     stopEngine()
@@ -353,6 +370,7 @@ function RoverBattery.init()
         return
     end
     initialized = true
+    RoverBoost.init()
     task.spawn(function()
         local tick = Config.ROVER.batteryTickSeconds
         while true do

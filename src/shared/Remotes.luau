@@ -23,6 +23,7 @@ Remotes.NAMES = {
     "SelectSite",
     "SetSpeed",
     "RequestRestart",
+    "RoverBoost", -- (on: boolean) 운전자 부스터 켜기/끄기 (2026-10-18)
 }
 
 local known: { [string]: boolean } = {}

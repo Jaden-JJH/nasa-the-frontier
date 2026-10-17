@@ -2356,7 +2356,8 @@ do
         if
             entry.name == "Notify"
             and entry.target == alice
-            and entry.args[1] == Config.TEXTS.firstBoard
+            and entry.args[1]
+                == string.format(Config.TEXTS.firstBoard, Config.ROVER.boostDrainMultiplier)
         then
             firstBoards += 1
             kind = entry.args[2]
@@ -3005,6 +3006,108 @@ do
     newRover = rover
 end
 
+-- 로버 부스터 (2026-10-18) ---------------------------------------------------
+print("[부스터]")
+do
+    local RoverBattery = loadModule(Server:FindFirstChild("RoverBattery"))
+    local RoverBoost = loadModule(Server:FindFirstChild("RoverBoost"))
+    local RoverDrive = loadModule(Server:FindFirstChild("RoverDrive"))
+    local rv = Config.ROVER
+    local boostRemote = dm:GetService("ReplicatedStorage").Remotes.RoverBoost
+    local rover = base.Rover
+    local chassis = rover.Chassis
+    check(rover.DriverSeat.Occupant == humanoid, "Alice가 로버에 타 있음")
+    local function request(player, on)
+        signalFor(boostRemote, "OnServerEvent"):Fire(player, on)
+        advance(0)
+    end
+    ResourceState.patch(function(st)
+        st.rover.battery = rv.batteryMax
+        st.rover.boostHeat = 0
+    end)
+    request(bob, true)
+    check(state().rover.boosting == false, "운전자가 아닌 Bob의 부스트 요청 거부")
+    ResourceState.patch(function(st)
+        st.rover.battery = rv.batteryMax * 0.15
+    end)
+    request(alice, true)
+    check(state().rover.boosting == false, "배터리 15%에서 부스트 거부")
+    ResourceState.patch(function(st)
+        st.rover.battery = rv.batteryMax
+    end)
+    request(alice, "yes")
+    check(state().rover.boosting == false, "boolean이 아닌 요청 무시")
+    request(alice, true)
+    check(
+        state().rover.boosting == true
+            and lastSent("StateUpdate").args[1].rover.boosting == true
+            and math.abs(RoverDrive.getSpeedMultiplier() - rv.boostSpeedMultiplier) < 1e-9,
+        "부스트: boosting, StateUpdate, 속도 배율 1.6"
+    )
+    -- 소모 3배: 한 주기(0.25초) 5 studs 이동
+    RoverBattery.step(0.25)
+    local b0 = state().rover.battery
+    chassis.CFrame = chassis.CFrame + Vector3.new(5, 0, 0)
+    RoverBattery.step(0.25)
+    check(
+        math.abs(
+            (b0 - state().rover.battery) - rv.batteryDrainPerSecond * 0.25 * rv.boostDrainMultiplier
+        ) < 1e-6,
+        string.format("부스트 중 소모 3배 (%.3f)", b0 - state().rover.battery)
+    )
+    chassis.CFrame = chassis.CFrame - Vector3.new(5, 0, 0)
+    -- 4초 연속이면 과열로 자동 해제
+    local steps = 0
+    while state().rover.boosting and steps < 40 do
+        RoverBattery.step(0.25)
+        steps += 1
+    end
+    advance(0)
+    check(
+        state().rover.boosting == false
+            and state().rover.boostHeat == 1
+            and RoverBoost.isOverheated()
+            and RoverDrive.getSpeedMultiplier() == 1,
+        string.format(
+            "부스트 %.2f초 뒤 과열로 자동 해제 (게이지 1, 속도 배율 1)",
+            (steps + 2) * 0.25
+        )
+    )
+    request(alice, true)
+    check(state().rover.boosting == false, "과열(쿨다운) 중 부스트 거부")
+    -- 6초 동안 식으면 다시 사용 가능
+    local cool = 0
+    while RoverBoost.isOverheated() and cool < 60 do
+        RoverBattery.step(0.25)
+        cool += 1
+    end
+    check(
+        not RoverBoost.isOverheated()
+            and state().rover.boostHeat == 0
+            and math.abs(cool * 0.25 - rv.boostCooldownSeconds) < 0.26,
+        string.format("%.2f초 뒤 다 식어 다시 사용 가능", cool * 0.25)
+    )
+    request(alice, true)
+    check(state().rover.boosting == true, "식은 뒤 다시 부스트")
+    -- 하차하면 해제 (Lune은 Occupant에 nil을 넣을 수 없어 좌석이 빈 주기를 직접 넣는다)
+    local released, changed = RoverBoost.tick(state(), 0.25, true, chassis)
+    check(released.rover.boosting == false and changed, "좌석이 비면 부스트 해제")
+    -- 배터리가 20% 아래로 내려가면 해제
+    ResourceState.patch(function(st)
+        st.rover.battery = rv.batteryMax * rv.boostMinBatteryRatio - 0.1
+    end)
+    RoverBattery.step(0.25)
+    advance(0)
+    check(
+        state().rover.boosting == false and RoverDrive.getSpeedMultiplier() == 1,
+        "배터리 부족이면 부스트 해제"
+    )
+    ResourceState.patch(function(st)
+        st.rover.battery = rv.batteryMax
+        st.rover.boostHeat = 0
+    end)
+end
+
 -- 건설 -----------------------------------------------------------------
 print("[건설]")
 local padAPrompt = base.ModulePads.PadA.Pad:FindFirstChildOfClass("ProximityPrompt")
@@ -3146,6 +3249,73 @@ check(
     state().modules.B.status == "active" and state().modules.C.status == "available",
     "B 가동, C 해금"
 )
+
+-- Farm 가동 중지 (2026-10-18) ------------------------------------------------
+do
+    local padB = base.ModulePads.PadB.Pad
+    local pausePrompt = padB:FindFirstChild("PausePrompt")
+    local doneB = false
+    for _, s in sent do
+        if
+            s.name == "Notify"
+            and string.find(tostring(s.args[1]), "Farm 가동 시작", 1, true) == 1
+            and string.find(
+                tostring(s.args[1]),
+                "물이 모자라면 Farm 패드에서 끌 수 있습니다",
+                1,
+                true
+            )
+        then
+            doneB = true
+        end
+    end
+    check(doneB, "Farm 완공 알림에 생산과 유지비, 끄는 법")
+    check(
+        pausePrompt ~= nil
+            and pausePrompt:IsA("ProximityPrompt")
+            and pausePrompt.ObjectText == "Farm"
+            and pausePrompt.ActionText == Config.PROMPT_TEXTS.pauseModule
+            and pausePrompt.HoldDuration == 0
+            and pausePrompt.MaxActivationDistance == Config.PROMPT.pauseDistance
+            and pausePrompt.Style == roblox.Enum.ProximityPromptStyle.Custom
+            and pausePrompt.Enabled == true,
+        "완공된 Farm 패드에 '가동 중지' 프롬프트 (Farm, 홀드 0, 거리 8, Custom)"
+    )
+    check(
+        base.ModulePads.PadA.Pad:FindFirstChild("PausePrompt") == nil
+            and base.ModulePads.PadC.Pad:FindFirstChild("PausePrompt") == nil,
+        "Habitat A와 Lab C에는 가동 중지 프롬프트 없음"
+    )
+    signalFor(pausePrompt, "Triggered"):Fire(alice)
+    advance(0)
+    local sentState = lastSent("StateUpdate").args[1]
+    check(
+        state().modules.B.paused == true
+            and sentState.modules.B.paused == true
+            and sentState.modules.B.upkeepText == Config.TEXTS.upkeepPaused
+            and pausePrompt.ActionText == Config.PROMPT_TEXTS.resumeModule
+            and lastSent("Notify").args[1] == string.format(Config.TEXTS.modulePaused, "Farm")
+            and lastSent("Notify").args[2] == "info",
+        "가동 중지: paused, upkeepText '대기 중', 프롬프트 '가동 재개', 알림"
+    )
+    check(state().modules.C.status == "available", "Farm을 멈춰도 Lab C 착공 가능")
+    signalFor(pausePrompt, "Triggered"):Fire(alice)
+    advance(0)
+    local B = Config.MODULES.B
+    sentState = lastSent("StateUpdate").args[1]
+    check(
+        state().modules.B.paused == false
+            and sentState.modules.B.upkeepText == string.format(
+                "물 -%d/일, 전력 -%d/일, 식량 +%d/일",
+                B.upkeep.water,
+                B.upkeep.energy,
+                B.foodPerDay
+            )
+            and pausePrompt.ActionText == Config.PROMPT_TEXTS.pauseModule
+            and lastSent("Notify").args[1] == string.format(Config.TEXTS.moduleResumed, "Farm"),
+        "가동 재개: upkeepText '" .. tostring(sentState.modules.B.upkeepText) .. "'"
+    )
+end
 
 -- 배속 ------------------------------------------------------------------
 print("[배속]")
