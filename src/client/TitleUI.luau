@@ -20,6 +20,7 @@ function TitleUI.init(ctx)
         Size = UDim2.fromOffset(240, 56),
         BackgroundColor3 = Colors.accent,
         Text = "시작",
+        Preset = "heading",
         TextSize = 26,
     }, { UI.corner(10) })
 
@@ -46,8 +47,8 @@ function TitleUI.init(ctx)
                 Name = "Title",
                 LayoutOrder = 1,
                 Size = UDim2.new(1, 0, 0, 84),
-                Font = UI.FontBold,
                 Text = "The Frontier",
+                Preset = "title",
                 TextSize = 72,
             }),
             UI.create("TextLabel", {
@@ -59,6 +60,7 @@ function TitleUI.init(ctx)
                     ctx.Config.TOTAL_DAYS
                 ),
                 TextColor3 = Colors.textDim,
+                Preset = "body",
                 TextSize = 22,
             }),
             startButton,

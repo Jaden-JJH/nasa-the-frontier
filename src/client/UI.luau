@@ -24,8 +24,20 @@ UI.Colors = {
     disabled = Color3.fromRGB(60, 66, 86),
 }
 
+-- 월드 라벨(프롬프트, 표지판)이 파트 중심에서 위로 띄우는 기본 거리 (파트 높이의 절반에 더함)
+UI.WORLD_ANCHOR_OFFSET = 3
+
 UI.Font = Enum.Font.GothamMedium
 UI.FontBold = Enum.Font.GothamBold
+
+-- 텍스트 스타일 프리셋. UI.create의 Preset 속성으로 쓴다 (고정 TextSize, 최소 14).
+UI.TextStyles = {
+    title = { Font = UI.FontBold, TextSize = 36 },
+    heading = { Font = UI.FontBold, TextSize = 20 },
+    body = { Font = UI.Font, TextSize = 17 },
+    caption = { Font = UI.Font, TextSize = 15 },
+    badge = { Font = UI.FontBold, TextSize = 15 },
+}
 
 -- 클래스별 기본 속성. props로 덮어쓴다.
 local DEFAULTS = {
@@ -56,8 +68,16 @@ function UI.create(className, props, children)
         end
     end
     local parent = nil
+    local preset = props and props.Preset
+    if preset then
+        for key, value in pairs(UI.TextStyles[preset]) do
+            inst[key] = value
+        end
+    end
     for key, value in pairs(props or {}) do
-        if key == "Parent" then
+        if key == "Preset" then
+            continue
+        elseif key == "Parent" then
             parent = value
         else
             inst[key] = value
@@ -122,6 +142,16 @@ function UI.gui(name, displayOrder, ignoreInset)
         ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
         DisplayOrder = displayOrder or 0,
         Parent = player:WaitForChild("PlayerGui"),
+    })
+end
+
+-- 월드 라벨용 외곽선 (밝은 배경에서도 읽히게)
+function UI.worldStroke()
+    return UI.create("UIStroke", {
+        Color = Color3.fromRGB(8, 12, 26),
+        Thickness = 1.5,
+        Transparency = 0.3,
+        ApplyStrokeMode = Enum.ApplyStrokeMode.Contextual,
     })
 end
 

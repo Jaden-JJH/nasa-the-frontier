@@ -59,7 +59,7 @@ function ToastUI.push(text, kind)
             Size = UDim2.fromScale(1, 0),
             AutomaticSize = Enum.AutomaticSize.Y,
             Text = text,
-            TextSize = 15,
+            Preset = "caption",
             TextWrapped = true,
             TextXAlignment = Enum.TextXAlignment.Left,
         }),

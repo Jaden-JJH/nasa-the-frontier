@@ -30,9 +30,8 @@ local function makeResourceRow(parent, order, name, color)
         Name = "Value",
         Position = UDim2.fromOffset(92, 0),
         Size = UDim2.new(0, 54, 1, 0),
-        Font = UI.FontBold,
         Text = "0",
-        TextSize = 18,
+        Preset = "heading",
         TextXAlignment = Enum.TextXAlignment.Right,
     })
     local net = UI.create("TextLabel", {
@@ -41,7 +40,7 @@ local function makeResourceRow(parent, order, name, color)
         Size = UDim2.new(1, -150, 1, 0),
         Text = "0/일",
         TextColor3 = Colors.neutral,
-        TextSize = 15,
+        Preset = "caption",
         TextXAlignment = Enum.TextXAlignment.Right,
     })
     UI.create("Frame", {
@@ -63,7 +62,7 @@ local function makeResourceRow(parent, order, name, color)
             Position = UDim2.fromOffset(22, 0),
             Size = UDim2.new(0, 66, 1, 0),
             Text = name,
-            TextSize = 16,
+            Preset = "body",
             TextXAlignment = Enum.TextXAlignment.Left,
         }),
         value,
@@ -92,9 +91,8 @@ local function makeInfoRow(parent, order, labelText)
         Name = "Value",
         Position = UDim2.fromScale(0.38, 0),
         Size = UDim2.fromScale(0.62, 1),
-        Font = UI.FontBold,
         Text = "-",
-        TextSize = 16,
+        Preset = "badge",
         TextXAlignment = Enum.TextXAlignment.Right,
     })
     UI.create("Frame", {
@@ -109,7 +107,7 @@ local function makeInfoRow(parent, order, labelText)
             Size = UDim2.fromScale(0.38, 1),
             Text = labelText,
             TextColor3 = Colors.textDim,
-            TextSize = 15,
+            Preset = "caption",
             TextXAlignment = Enum.TextXAlignment.Left,
         }),
         value,
@@ -125,7 +123,7 @@ local function makeModuleRow(parent, order, moduleId)
         Size = UDim2.new(1, 0, 0, 18),
         Text = "잠김",
         TextColor3 = Colors.neutral,
-        TextSize = 14,
+        Preset = "caption",
         TextXAlignment = Enum.TextXAlignment.Left,
     })
     local bar = UI.progressBar(Colors.energy, 6)
@@ -141,9 +139,8 @@ local function makeModuleRow(parent, order, moduleId)
         UI.create("TextLabel", {
             Name = "Title",
             Size = UDim2.new(1, 0, 0, 22),
-            Font = UI.FontBold,
             Text = moduleId .. " " .. title,
-            TextSize = 16,
+            Preset = "badge",
             TextXAlignment = Enum.TextXAlignment.Left,
         }),
         status,
@@ -175,9 +172,8 @@ function HUD.init(ctx)
     -- 상단 중앙: 부족 경고 배너, Day, 미션 텍스트
     refs.bannerText = UI.create("TextLabel", {
         Size = UDim2.fromScale(1, 1),
-        Font = UI.FontBold,
         Text = "",
-        TextSize = 18,
+        Preset = "heading",
     })
     refs.banner = UI.create("Frame", {
         Name = "ShortageBanner",
@@ -190,8 +186,8 @@ function HUD.init(ctx)
         Name = "Day",
         LayoutOrder = 1,
         Size = UDim2.new(1, 0, 0, 32),
-        Font = UI.FontBold,
         Text = "Day 0 / " .. config.TOTAL_DAYS,
+        Preset = "heading",
         TextSize = 28,
     })
     refs.mission = UI.create("TextLabel", {
@@ -201,7 +197,7 @@ function HUD.init(ctx)
         AutomaticSize = Enum.AutomaticSize.Y,
         Text = "",
         TextColor3 = Colors.textDim,
-        TextSize = 18,
+        Preset = "body",
         TextWrapped = true,
     })
     UI.create("Frame", {
@@ -272,7 +268,7 @@ function HUD.init(ctx)
         Size = UDim2.fromOffset(72, 44),
         BackgroundColor3 = Colors.panelLight,
         Text = "1x",
-        TextSize = 20,
+        Preset = "heading",
         Parent = gui,
     }, { UI.corner(10), UI.stroke(Colors.accent, 1) })
     refs.speed.Activated:Connect(function()

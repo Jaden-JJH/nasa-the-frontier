@@ -47,9 +47,8 @@ function OxygenBar.init(_ctx)
     label = UI.create("TextLabel", {
         Name = "Text",
         Size = UDim2.fromScale(1, 1),
-        Font = UI.FontBold,
         Text = "산소 0",
-        TextSize = 16,
+        Preset = "badge",
         ZIndex = 2,
     })
     group = UI.create("CanvasGroup", {
@@ -68,7 +67,7 @@ function OxygenBar.init(_ctx)
         BackgroundTransparency = 0,
         BackgroundColor3 = Colors.accent,
         Text = "실내",
-        TextSize = 14,
+        Preset = "caption",
         Visible = false,
         Parent = gui,
     }, { UI.corner(6) })

@@ -36,7 +36,7 @@ local function infoLine(text, order)
         Size = UDim2.new(1, 0, 0, 22),
         Text = text,
         TextColor3 = Colors.textDim,
-        TextSize = 16,
+        Preset = "body",
         TextXAlignment = Enum.TextXAlignment.Left,
     })
 end
@@ -78,7 +78,7 @@ local function buildCard(site, isDefault)
         Size = UDim2.new(1, 0, 0, 44),
         BackgroundColor3 = Colors.disabled,
         Text = "대기 중",
-        TextSize = 18,
+        Preset = "heading",
     }, { UI.corner(8) })
 
     local frame = UI.create("Frame", {
@@ -94,9 +94,8 @@ local function buildCard(site, isDefault)
         UI.create("TextLabel", {
             LayoutOrder = 1,
             Size = UDim2.new(1, 0, 0, 28),
-            Font = UI.FontBold,
             Text = isDefault and (site.name .. " (기본)") or site.name,
-            TextSize = 20,
+            Preset = "heading",
             TextXAlignment = Enum.TextXAlignment.Left,
             TextTruncate = Enum.TextTruncate.AtEnd,
         }),
@@ -105,7 +104,7 @@ local function buildCard(site, isDefault)
             Size = UDim2.new(1, 0, 0, 22),
             Text = "일조율 " .. sunPercent .. "%",
             TextColor3 = Colors.energy,
-            TextSize = 16,
+            Preset = "body",
             TextXAlignment = Enum.TextXAlignment.Left,
         }),
         bar.root,
@@ -115,7 +114,7 @@ local function buildCard(site, isDefault)
             Size = UDim2.new(1, 0, 0, 22),
             Text = "지형 위험: " .. site.hazardLabel,
             TextColor3 = HAZARD_COLORS[site.hazardLabel] or Colors.textDim,
-            TextSize = 16,
+            Preset = "body",
             TextXAlignment = Enum.TextXAlignment.Left,
         }),
         UI.create("TextLabel", {
@@ -123,7 +122,7 @@ local function buildCard(site, isDefault)
             Size = UDim2.new(1, 0, 0, 72),
             Text = site.description,
             TextColor3 = Colors.text,
-            TextSize = 15,
+            Preset = "caption",
             TextWrapped = true,
             TextXAlignment = Enum.TextXAlignment.Left,
             TextYAlignment = Enum.TextYAlignment.Top,
@@ -175,7 +174,7 @@ function SiteSelectUI.init(ctx)
         LayoutOrder = 2,
         Size = UDim2.new(1, 0, 0, 26),
         Text = "",
-        TextSize = 20,
+        Preset = "body",
         TextColor3 = Colors.water,
     })
     countdownLabel = UI.create("TextLabel", {
@@ -183,7 +182,7 @@ function SiteSelectUI.init(ctx)
         LayoutOrder = 3,
         Size = UDim2.new(1, 0, 0, 26),
         Text = "",
-        TextSize = 18,
+        Preset = "body",
         TextColor3 = Colors.textDim,
     })
     cardsFrame = UI.create("Frame", {
@@ -214,9 +213,8 @@ function SiteSelectUI.init(ctx)
             Name = "Header",
             LayoutOrder = 1,
             Size = UDim2.new(1, 0, 0, 44),
-            Font = UI.FontBold,
             Text = "착륙지 선택",
-            TextSize = 36,
+            Preset = "title",
         }),
         chooserLabel,
         countdownLabel,

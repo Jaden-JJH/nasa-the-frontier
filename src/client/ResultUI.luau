@@ -18,9 +18,8 @@ local function makeRow(parent, order, labelText)
     local value = UI.create("TextLabel", {
         Position = UDim2.fromScale(0.5, 0),
         Size = UDim2.fromScale(0.5, 1),
-        Font = UI.FontBold,
         Text = "-",
-        TextSize = 18,
+        Preset = "heading",
         TextXAlignment = Enum.TextXAlignment.Right,
     })
     UI.create("Frame", {
@@ -34,7 +33,7 @@ local function makeRow(parent, order, labelText)
             Size = UDim2.fromScale(0.5, 1),
             Text = labelText,
             TextColor3 = Colors.textDim,
-            TextSize = 17,
+            Preset = "body",
             TextXAlignment = Enum.TextXAlignment.Left,
         }),
         value,
@@ -50,8 +49,8 @@ function ResultUI.init(ctx)
     titleLabel = UI.create("TextLabel", {
         LayoutOrder = 1,
         Size = UDim2.new(1, 0, 0, 56),
-        Font = UI.FontBold,
         Text = "",
+        Preset = "title",
         TextSize = 44,
     })
     reasonLabel = UI.create("TextLabel", {
@@ -60,7 +59,7 @@ function ResultUI.init(ctx)
         AutomaticSize = Enum.AutomaticSize.Y,
         Text = "",
         TextColor3 = Colors.textDim,
-        TextSize = 18,
+        Preset = "body",
         TextWrapped = true,
     })
     local summary = UI.create("Frame", {
@@ -81,7 +80,7 @@ function ResultUI.init(ctx)
         Size = UDim2.new(1, 0, 0, 52),
         BackgroundColor3 = Colors.accent,
         Text = "재도전",
-        TextSize = 22,
+        Preset = "heading",
     }, { UI.corner(10) })
 
     UI.create("Frame", {

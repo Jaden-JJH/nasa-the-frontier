@@ -138,7 +138,7 @@ function RadarUI.init(ctx)
         Size = UDim2.new(1, 0, 0, 22),
         Text = "",
         TextColor3 = Colors.water,
-        TextSize = 14,
+        Preset = "caption",
     })
 
     UI.create("Frame", {
@@ -175,7 +175,7 @@ function RadarUI.init(ctx)
                 Size = UDim2.fromOffset(24, 14),
                 Text = "앞",
                 TextColor3 = Colors.textDim,
-                TextSize = 12,
+                Preset = "caption",
             }),
             dotsFrame,
             -- 중심 점 (로버)
