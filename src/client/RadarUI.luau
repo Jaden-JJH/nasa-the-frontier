@@ -26,6 +26,7 @@ local dotsFrame
 local distanceLabel
 local batteryLabel
 local battery = nil -- 마지막 StateUpdate의 rover.battery
+local boosting = false
 local enabled = false
 local dots = {} -- { [BasePart] = Frame }
 
@@ -170,7 +171,7 @@ local function step()
         local speed = roverConfig.maxSpeed or 18
         local drain = roverConfig.batteryDrainPerSecond or 0.4
         local text = string.format("배터리 %d E", math.floor(battery + 0.5))
-        local color = Colors.energy
+        local color = if boosting then HARD_COLOR else Colors.energy
         if nearest ~= math.huge then
             local need = nearest * 2 / speed * drain
             text = text .. string.format(", 왕복 약 %d E", math.ceil(need))
@@ -297,6 +298,7 @@ end
 function RadarUI.onState(state)
     local rover = state and state.rover
     battery = rover and rover.battery
+    boosting = rover ~= nil and rover.boosting == true
 end
 
 -- Main이 phase에 따라 켜고 끈다. 실제 표시는 DriverSeat 착석 여부로 결정.

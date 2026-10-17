@@ -5,6 +5,7 @@
 
 local TweenService = game:GetService("TweenService")
 
+local RoverBoost = require(script.Parent.RoverBoost)
 local UI = require(script.Parent.UI)
 local Colors = UI.Colors
 
@@ -17,6 +18,10 @@ local refs = {}
 local currentSpeed = 1
 local batteryTweens = nil
 local batteryMode = nil -- "low" | "charging" | nil
+local boostOverheated = false -- 과열 이후 쿨다운 중
+local lastRover = nil
+local BOOST_COLOR = Color3.fromRGB(255, 150, 50)
+local BOOST_DIM = Color3.fromRGB(170, 100, 40)
 
 local STATUS_TEXT = {
     locked = "잠김",
@@ -308,7 +313,42 @@ function HUD.init(ctx)
     }, { refs.batteryBar.root, refs.batteryBadge })
     refs.batteryText.Parent.Visible = false
     refs.batteryRow.Visible = false
-    refs.roverBadge = makeInfoRow(topRight, 5, "로버 상태")
+    -- 부스트 게이지 (로버 탑승 중에만)
+    refs.boostBar = UI.progressBar(BOOST_COLOR, 8)
+    refs.boostBar.root.AnchorPoint = Vector2.new(0, 0.5)
+    refs.boostBar.root.Position = UDim2.fromScale(0, 0.5)
+    refs.boostBar.root.Size = UDim2.new(1, -68, 0, 8)
+    refs.boostState = UI.create("TextLabel", {
+        Name = "BoostState",
+        AnchorPoint = Vector2.new(1, 0.5),
+        Position = UDim2.fromScale(1, 0.5),
+        Size = UDim2.fromOffset(62, 18),
+        Text = "",
+        Preset = "badge",
+        TextSize = 12,
+        TextXAlignment = Enum.TextXAlignment.Right,
+    })
+    refs.boostRow = UI.create("Frame", {
+        Name = "BoostRow",
+        LayoutOrder = 5,
+        Size = UDim2.new(1, 0, 0, 20),
+        BackgroundTransparency = 1,
+        Visible = false,
+        Parent = topRight,
+    }, { refs.boostBar.root, refs.boostState })
+    refs.boostCaption = UI.create("TextLabel", {
+        Name = "BoostCaption",
+        LayoutOrder = 6,
+        Size = UDim2.new(1, 0, 0, 16),
+        Text = "",
+        TextColor3 = Colors.textDim,
+        Preset = "caption",
+        TextSize = 12,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        Visible = false,
+        Parent = topRight,
+    })
+    refs.roverBadge = makeInfoRow(topRight, 7, "로버 상태")
     refs.roverBadge.Parent.Visible = false
 
     -- 우측: 모듈 3개 (y=300, 토스트 영역을 피한다)
@@ -439,6 +479,47 @@ local function updateBattery(rover)
     end
 end
 
+-- 부스트 게이지: boostHeat 0..1, 탑승 중이고 필드가 있을 때만 보인다
+local function updateBoost(rover)
+    local heat = rover and rover.boostHeat
+    local show = RoverBoost.isDriving() and type(heat) == "number"
+    refs.boostRow.Visible = show
+    refs.boostCaption.Visible = show
+    if not show then
+        boostOverheated = false
+        return
+    end
+    if heat >= 0.98 then
+        boostOverheated = true
+    elseif heat <= 0.02 then
+        boostOverheated = false
+    end
+    refs.boostBar.setRatio(heat)
+    if heat >= 0.98 then
+        refs.boostBar.fill.BackgroundColor3 = Colors.bad
+        refs.boostState.Text = "과열"
+        refs.boostState.TextColor3 = Colors.bad
+    elseif boostOverheated then
+        refs.boostBar.fill.BackgroundColor3 = Colors.neutral
+        refs.boostState.Text = "쿨다운"
+        refs.boostState.TextColor3 = Colors.neutral
+    else
+        local boosting = rover.boosting == true
+        refs.boostBar.fill.BackgroundColor3 = if boosting then BOOST_COLOR else BOOST_DIM
+        refs.boostState.Text = if boosting then "부스트" else ""
+        refs.boostState.TextColor3 = BOOST_COLOR
+    end
+    refs.boostCaption.Text = if UI.isTouchOnly()
+        then "부스터 버튼 (배터리 3배)"
+        else "Shift 부스터 (배터리 3배)"
+    local battery, batteryMax = rover.battery, rover.batteryMax
+    local lowBattery = type(battery) == "number"
+        and type(batteryMax) == "number"
+        and batteryMax > 0
+        and battery / batteryMax <= 0.2
+    refs.boostCaption.TextTransparency = if lowBattery then 0.6 else 0
+end
+
 function HUD.update(state)
     refs.energy.value.Text = tostring(math.floor(state.energy))
     refs.water.value.Text = tostring(math.floor(state.water))
@@ -476,6 +557,8 @@ function HUD.update(state)
         string.format("%d/%d", roundInt(state.rover.tank), roundInt(state.rover.tankMax))
 
     updateBattery(state.rover)
+    lastRover = state.rover
+    updateBoost(state.rover)
 
     local damage = state.rover.damage
     local badge = refs.roverBadge
@@ -524,6 +607,13 @@ function HUD.update(state)
         refs.banner.Visible = false
     end
 end
+
+-- 탑승 여부가 바뀌면 다음 StateUpdate를 기다리지 않고 게이지를 갱신
+RoverBoost.drivingChanged:Connect(function()
+    if refs.boostRow then
+        updateBoost(lastRover)
+    end
+end)
 
 function HUD.setVisible(visible)
     gui.Enabled = visible

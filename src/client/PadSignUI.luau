@@ -110,6 +110,18 @@ local function makeSign(moduleId, pad)
         Visible = false,
     }, { UI.worldStroke() })
 
+    local upkeepLabel = UI.create("TextLabel", {
+        Name = "Upkeep",
+        LayoutOrder = 7,
+        Size = UDim2.new(1, 0, 0, 18),
+        AutomaticSize = Enum.AutomaticSize.Y,
+        Preset = "caption",
+        Text = "",
+        TextColor3 = Colors.textDim,
+        TextWrapped = true,
+        Visible = false,
+    }, { UI.worldStroke() })
+
     local panel = UI.create("Frame", {
         Name = "Panel",
         AnchorPoint = Vector2.new(0.5, 1),
@@ -140,6 +152,7 @@ local function makeSign(moduleId, pad)
         daysLabel,
         costLabel,
         noteLabel,
+        upkeepLabel,
     })
 
     local gui = UI.create("BillboardGui", {
@@ -162,6 +175,7 @@ local function makeSign(moduleId, pad)
         daysLabel = daysLabel,
         costLabel = costLabel,
         noteLabel = noteLabel,
+        upkeepLabel = upkeepLabel,
     }
 end
 
@@ -195,6 +209,13 @@ local function applyState(sign, moduleId)
         end
     end
 
+    -- 가동 중이지만 대기(paused)면 회색 배지
+    local paused = status == "active" and moduleState ~= nil and moduleState.paused == true
+    if paused then
+        style = { text = "대기 중", color = Colors.neutral }
+        lightBadge = false
+    end
+
     sign.badge.BackgroundColor3 = style.color
     sign.badgeLabel.Text = style.text
     -- 밝은 배지(노랑, 초록)는 어두운 글자, 어두운 배지는 흰 글자
@@ -208,6 +229,12 @@ local function applyState(sign, moduleId)
         sign.daysLabel.Text = string.format("%d일 남음", moduleState.daysLeft)
     end
     sign.costLabel.Visible = status == "available"
+    local upkeep = moduleState and moduleState.upkeepText
+    if status == "active" and type(upkeep) ~= "string" and paused then
+        upkeep = "대기 중"
+    end
+    sign.upkeepLabel.Visible = status == "active" and type(upkeep) == "string" and upkeep ~= ""
+    sign.upkeepLabel.Text = if type(upkeep) == "string" then upkeep else ""
     sign.noteLabel.Visible = note ~= ""
     sign.noteLabel.Text = note
     sign.noteLabel.TextColor3 = noteColor
