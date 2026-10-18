@@ -398,6 +398,11 @@ roblox.implementMethod("Sound", "Play", function(inst)
     )
 end)
 roblox.implementMethod("Sound", "Stop", function() end)
+-- 입자 (RoverBoost): Emit 호출 기록. emitLog = { { emitter, count } }
+local emitLog = {}
+roblox.implementMethod("ParticleEmitter", "Emit", function(inst, count)
+    table.insert(emitLog, { emitter = inst, name = inst.Name, count = count })
+end)
 roblox.implementProperty("Sound", "Ended", function(inst)
     return signalFor(inst, "Ended")
 end)
@@ -507,6 +512,10 @@ local function makeLoader(dataModel, warnSink, patch)
             CFrame = CFrame,
             Color3 = roblox.Color3,
             UDim2 = roblox.UDim2,
+            Vector2 = roblox.Vector2,
+            NumberRange = roblox.NumberRange,
+            NumberSequence = roblox.NumberSequence,
+            ColorSequence = roblox.ColorSequence,
             Enum = roblox.Enum,
             PhysicalProperties = roblox.PhysicalProperties,
             RaycastParams = {
@@ -3044,6 +3053,64 @@ do
             and math.abs(RoverDrive.getSpeedMultiplier() - rv.boostSpeedMultiplier) < 1e-9,
         "부스트: boosting, StateUpdate, 속도 배율 1.6"
     )
+    -- 시각 효과: 뒤쪽 양옆 불꽃 Rate 120, 뒤쪽 빛 켜짐, 켜는 순간 burst, 바퀴 살짝 밝게
+    local f = rv.boostFx
+    local flames, fxLight = {}, nil
+    for _, a in chassis:GetChildren() do
+        if a:IsA("Attachment") and a.Name == "BoostFlame" then
+            table.insert(flames, a)
+        elseif a:IsA("Attachment") and a.Name == "BoostRear" then
+            fxLight = a:FindFirstChild("BoostLight")
+        end
+    end
+    local flameOk = #flames == 2
+    for _, a in flames do
+        local e = a:FindFirstChild("BoostFlames")
+        if
+            not e
+            or e.Rate ~= f.rate
+            or a.Position.Z <= 0
+            or e.EmissionDirection ~= roblox.Enum.NormalId.Back
+            or e.LightEmission ~= 1
+        then
+            flameOk = false
+        end
+    end
+    check(
+        flameOk,
+        "부스트 중 섀시 뒤쪽(+Z) 양옆 불꽃 2개 Rate 120, 뒤쪽으로 뿜음"
+    )
+    check(
+        fxLight ~= nil and fxLight.Enabled == true and fxLight.Range == f.lightRange,
+        "부스트 중 뒤쪽 하늘색 빛 켜짐"
+    )
+    local bursts = 0
+    for _, entry in emitLog do
+        if entry.name == "BoostFlames" and entry.count == f.burst then
+            bursts += 1
+        end
+    end
+    check(
+        bursts == 2,
+        "켜는 순간 불꽃마다 burst " .. f.burst .. "개 (" .. bursts .. "회)"
+    )
+    do
+        local wheel = nil
+        for _, part in rover:GetChildren() do
+            if part:IsA("BasePart") and string.sub(part.Name, 1, 5) == "Wheel" then
+                wheel = part
+                break
+            end
+        end
+        local original = loadModule(Server:FindFirstChild("RoverBoost")).getFx().wheels[wheel]
+        check(
+            wheel ~= nil
+                and original ~= nil
+                and (wheel.Color.R + wheel.Color.G + wheel.Color.B)
+                    > (original.R + original.G + original.B),
+            "부스트 중 바퀴 색 살짝 밝게"
+        )
+    end
     -- 소모 3배: 한 주기(0.25초) 5 studs 이동
     RoverBattery.step(0.25)
     local b0 = state().rover.battery
@@ -3073,6 +3140,29 @@ do
             (steps + 2) * 0.25
         )
     )
+    do
+        local off = fxLight.Enabled == false
+        for _, a in flames do
+            if a.BoostFlames.Rate ~= 0 then
+                off = false
+            end
+        end
+        local smokes = 0
+        for _, entry in emitLog do
+            if entry.name == "BoostSmoke" and entry.count == f.smokeBurst then
+                smokes += 1
+            end
+        end
+        check(off, "부스트가 꺼지면 불꽃 Rate 0, 빛 꺼짐")
+        check(
+            smokes == 1,
+            "과열로 꺼지면 회색 연기 "
+                .. f.smokeBurst
+                .. "개 한 번 ("
+                .. smokes
+                .. "회)"
+        )
+    end
     request(alice, true)
     check(state().rover.boosting == false, "과열(쿨다운) 중 부스트 거부")
     -- 6초 동안 식으면 다시 사용 가능
@@ -3106,6 +3196,24 @@ do
         st.rover.battery = rv.batteryMax
         st.rover.boostHeat = 0
     end)
+    -- 로버를 다시 만들어도(복구 재복제) 불꽃과 빛이 새 섀시에 다시 붙는다
+    advance(Config.ROVER_RECOVERY.cooldownSeconds)
+    rover:Destroy()
+    advance(Config.ROVER_RECOVERY.checkSeconds + 0.1)
+    rover = base:FindFirstChild("Rover")
+    local newFlames = 0
+    for _, a in rover.Chassis:GetChildren() do
+        if a:IsA("Attachment") and a.Name == "BoostFlame" and a:FindFirstChild("BoostFlames") then
+            newFlames += 1
+        end
+    end
+    local rearOk = rover.Chassis:FindFirstChild("BoostRear") ~= nil
+        and rover.Chassis.BoostRear:FindFirstChild("BoostLight") ~= nil
+        and rover.Chassis.BoostRear:FindFirstChild("BoostSmoke") ~= nil
+    check(newFlames == 2 and rearOk, "로버 재생성 뒤에도 불꽃 2개, 빛, 연기 Emitter")
+    rover.DriverSeat:Sit(humanoid)
+    advance(0)
+    newRover = rover
 end
 
 -- 건설 -----------------------------------------------------------------

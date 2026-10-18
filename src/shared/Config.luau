@@ -181,6 +181,29 @@ local Config = {
         boostMaxSeconds = 4,
         boostCooldownSeconds = 6,
         boostMinBatteryRatio = 0.2,
+        -- 부스터 시각 효과 (2026-10-18, RoverBoost): 섀시 뒤쪽 양옆 불꽃 입자 + 뒤쪽 하늘색 빛 + 바퀴 색 살짝 밝게.
+        -- 켜는 순간 burst개를 한 번에 뿜고, 과열로 꺼지면 회색 연기를 smokeBurst개. 색은 RGB 0..255
+        boostFx = {
+            rate = 120,
+            burst = 30,
+            lifetime = { 0.25, 0.4 },
+            speed = { 25, 35 },
+            size = { 0.6, 0 },
+            transparency = { 0.2, 1 },
+            color = { 120, 200, 255 },
+            colorEnd = { 255, 255, 255 },
+            spread = 12, -- 뒤쪽 방향에서 퍼지는 각도(도)
+            sideInset = 0.8, -- 섀시 옆면에서 불꽃 위치까지 안쪽 거리
+            lightRange = 14,
+            lightBrightness = 2,
+            smokeBurst = 20,
+            smokeColor = { 150, 150, 150 },
+            smokeLifetime = 1.2,
+            smokeSpeed = 4,
+            smokeSize = { 1.2, 2.5 },
+            smokeTransparency = { 0.3, 1 },
+            wheelBrighten = 0.35, -- 부스트 중 바퀴 색을 흰색 쪽으로 이 비율만큼
+        },
     },
     SPAWN_HEIGHT_OFFSET = 3, -- SpawnPoint 윗면에서 캐릭터 중심까지 높이(studs)
     CHARACTER_LOAD_TIMEOUT = 5, -- 리스폰 후 HumanoidRootPart를 기다리는 최대 시간(초)

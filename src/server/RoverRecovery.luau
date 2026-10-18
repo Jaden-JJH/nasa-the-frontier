@@ -13,6 +13,7 @@ local ServerStorage = game:GetService("ServerStorage")
 local Config = require(ReplicatedStorage.Shared.Config)
 local ResourceState = require(script.Parent.ResourceState)
 local RoverBattery = require(script.Parent.RoverBattery)
+local RoverBoost = require(script.Parent.RoverBoost)
 local RoverDamage = require(script.Parent.RoverDamage)
 local RoverDrive = require(script.Parent.RoverDrive)
 local ServerUtil = require(script.Parent.ServerUtil)
@@ -96,6 +97,7 @@ function RoverRecovery.recover(): boolean
         fresh.Parent = base
         RoverDrive.attach(base)
         RoverDamage.attach(base)
+        RoverBoost.attach(base) -- 부스터 불꽃과 빛을 새 섀시에 다시 붙인다
     end
     -- 물 유실: 복구는 물을 기지로 옮겨 주지 않는다. 파손은 복구와 함께 고쳐진다
     local lostWater = ResourceState.get().rover.tank > 0
