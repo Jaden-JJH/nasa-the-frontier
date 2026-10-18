@@ -1,5 +1,7 @@
 --!nonstrict
--- 상황별 일회성 Tip 카드. 토스트(사건 알림)와 미션 문구(목표)와 달리 화면 중앙 아래쪽(세로 65%)에 뜬다.
+-- 상황별 일회성 Tip 카드. 토스트(우상단, 사건 알림)와 미션 문구(상단 중앙, 목표)와 달리
+-- 하단 중앙 산소 바 바로 위에 뜬다(시야 중앙과 월드 프롬프트를 가리지 않게). 아래에서 올라오며 나타난다.
+-- 좌하단(PC)/좌상단(터치) 레이더와 터치 점프 버튼을 피하도록 폭과 가로 위치를 화면 크기로 정한다.
 -- 한 번에 하나, 대기열 순차 표시, 표시 사이 최소 3초 간격, 세션당 각 Tip 1회(재시작하면 초기화).
 -- 문구는 Config.TIPS. 트리거는 전부 클라이언트 측(StateUpdate, OxygenUpdate, 탑승 이벤트).
 
@@ -16,8 +18,16 @@ local FADE_IN = 0.3
 local HOLD = 6
 local FADE_OUT = 0.5
 local MIN_GAP = 3
-local RISE = 20
-local CARD_Y = 0.65
+local RISE = 24 -- 등장 시 아래에서 올라오는 거리(px)
+local SINK = 12 -- 퇴장 시 아래로 가라앉는 거리(px)
+-- 카드 아래 끝 = 화면 하단에서 84px. 산소 바(하단 18~48), 에어락 태그(54~76) 위 8px 여유.
+-- 에어락 안내 문구는 산소 바 아래(하단 0~18)라 겹치지 않는다.
+local BOTTOM_GAP = 84
+-- 레이더 오른쪽 끝(PC 좌하단 x 16~236, 터치 좌상단 x 12~232, 캡션 포함) + 12px
+local LEFT_BOUND = 248
+local RIGHT_RESERVE_PC = 12 -- PC 우하단 배속 버튼은 카드보다 아래(하단 12~56)라 가로 여유만 둔다
+local RIGHT_RESERVE_TOUCH = 120 -- 터치 점프 버튼(약 x W-95~W-25, 하단 20~90)
+local FALLBACK_VIEWPORT = Vector2.new(1280, 720)
 local TIP_SOUND_VOLUME = 0.3
 
 local CREAM = Color3.fromRGB(245, 240, 225)
@@ -26,6 +36,7 @@ local AMBER = Color3.fromRGB(255, 200, 40)
 local BASE_GRAY = Color3.fromRGB(120, 110, 90)
 
 local config
+local gui
 local group
 local textLabel
 local card
@@ -109,18 +120,39 @@ local function waitFor(seconds, myGeneration)
     return generation == myGeneration
 end
 
+-- 카드 폭과 가로 중심(px). 가운데에 두되 레이더와 겹치면 오른쪽으로 비키고, 그래도 좁으면 폭을 줄인다.
+-- 예: 1920x1080 -> 폭 560, x 680~1240 / 1280x720 -> x 360~920 / 844x390 터치 -> 폭 476, x 248~724
+local function cardLayout()
+    local viewport = gui.AbsoluteSize
+    if viewport.X <= 0 or viewport.Y <= 0 then
+        viewport = FALLBACK_VIEWPORT
+    end
+    local rightReserve = if UI.isTouchOnly() then RIGHT_RESERVE_TOUCH else RIGHT_RESERVE_PC
+    local width = math.min(CARD_MAX_WIDTH, viewport.X - LEFT_BOUND - rightReserve)
+    local centerX = math.max(viewport.X / 2, LEFT_BOUND + width / 2)
+    return width, centerX
+end
+
+local function cardPosition(centerX, dy)
+    return UDim2.new(0, centerX, 1, -BOTTOM_GAP + dy)
+end
+
 local function showCard(text, myGeneration)
     textLabel.Text = text
+    local width, centerX = cardLayout()
+    group.Size = UDim2.fromOffset(width, 0)
     group.GroupTransparency = 1
-    group.Position = UDim2.new(0.5, 0, CARD_Y, RISE)
+    group.Position = cardPosition(centerX, RISE)
     local info = TweenInfo.new(FADE_IN, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
     TweenService:Create(group, info, { GroupTransparency = 0 }):Play()
-    TweenService:Create(group, info, { Position = UDim2.fromScale(0.5, CARD_Y) }):Play()
+    TweenService:Create(group, info, { Position = cardPosition(centerX, 0) }):Play()
     group.Visible = true
 
     local completed = waitFor(FADE_IN + HOLD, myGeneration)
     local fade = if completed then FADE_OUT else 0.2
-    local out = TweenService:Create(group, TweenInfo.new(fade), { GroupTransparency = 1 })
+    local outInfo = TweenInfo.new(fade, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+    local out = TweenService:Create(group, outInfo, { GroupTransparency = 1 })
+    TweenService:Create(group, outInfo, { Position = cardPosition(centerX, SINK) }):Play()
     out:Play()
     task.wait(fade)
     if generation == myGeneration or not completed then
@@ -174,7 +206,7 @@ end
 
 function TipUI.init(ctx)
     config = ctx.Config
-    local gui = UI.gui("Tip", 14)
+    gui = UI.gui("Tip", 14)
 
     textLabel = UI.create("TextLabel", {
         Name = "Text",
@@ -236,16 +268,16 @@ function TipUI.init(ctx)
 
     group = UI.create("CanvasGroup", {
         Name = "Group",
-        AnchorPoint = Vector2.new(0.5, 0.5),
-        Position = UDim2.fromScale(0.5, CARD_Y),
-        Size = UDim2.fromScale(0.9, 0),
+        -- 아래 끝 기준: 문구가 3줄로 늘어나도 위로만 자라 산소 바를 덮지 않는다
+        AnchorPoint = Vector2.new(0.5, 1),
+        Position = cardPosition(640, 0),
+        Size = UDim2.fromOffset(CARD_MAX_WIDTH, 0),
         AutomaticSize = Enum.AutomaticSize.Y,
         BackgroundTransparency = 1,
         GroupTransparency = 1,
         Visible = false,
         Parent = gui,
     }, {
-        UI.create("UISizeConstraint", { MaxSize = Vector2.new(CARD_MAX_WIDTH, math.huge) }),
         card,
     })
 
