@@ -53,6 +53,10 @@ function ToastUI.init(_ctx)
     -- 기준 프레임 크기가 바뀌어도(배터리 줄, 부스트 게이지 등장) 따라가도록 주기적으로 갱신
     task.spawn(function()
         while true do
+            -- 뷰포트가 바뀔 수 있으므로 매번 판정한다 (init 시점에는 아직 작게 보일 수 있다)
+            compactLayout = Layout.isCompact()
+            container.AnchorPoint = if compactLayout then Vector2.new(0.5, 0) else Vector2.new(1, 0)
+            container.Size = UDim2.fromOffset(if compactLayout then 260 else 300, 0)
             local target = if compactLayout then HUD.getTopCenter() else HUD.getRightColumn()
             if target then
                 local y = Layout.below(toastRoot, target, 8)

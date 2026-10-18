@@ -1,7 +1,7 @@
 --!nonstrict
 -- 상황별 일회성 Tip 카드. 토스트(우상단, 사건 알림)와 미션 문구(상단 중앙, 목표)와 달리
--- 하단 중앙 산소 바 바로 위에 뜬다(시야 중앙과 월드 프롬프트를 가리지 않게). 아래에서 올라오며 나타난다.
--- 좌하단(PC)/좌상단(터치) 레이더와 터치 점프 버튼을 피하도록 폭과 가로 위치를 화면 크기로 정한다.
+-- 우측 하단에 뜬다(14차, 사용자 지시). 아래에서 올라오며 나타나고 여러 줄은 위로 자란다.
+-- PC: 오른쪽 16px, 아래 16px, 폭 360. 터치/낮은 화면(compact): 오른쪽 12px, 아래 190px(부스터와 점프 버튼 위).
 -- 한 번에 하나, 대기열 순차 표시, 표시 사이 최소 3초 간격, 세션당 각 Tip 1회(재시작하면 초기화).
 -- 문구는 Config.TIPS. 트리거는 전부 클라이언트 측(StateUpdate, OxygenUpdate, 탑승 이벤트).
 
@@ -14,21 +14,17 @@ local UI = require(script.Parent.UI)
 
 local TipUI = {}
 
-local CARD_MAX_WIDTH = 560
+local CARD_WIDTH = 360
 local FADE_IN = 0.3
 local HOLD = 6
 local FADE_OUT = 0.5
 local MIN_GAP = 3
 local RISE = 24 -- 등장 시 아래에서 올라오는 거리(px)
 local SINK = 12 -- 퇴장 시 아래로 가라앉는 거리(px)
--- 카드 아래 끝 = 화면 하단에서 (76 x 배율 + 8)px. 산소 바(하단 18~48), 에어락 태그(54~76) 위 8px 여유.
--- 에어락 안내 문구는 산소 바 아래(하단 0~18)라 겹치지 않는다. 산소 UI가 배율만큼 커지므로 여백도 같은 배율.
-local OXYGEN_TOP_UNITS = 76
-local BOTTOM_MARGIN = 8
--- 레이더 오른쪽 끝(캡션 포함, 레이더 크기 + 40) + 12px. 레이더도 같은 배율로 그려진다.
-local LEFT_EDGE_GAP = 12
-local RIGHT_RESERVE_PC = 12 -- PC 우하단 배속 버튼은 카드보다 아래(하단 12~56)라 가로 여유만 둔다
-local RIGHT_RESERVE_TOUCH = 120 -- 터치 점프 버튼(약 x W-95~W-25, 하단 20~90)
+local PC_MARGIN = 16 -- PC: 오른쪽, 아래 여백
+local COMPACT_RIGHT = 12
+local COMPACT_BOTTOM = 190 -- 부스터 버튼(하단 110~174) 위 + 여유. 점프 버튼도 이 아래에 있다
+local COMPACT_SIDE_PAD = 24 -- compact 폭 = min(360, 뷰포트 폭 - 24)
 local FALLBACK_VIEWPORT = Vector2.new(1280, 720)
 local TIP_SOUND_VOLUME = 0.3
 
@@ -122,51 +118,38 @@ local function waitFor(seconds, myGeneration)
     return generation == myGeneration
 end
 
--- 카드 폭과 가로 중심(px). 가운데에 두되 레이더와 겹치면 오른쪽으로 비키고, 그래도 좁으면 폭을 줄인다.
--- 예: 1920x1080 -> 폭 560, x 680~1240 / 1280x720 -> x 360~920 / 844x390 터치 -> 폭 560, x 146~706
-local function bottomGap()
-    return OXYGEN_TOP_UNITS * Layout.scale() + BOTTOM_MARGIN
-end
-
-local function leftBound()
-    local compact = Layout.isCompact()
-    local radarWidth = (if compact then 140 else 180) + 40
-    local radarLeft = if compact then 12 else 16
-    return (radarLeft + radarWidth) * Layout.scale() + LEFT_EDGE_GAP
-end
-
+-- 카드 폭(px)과 우하단 여백. compact 여부는 표시할 때마다 읽는다.
 local function cardLayout()
     local viewport = gui.AbsoluteSize
     if viewport.X <= 0 or viewport.Y <= 0 then
         viewport = FALLBACK_VIEWPORT
     end
-    local rightReserve = if UI.isTouchOnly() then RIGHT_RESERVE_TOUCH else RIGHT_RESERVE_PC
-    local bound = leftBound()
-    local width = math.min(CARD_MAX_WIDTH, viewport.X - bound - rightReserve)
-    local centerX = math.max(viewport.X / 2, bound + width / 2)
-    return width, centerX
+    if Layout.isCompact() then
+        return math.min(CARD_WIDTH, viewport.X - COMPACT_SIDE_PAD), COMPACT_RIGHT, COMPACT_BOTTOM
+    end
+    return math.min(CARD_WIDTH, viewport.X - PC_MARGIN * 2), PC_MARGIN, PC_MARGIN
 end
 
-local function cardPosition(centerX, dy)
-    return UDim2.new(0, centerX, 1, -bottomGap() + dy)
+local function cardPosition(right, bottom, dy)
+    return UDim2.new(1, -right, 1, -bottom + dy)
 end
 
 local function showCard(text, myGeneration)
     textLabel.Text = text
-    local width, centerX = cardLayout()
+    local width, right, bottom = cardLayout()
     group.Size = UDim2.fromOffset(width, 0)
     group.GroupTransparency = 1
-    group.Position = cardPosition(centerX, RISE)
+    group.Position = cardPosition(right, bottom, RISE)
     local info = TweenInfo.new(FADE_IN, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
     TweenService:Create(group, info, { GroupTransparency = 0 }):Play()
-    TweenService:Create(group, info, { Position = cardPosition(centerX, 0) }):Play()
+    TweenService:Create(group, info, { Position = cardPosition(right, bottom, 0) }):Play()
     group.Visible = true
 
     local completed = waitFor(FADE_IN + HOLD, myGeneration)
     local fade = if completed then FADE_OUT else 0.2
     local outInfo = TweenInfo.new(fade, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
     local out = TweenService:Create(group, outInfo, { GroupTransparency = 1 })
-    TweenService:Create(group, outInfo, { Position = cardPosition(centerX, SINK) }):Play()
+    TweenService:Create(group, outInfo, { Position = cardPosition(right, bottom, SINK) }):Play()
     out:Play()
     task.wait(fade)
     if generation == myGeneration or not completed then
@@ -282,10 +265,10 @@ function TipUI.init(ctx)
 
     group = UI.create("CanvasGroup", {
         Name = "Group",
-        -- 아래 끝 기준: 문구가 3줄로 늘어나도 위로만 자라 산소 바를 덮지 않는다
-        AnchorPoint = Vector2.new(0.5, 1),
-        Position = cardPosition(640, 0),
-        Size = UDim2.fromOffset(CARD_MAX_WIDTH, 0),
+        -- 아래 끝 기준: 문구가 여러 줄이 되어도 위로만 자란다
+        AnchorPoint = Vector2.new(1, 1),
+        Position = cardPosition(PC_MARGIN, PC_MARGIN, 0),
+        Size = UDim2.fromOffset(CARD_WIDTH, 0),
         AutomaticSize = Enum.AutomaticSize.Y,
         BackgroundTransparency = 1,
         GroupTransparency = 1,

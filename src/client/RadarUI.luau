@@ -12,7 +12,10 @@ local Colors = UI.Colors
 
 local RadarUI = {}
 
-local radarSize = 180 -- compact(휴대폰)에서는 init에서 140으로 줄인다
+local RADAR_SIZE_PC = 180
+local RADAR_SIZE_COMPACT = 140
+local LABEL_EXTRA_WIDTH = 140 -- 라벨 폭 = 레이더 지름 + 140 (PC 320, compact 280)
+local radarSize = RADAR_SIZE_PC
 local DOT_MARGIN = 8
 local TICK_SECONDS = 0.1
 local DOT_FAR_SIZE = 6
@@ -31,7 +34,8 @@ local distanceLabel
 local batteryLabel
 local radarFrame
 local radarRootFrame
-local compactLayout = false
+local compactLayout = nil -- applyLayout 전에는 nil
+local circleFrame
 local battery = nil -- 마지막 StateUpdate의 rover.battery
 local boosting = false
 local enabled = false
@@ -85,11 +89,29 @@ local function getDot(part)
     return dot
 end
 
+-- PC: 좌하단 180. compact: 자원 패널 아래 140(y는 step에서 갱신). radarSize에 의존하는 값을 함께 갱신한다.
+local function applyLayout(compact)
+    compactLayout = compact
+    radarSize = if compact then RADAR_SIZE_COMPACT else RADAR_SIZE_PC
+    local labelWidth = radarSize + LABEL_EXTRA_WIDTH
+    radarFrame.AnchorPoint = if compact then Vector2.new(0, 0) else Vector2.new(0, 1)
+    radarFrame.Position = if compact then UDim2.fromOffset(12, 160) else UDim2.new(0, 16, 1, -16)
+    radarFrame.Size = UDim2.fromOffset(labelWidth, radarSize + 64)
+    circleFrame.Size = UDim2.fromOffset(radarSize, radarSize)
+    distanceLabel.Size = UDim2.fromOffset(labelWidth, 22)
+    batteryLabel.Position = UDim2.fromOffset(0, 26 + radarSize + 2)
+    batteryLabel.Size = UDim2.fromOffset(labelWidth, 36)
+end
+
 local function step()
     local seat = if enabled then getDriverSeat() else nil
     gui.Enabled = seat ~= nil
     if not seat then
         return
+    end
+    local compactNow = Layout.isCompact()
+    if compactNow ~= compactLayout then
+        applyLayout(compactNow)
     end
     if compactLayout then
         local resources = HUD.getResources()
@@ -220,10 +242,6 @@ function RadarUI.init(ctx)
     config = ctx.Config
     gui = UI.gui("Radar", 12)
     radarRootFrame = Layout.root(gui)
-    compactLayout = Layout.isCompact()
-    if compactLayout then
-        radarSize = 140
-    end
     gui.Enabled = false
 
     dotsFrame = UI.create("Frame", {
@@ -234,30 +252,30 @@ function RadarUI.init(ctx)
     distanceLabel = UI.create("TextLabel", {
         Name = "Distance",
         Position = UDim2.fromOffset(0, 0),
-        Size = UDim2.new(1, 0, 0, 22),
+        Size = UDim2.fromOffset(RADAR_SIZE_PC + LABEL_EXTRA_WIDTH, 22),
         Text = "",
         TextColor3 = Colors.water,
         Preset = "caption",
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextTruncate = Enum.TextTruncate.AtEnd,
     })
 
     batteryLabel = UI.create("TextLabel", {
         Name = "Battery",
-        Position = UDim2.fromOffset(0, 26 + radarSize + 2),
-        Size = UDim2.new(1, 40, 0, 18),
+        Position = UDim2.fromOffset(0, 26 + RADAR_SIZE_PC + 2),
+        Size = UDim2.fromOffset(RADAR_SIZE_PC + LABEL_EXTRA_WIDTH, 36),
         Text = "",
         TextColor3 = Colors.energy,
         Preset = "caption",
         TextSize = 14,
         TextWrapped = true,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextYAlignment = Enum.TextYAlignment.Top,
         Visible = false,
     })
 
     radarFrame = UI.create("Frame", {
         Name = "RadarFrame",
-        AnchorPoint = if compactLayout then Vector2.new(0, 0) else Vector2.new(0, 1),
-        -- compact는 자원 패널 실제 하단 + 8 아래(step에서 갱신), PC는 좌하단
-        Position = if compactLayout then UDim2.fromOffset(12, 160) else UDim2.new(0, 16, 1, -16),
-        Size = UDim2.fromOffset(radarSize, radarSize + 46),
         BackgroundTransparency = 1,
         Parent = radarRootFrame,
     }, {
@@ -266,7 +284,7 @@ function RadarUI.init(ctx)
         UI.create("Frame", {
             Name = "Circle",
             Position = UDim2.fromOffset(0, 26),
-            Size = UDim2.fromOffset(radarSize, radarSize),
+            Size = UDim2.fromOffset(RADAR_SIZE_PC, RADAR_SIZE_PC),
             BackgroundColor3 = Colors.bg,
             BackgroundTransparency = 0.15,
         }, {
@@ -301,6 +319,12 @@ function RadarUI.init(ctx)
             }, { UI.roundCorner() }),
         }),
     })
+
+    circleFrame = radarFrame.Circle
+    applyLayout(Layout.isCompact())
+    Layout.changed:Connect(function(_scale, compact)
+        applyLayout(compact)
+    end)
 
     task.spawn(function()
         while true do

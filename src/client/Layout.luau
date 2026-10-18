@@ -19,9 +19,17 @@ Layout.changed = changed.Event
 
 local cameraConn = nil
 
+-- 카메라가 없거나 아직 레이아웃 전(높이 200 미만)이면 기본 해상도로 본다. 가로 폰(높이 390)은 그대로 통과한다.
+local MIN_VALID_HEIGHT = 200
+local FALLBACK_VIEWPORT = Vector2.new(1280, 720)
+
 local function viewportSize()
     local camera = workspace.CurrentCamera
-    return if camera then camera.ViewportSize else Vector2.new(1280, 720)
+    local size = if camera then camera.ViewportSize else FALLBACK_VIEWPORT
+    if size.Y < MIN_VALID_HEIGHT then
+        return FALLBACK_VIEWPORT
+    end
+    return size
 end
 
 function Layout.scale()
