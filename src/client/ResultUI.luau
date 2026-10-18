@@ -4,6 +4,7 @@
 local Players = game:GetService("Players")
 
 local UI = require(script.Parent.UI)
+local FactUI = require(script.Parent.FactUI)
 local Colors = UI.Colors
 
 local ResultUI = {}
@@ -16,6 +17,7 @@ local values = {}
 local restartButton
 local visible = false
 local noteLabel
+local learnedLabel
 local restartPressed = false
 local restartAvailableAt = nil -- workspace:GetServerTimeNow() 기준, nil이면 즉시 가능
 local chooserUserId = nil -- nil이면 누구나 (기존 동작)
@@ -45,6 +47,20 @@ local function makeRow(parent, order, labelText)
         value,
     })
     return value
+end
+
+-- "오늘 배운 것": 이번 세션에 본 사실 카드 제목(최대 3개), 하나도 없으면 결과별 한 문장
+local function updateLearned(won)
+    local titles = FactUI.seenTitles(3)
+    if #titles == 0 then
+        learnedLabel.Text = FactUI.resultText(won)
+        return
+    end
+    local lines = {}
+    for _, title in ipairs(titles) do
+        table.insert(lines, "- " .. title)
+    end
+    learnedLabel.Text = table.concat(lines, "\n")
 end
 
 -- 재도전 버튼 상태: 권한자 아님(숨김), 카운트다운(비활성), 가능, 이미 눌림
@@ -135,6 +151,39 @@ function ResultUI.init(ctx)
         Visible = false,
     })
 
+    learnedLabel = UI.create("TextLabel", {
+        Name = "LearnedBody",
+        LayoutOrder = 2,
+        Size = UDim2.fromScale(1, 0),
+        AutomaticSize = Enum.AutomaticSize.Y,
+        Text = "",
+        TextColor3 = Colors.textDim,
+        TextSize = 15,
+        TextWrapped = true,
+        TextXAlignment = Enum.TextXAlignment.Left,
+    })
+    local learned = UI.create("Frame", {
+        Name = "Learned",
+        LayoutOrder = 6,
+        Size = UDim2.fromScale(1, 0),
+        AutomaticSize = Enum.AutomaticSize.Y,
+        BackgroundColor3 = Colors.bg,
+    }, {
+        UI.corner(10),
+        UI.padding(12),
+        UI.list(Enum.FillDirection.Vertical, 4),
+        UI.create("TextLabel", {
+            Name = "LearnedTitle",
+            LayoutOrder = 1,
+            Size = UDim2.new(1, 0, 0, 20),
+            Text = "오늘 배운 것",
+            Font = UI.FontBold,
+            TextSize = 16,
+            TextXAlignment = Enum.TextXAlignment.Left,
+        }),
+        learnedLabel,
+    })
+
     UI.create("Frame", {
         Name = "Dim",
         Size = UDim2.fromScale(1, 1),
@@ -159,6 +208,7 @@ function ResultUI.init(ctx)
             summary,
             restartButton,
             noteLabel,
+            learned,
         }),
     })
 
@@ -195,6 +245,7 @@ function ResultUI.show(result)
     values.deaths.Text = string.format("%d회", result.oxygenDeaths)
     values.site.Text = result.siteName or "-"
 
+    updateLearned(result.won)
     restartAvailableAt = result.restartAvailableAt
     chooserUserId = result.chooserUserId
     if not visible then
