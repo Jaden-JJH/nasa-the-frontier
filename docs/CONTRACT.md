@@ -233,12 +233,14 @@ ProximityPrompt 공통: `RequiresLineOfSight = false`, `MaxActivationDistance = 
 | OxygenBar.lua | OxygenUpdate 수신. 실외일 때 강조, 20 이하 경고 |
 | PromptUI.lua | 커스텀 ProximityPrompt 표시(키 아이콘, ObjectText, ActionText, 홀드 진행 바). 서버 프롬프트는 전부 Style Custom |
 | PadSignUI.lua | 모듈 패드 위 표지판(이름, 상태 배지, 진행 바, 비용). PadX의 ModuleId Attribute와 state.modules 사용 |
-| Layout.lua | 2026-10-18 추가. 화면 높이 기준 배율(높이/720, 0.7~1.25)과 압축 배치 판정(터치 전용 또는 높이 600 미만). HUD, 토스트, 레이더, 산소 UI, Tip이 공유 |
+| Layout.lua | 2026-10-18 추가. 화면 높이 기준 배율(높이/720, 0.7~1.25)과 압축 배치 판정(터치 전용 또는 높이 600 미만). HUD, 토스트, 레이더, 산소 UI, Tip, 사실 카드가 공유 |
 | SoundFX.lua | 2026-10-18 추가. 클라이언트 2D 효과음: 호흡 루프(산소 비례), 산소 경고, UI 클릭, 토스트음, 미션 전진, 승패 스팅어, 로버 승하차와 엔진(자기 로버) |
 | DockSignUI.lua | 2026-10-18 추가. ChargePad 위 표지판: DockState와 state.rover.battery로 "도킹됨, 하차하면 충전 시작" / "충전 중 38/50" / "충전 완료" |
 | RadarUI.lua | 로컬 계산. 자신이 DriverSeat에 앉아 있을 때만 표시. Workspace.IceSites 각 파트까지 거리로 점 크기와 방향 표시, Config.RADAR_RANGE 안이면 비프(사운드 선택). 2026-10-18 14차: PC는 좌하단 지름 180, compact(터치 전용 또는 낮은 화면)는 자원 패널 아래 140, 뷰포트가 바뀌면 다시 배치. 거리 문구는 왼쪽 정렬 한 줄(넘치면 말줄임), 배터리 문구는 2줄 |
 | ToastUI.lua | Notify 수신. 3초 표시 후 사라짐. 최대 3개 스택 |
-| ResultUI.lua | GameOver 수신. 승리/실패 공용. 요약 수치. 재도전 버튼(RequestRestart) |
+| ResultUI.lua | GameOver 수신. 승리/실패 공용. 요약 수치. 재도전 버튼(RequestRestart). 2026-10-18 15차: 맨 아래 "오늘 배운 것"에 FactUI.seenTitles(3) 제목 목록, 없으면 FactUI.resultText(won) 한 문장 |
+| FactUI.lua | 2026-10-18 15차 추가. 교육 사실 카드("알고 있나요?"). 화면 오른쪽 세로 중앙(Layout 배율), 한 번에 하나, 세션당 각 1회, 최소 4초 간격, 선택/착륙/결과 화면에서 억제. StateUpdate(phase, panelsInstalled, waterTrips, modules.status), OxygenUpdate(50 미만), RoverBoost.drivingChanged(첫 탑승 20초 뒤)로 트리거. 상태 트리거는 Tip과 겹치지 않게 4초 지연. seenTitles(n)/resultText(won)를 ResultUI에 제공 |
+| Facts.lua (shared) | 2026-10-18 15차 추가. 사실 문구 목록 { key, title, body, trigger }와 byKey. body의 {site}는 착륙지 이름으로 치환. trigger가 result인 항목은 결과 화면 전용 |
 
 UI 스타일: 다크 배경(어두운 남색 계열), 흰 글씨, 강조색은 에너지 노랑, 물 하늘색, 식량 초록, 산소 주황. 폰트 GothamMedium 계열. 모바일 터치도 고려해 버튼 최소 44px.
 
