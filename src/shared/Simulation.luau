@@ -33,7 +33,35 @@ export type ModuleState = {
     unlocked: boolean, -- 선행 조건(앞 모듈 완공) 충족 여부. 비용과 무관
     shortfall: Shortfall, -- 착공 비용 대비 부족량 (충분하거나 이미 착공, 완공했으면 0)
     paused: boolean, -- 가동 중지 (2026-10-18, 현재 Farm만). true면 유지비와 생산 모두 없음. 선행 조건과 저장 상한은 그대로
-    upkeepText: string, -- 표지판용 한 줄 "물 -2/일, 전력 -6/일, 식량 +2/일", 가동 중지면 "대기 중"
+    upkeepText: string, -- 표지판용 한 줄 "물 -2/일, 전력 -6/일, 식량 +2/일", 가동 중지면 "대기 중", 손상이면 수리 안내
+    damaged: boolean, -- 미세운석 외벽 손상 (2026-10-18 15차). 생산 정지, 유지비는 계속. 수리 전까지 풀리지 않는다
+}
+
+-- 랜덤 이벤트 (2026-10-18 15차) ------------------------------------------
+export type EventKind = "solarStorm" | "micrometeoroid"
+export type EventStage = "warning" | "active"
+
+-- 일정 한 줄. 새 게임마다 시드로 만든다 (Simulation.makeEventSchedule)
+--   solarStorm: day = 진행 첫날, duration = 진행 일수, warningDays = 예고 일수
+--   micrometeoroid: day = 충돌 날(그날로 넘어가는 DayTick에 처리), duration = 배너 일수, roll = 대상 고르기 난수 0..1
+--   resolved, target: 충돌을 처리했는지와 결과 ("A" | "B" | "C" 모듈 id, "panel", "none"). 폭풍은 쓰지 않는다
+export type EventEntry = {
+    kind: EventKind,
+    day: number,
+    duration: number,
+    warningDays: number,
+    roll: number,
+    resolved: boolean,
+    target: string,
+}
+
+-- 지금 보여 줄 이벤트 (HUD 배너). 없으면 GameState.event = nil
+export type ActiveEvent = {
+    kind: EventKind,
+    stage: EventStage,
+    daysLeft: number, -- warning: 시작까지 남은 일수(D-n), active: 끝까지 남은 일수(오늘 포함)
+    text: string, -- 배너 한 줄 (예: "태양 입자 폭풍 D-2")
+    eduText: string, -- 배너 아래 교육 한 줄
 }
 
 -- 키는 "A", "B", "C" (CONTRACT: { A: ModuleState, B: ModuleState, C: ModuleState })
@@ -85,6 +113,8 @@ export type GameState = {
     stallReason: string, -- 모듈 정지 사유 한 줄, 정지 아니면 ""
     energyCap: number, -- 에너지 저장 상한 = ENERGY_CAP_BASE + 가동 모듈 수 x ENERGY_CAP_PER_MODULE
     energyWasted: number, -- 서버 추가 필드: 마지막 DayTick에 상한 때문에 버려진 발전량 (없으면 0)
+    event: ActiveEvent?, -- 진행 중이거나 예고 중인 이벤트 (2026-10-18 15차). 없으면 nil
+    eventSchedule: { EventEntry }, -- 이번 게임 이벤트 일정. StateUpdate에 함께 실리지만 클라이언트는 읽지 않는다
 }
 
 local Simulation = {}
@@ -121,6 +151,7 @@ local function newModule(status: ModuleStatus, progress: number, daysLeft: numbe
         shortfall = { energy = 0, water = 0 },
         paused = false,
         upkeepText = "",
+        damaged = false,
     }
 end
 
@@ -135,9 +166,42 @@ local function copyModules(modules: Modules): Modules
             shortfall = { energy = m.shortfall.energy, water = m.shortfall.water },
             paused = m.paused,
             upkeepText = m.upkeepText,
+            damaged = m.damaged == true,
         }
     end
     return out
+end
+
+local function copySchedule(schedule: { EventEntry }?): { EventEntry }
+    local out: { EventEntry } = {}
+    if not schedule then
+        return out
+    end
+    for _, e in schedule do
+        table.insert(out, {
+            kind = e.kind,
+            day = e.day,
+            duration = e.duration,
+            warningDays = e.warningDays,
+            roll = e.roll,
+            resolved = e.resolved,
+            target = e.target,
+        })
+    end
+    return out
+end
+
+local function copyEvent(event: ActiveEvent?): ActiveEvent?
+    if not event then
+        return nil
+    end
+    return {
+        kind = event.kind,
+        stage = event.stage,
+        daysLeft = event.daysLeft,
+        text = event.text,
+        eduText = event.eduText,
+    }
 end
 
 -- 가동 중이고 멈추지 않은 모듈 (유지비와 생산이 있는 모듈)
@@ -192,6 +256,8 @@ function Simulation.copy(state: GameState): GameState
         stallReason = state.stallReason,
         energyCap = state.energyCap,
         energyWasted = state.energyWasted,
+        event = copyEvent(state.event),
+        eventSchedule = copySchedule(state.eventSchedule),
     }
 end
 
@@ -230,8 +296,51 @@ local function activeUpkeep(state: GameState, config: Config): (number, number)
     return energy, water
 end
 
+-- 랜덤 이벤트 도우미 (2026-10-18 15차) ----------------------------------
+
+-- 일정 entry가 지금(day) 보여 줄 단계. 없으면 nil
+local function entryStage(entry: EventEntry, day: number): (string?, number)
+    if entry.kind == "solarStorm" then
+        if day >= entry.day - entry.warningDays and day < entry.day then
+            return "warning", entry.day - day
+        elseif day >= entry.day and day < entry.day + entry.duration then
+            return "active", entry.day + entry.duration - day
+        end
+    elseif entry.kind == "micrometeoroid" then
+        if entry.resolved and day >= entry.day and day < entry.day + entry.duration then
+            return "active", entry.day + entry.duration - day
+        end
+    end
+    return nil, 0
+end
+
+-- 오늘 태양 입자 폭풍이 진행 중인지 (예고 단계는 아님)
+function Simulation.stormActive(state: GameState, config: Config): boolean
+    if not config.EVENTS.enabled or state.phase ~= "playing" then
+        return false
+    end
+    for _, entry in state.eventSchedule do
+        if entry.kind == "solarStorm" and entryStage(entry, state.day) == "active" then
+            return true
+        end
+    end
+    return false
+end
+
+-- 실외 산소 소모 배율 (Oxygen이 실외에서만 곱한다)
+function Simulation.outdoorOxygenMultiplier(state: GameState, config: Config): number
+    if Simulation.stormActive(state, config) then
+        return config.EVENTS.solarStorm.outdoorOxygenMultiplier
+    end
+    return 1
+end
+
 local function panelEnergy(state: GameState, config: Config): number
-    return state.panelsInstalled * config.PANEL_OUTPUT * (state.sunlight or 0)
+    local energy = state.panelsInstalled * config.PANEL_OUTPUT * (state.sunlight or 0)
+    if Simulation.stormActive(state, config) then
+        energy *= config.EVENTS.solarStorm.panelMultiplier
+    end
+    return energy
 end
 
 -- 에너지 저장 상한: 기본 + 가동 모듈 수 x 모듈당
@@ -265,8 +374,268 @@ end
 
 -- 공개 API ---------------------------------------------------------------
 
--- 새 게임의 초기 상태 (phase = selecting, day = 0)
-function Simulation.newState(config: Config): GameState
+-- 결정적 난수 (Park-Miller 최소 표준 LCG). Roblox Random이 없는 Lune 테스트에서도 같은 값을 낸다.
+-- 곱이 2^53 아래라 double로 정확하다. 0..1 미만 값을 돌려주는 함수를 만든다
+local LCG_MODULUS = 2147483647
+local LCG_MULTIPLIER = 48271
+local LCG_WARMUP = 3 -- 인접한 시드(os.time)의 첫 값이 거의 같아지는 것을 줄인다
+
+local function makeRng(seed: number): () -> number
+    local value = math.floor(math.abs(seed)) % LCG_MODULUS
+    if value == 0 then
+        value = 1
+    end
+    local function nextValue(): number
+        value = (value * LCG_MULTIPLIER) % LCG_MODULUS
+        return value / LCG_MODULUS
+    end
+    for _ = 1, LCG_WARMUP do
+        nextValue()
+    end
+    return nextValue
+end
+
+local function randInt(rng: () -> number, low: number, high: number): number
+    if high <= low then
+        return low
+    end
+    return math.min(high, low + math.floor(rng() * (high - low + 1)))
+end
+
+-- 이번 게임의 이벤트 일정 (같은 시드면 같은 일정). EVENTS.enabled = false면 빈 목록.
+-- 폭풍 1회: 진행 첫날 [startDayMin, startDayMax]. 미세운석 countMin ~ countMax회: [dayMin, dayMax] 중
+-- 배너 기간(bannerDays)이 폭풍 예고와 진행 기간에 겹치지 않고, 서로 minGapDays 이상 떨어진 날. 날짜 순으로 정렬
+function Simulation.makeEventSchedule(config: Config, seed: number): { EventEntry }
+    local events = config.EVENTS
+    local schedule: { EventEntry } = {}
+    if not events.enabled then
+        return schedule
+    end
+    local rng = makeRng(seed)
+    local storm = events.solarStorm
+    local stormDay = randInt(rng, storm.startDayMin, storm.startDayMax)
+    table.insert(schedule, {
+        kind = "solarStorm",
+        day = stormDay,
+        duration = storm.durationDays,
+        warningDays = storm.warningDays,
+        roll = 0,
+        resolved = false,
+        target = "",
+    })
+    local stormFrom = stormDay - storm.warningDays
+    local stormTo = stormDay + storm.durationDays - 1
+
+    local meteor = events.micrometeoroid
+    local count = randInt(rng, meteor.countMin, meteor.countMax)
+    local chosen: { number } = {}
+    for _ = 1, count do
+        local candidates: { number } = {}
+        for day = meteor.dayMin, meteor.dayMax do
+            local bannerTo = day + meteor.bannerDays - 1
+            local ok = bannerTo < stormFrom or day > stormTo
+            for _, other in chosen do
+                if math.abs(day - other) < meteor.minGapDays then
+                    ok = false
+                end
+            end
+            if ok then
+                table.insert(candidates, day)
+            end
+        end
+        if #candidates == 0 then
+            break
+        end
+        local day = candidates[randInt(rng, 1, #candidates)]
+        table.insert(chosen, day)
+        table.insert(schedule, {
+            kind = "micrometeoroid",
+            day = day,
+            duration = meteor.bannerDays,
+            warningDays = 0,
+            roll = rng(),
+            resolved = false,
+            target = "",
+        })
+    end
+    table.sort(schedule, function(a, b)
+        return a.day < b.day
+    end)
+    return schedule
+end
+
+-- 미세운석 충돌 결과의 배너 문구
+local function meteorBanner(entry: EventEntry, config: Config): string
+    local t = config.TEXTS
+    local def = config.MODULES[entry.target]
+    if def then
+        return string.format(t.meteorBannerModule, def.displayName)
+    elseif entry.target == "panel" then
+        return t.meteorBannerPanel
+    end
+    return t.meteorBannerMiss
+end
+
+-- 지금 보여 줄 이벤트 (플레이 중이 아니거나 없으면 nil). 둘이 겹치면 진행 중인 것, 그다음 최근 것
+function Simulation.currentEvent(state: GameState, config: Config): ActiveEvent?
+    if not config.EVENTS.enabled or state.phase ~= "playing" then
+        return nil
+    end
+    local t = config.TEXTS
+    local best: ActiveEvent? = nil
+    local bestRank, bestDay = 0, -math.huge
+    for _, entry in state.eventSchedule do
+        local stage, daysLeft = entryStage(entry, state.day)
+        -- 진행 중이 예고보다 먼저, 같은 단계면 더 최근 일정(나중 날짜)을 보인다
+        local rank = if stage == "active" then 2 elseif stage then 1 else 0
+        if rank > bestRank or (rank > 0 and rank == bestRank and entry.day > bestDay) then
+            bestRank, bestDay = rank, entry.day
+            local text, edu
+            if entry.kind == "solarStorm" then
+                text = string.format(
+                    if stage == "warning" then t.stormBannerWarning else t.stormBannerActive,
+                    int(daysLeft)
+                )
+                edu = t.stormEdu
+            else
+                text = meteorBanner(entry, config)
+                edu = t.meteorEdu
+            end
+            best = {
+                kind = entry.kind,
+                stage = if stage == "active" then "active" else "warning",
+                daysLeft = daysLeft,
+                text = text,
+                eduText = edu,
+            }
+        end
+    end
+    return best
+end
+
+export type EventNotice = { text: string, kind: NoticeKind, target: string? }
+
+-- DayTick 앞뒤 상태를 비교해 보낼 토스트 목록 (폭풍 예고 시작, 진행 시작, 종료, 미세운석 충돌).
+-- target은 미세운석 충돌 대상("A" | "B" | "C" | "panel" | "none"), 서버가 효과음 위치를 고를 때 쓴다
+function Simulation.eventNotices(prev: GameState, new: GameState, config: Config): { EventNotice }
+    local notices: { EventNotice } = {}
+    if not config.EVENTS.enabled then
+        return notices
+    end
+    local t = config.TEXTS
+    local storm = config.EVENTS.solarStorm
+    local function stormStage(state: GameState): string?
+        for _, entry in state.eventSchedule do
+            if entry.kind == "solarStorm" then
+                local stage = entryStage(entry, state.day)
+                if stage then
+                    return stage
+                end
+            end
+        end
+        return nil
+    end
+    local before: string? = if prev.phase == "playing" then stormStage(prev) else nil
+    local after: string? = if new.phase == "playing" then stormStage(new) else nil
+    local warningStarted = after == "warning" and before ~= "warning"
+    local activeStarted = after == "active" and before ~= "active"
+    local stormEnded = before == "active" and after == nil and new.phase == "playing"
+    if warningStarted then
+        local event = Simulation.currentEvent(new, config)
+        local daysLeft = if event and event.kind == "solarStorm"
+            then event.daysLeft
+            else storm.warningDays
+        table.insert(
+            notices,
+            { text = string.format(t.stormWarning, int(daysLeft)), kind = "warn" }
+        )
+    elseif activeStarted then
+        table.insert(
+            notices,
+            { text = string.format(t.stormStart, int(storm.durationDays)), kind = "warn" }
+        )
+    elseif stormEnded then
+        table.insert(notices, { text = t.stormEnd, kind = "good" })
+    end
+
+    local meteor = config.EVENTS.micrometeoroid
+    for index, entry in new.eventSchedule do
+        local old = prev.eventSchedule and prev.eventSchedule[index]
+        if entry.kind == "micrometeoroid" and entry.resolved and not (old and old.resolved) then
+            local def = config.MODULES[entry.target]
+            if def then
+                table.insert(notices, {
+                    text = string.format(
+                        t.meteorModule,
+                        def.displayName,
+                        meteor.repairKey,
+                        int(meteor.repairEnergy)
+                    ),
+                    kind = "warn",
+                    target = entry.target,
+                })
+            elseif entry.target == "panel" then
+                table.insert(notices, { text = t.meteorPanel, kind = "warn", target = "panel" })
+            else
+                table.insert(notices, { text = t.meteorMiss, kind = "info", target = "none" })
+            end
+        end
+    end
+    return notices
+end
+
+-- 미세운석 충돌 처리 (복사본을 직접 고친다). 손상되지 않은 가동 모듈(승리 모듈 제외) 중 roll로 하나,
+-- 없으면 설치된 패널 1장 파괴, 패널도 없으면 빗나감
+local function resolveMeteor(state: GameState, config: Config, entry: EventEntry)
+    entry.resolved = true
+    local candidates: { string } = {}
+    for _, id in config.MODULE_ORDER do
+        local m = state.modules[id]
+        if m and m.status == "active" and not m.damaged and id ~= config.WIN_MODULE then
+            table.insert(candidates, id)
+        end
+    end
+    if #candidates > 0 then
+        local index = math.clamp(math.floor(entry.roll * #candidates) + 1, 1, #candidates)
+        local id = candidates[index]
+        state.modules[id].damaged = true
+        entry.target = id
+    elseif state.panelsInstalled > 0 then
+        state.panelsInstalled -= 1
+        entry.target = "panel"
+    else
+        entry.target = "none"
+    end
+end
+
+-- 손상 모듈 수리: 전력 repairEnergy를 내고 damaged 해제. 반환: 성공 여부, 새 상태, 토스트 문구, 토스트 종류
+function Simulation.repairModule(
+    state: GameState,
+    config: Config,
+    moduleId: string
+): (boolean, GameState, string, NoticeKind)
+    local t = config.TEXTS
+    local cost = config.EVENTS.micrometeoroid.repairEnergy
+    if state.phase ~= "playing" then
+        return false, Simulation.copy(state), t.notPlaying, "info"
+    end
+    local m = state.modules[moduleId]
+    local def = config.MODULES[moduleId]
+    if not m or not def or not m.damaged then
+        return false, Simulation.copy(state), t.moduleRepairNotNeeded, "info"
+    end
+    if state.energy < cost then
+        return false, Simulation.copy(state), string.format(t.repairNeedEnergy, int(cost)), "warn"
+    end
+    local new = Simulation.copy(state)
+    new.energy = clampMin0(roundResource(new.energy - cost, config))
+    new.modules[moduleId].damaged = false
+    Simulation.refreshDerived(new, config)
+    return true, new, string.format(t.moduleRepaired, def.displayName), "good"
+end
+
+-- 새 게임의 초기 상태 (phase = selecting, day = 0). seed가 없으면 os.time()으로 이벤트 일정을 정한다
+function Simulation.newState(config: Config, seed: number?): GameState
     local modules: Modules = {}
     for _, id in config.MODULE_ORDER do
         modules[id] = newModule("locked", 0, 0)
@@ -312,6 +681,8 @@ function Simulation.newState(config: Config): GameState
         stallReason = "",
         energyCap = config.ENERGY_CAP_BASE,
         energyWasted = 0,
+        event = nil,
+        eventSchedule = Simulation.makeEventSchedule(config, seed or os.time()),
     }
     refreshLocks(state, config)
     Simulation.refreshDerived(state, config)
@@ -329,7 +700,9 @@ function Simulation.dailyProduction(state: GameState, config: Config): (number, 
         local waterNeedMet = state.water + water >= config.CREW.water + upkeepWater
         if waterNeedMet then
             for _, id in config.MODULE_ORDER do
-                if running(state.modules[id]) then
+                local m = state.modules[id]
+                -- 미세운석으로 손상된 모듈은 생산하지 않는다 (유지비는 activeUpkeep이 그대로 받는다)
+                if running(m) and not (m :: ModuleState).damaged then
                     food += config.MODULES[id].foodPerDay
                 end
             end
@@ -405,6 +778,15 @@ function Simulation.applyDay(state: GameState, config: Config): GameState
 
     new.panelsInstalledToday = 0
     new.day = state.day + 1
+
+    -- 랜덤 이벤트: 오늘(new.day) 떨어지는 미세운석을 처리한다. 폭풍은 날짜로만 정해져 따로 처리할 것이 없다
+    if config.EVENTS.enabled then
+        for _, entry in new.eventSchedule do
+            if entry.kind == "micrometeoroid" and not entry.resolved and entry.day == new.day then
+                resolveMeteor(new, config, entry)
+            end
+        end
+    end
     Simulation.refreshDerived(new, config)
     return new
 end
@@ -822,12 +1204,18 @@ function Simulation.refreshDerived(state: GameState, config: Config)
             m.upkeepText = Simulation.upkeepText(m, def, config)
         end
     end
+    state.event = Simulation.currentEvent(state, config)
     state.missionText = Simulation.missionText(state, config)
 end
 
--- 모듈 표지판 한 줄: 유지비와 생산 ("물 -2/일, 전력 -6/일, 식량 +2/일"), 가동 중지면 "대기 중"
+-- 모듈 표지판 한 줄: 유지비와 생산 ("물 -2/일, 전력 -6/일, 식량 +2/일"), 가동 중지면 "대기 중",
+-- 미세운석 손상이면 수리 안내 (가동 중지보다 먼저)
 function Simulation.upkeepText(m: ModuleState, def: ModuleDef, config: Config): string
     local t = config.TEXTS
+    if m.damaged then
+        local meteor = config.EVENTS.micrometeoroid
+        return string.format(t.upkeepDamaged, meteor.repairKey, int(meteor.repairEnergy))
+    end
     if m.paused then
         return t.upkeepPaused
     end

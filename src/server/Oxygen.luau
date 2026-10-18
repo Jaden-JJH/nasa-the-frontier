@@ -174,13 +174,15 @@ local function step(dt: number, now: number)
         return
     end
     local o = Config.OXYGEN
+    -- 태양 입자 폭풍 중에는 실외 소모만 늘어난다 (2026-10-18 15차. 실내와 로버 좌석은 그대로 회복)
+    local drain = o.drainPerSecond * Simulation.outdoorOxygenMultiplier(state, Config)
     for player, record in records do
         local character = player.Character
         local root = character and character:FindFirstChild("HumanoidRootPart")
         local humanoid = character and character:FindFirstChildOfClass("Humanoid")
         if root and root:IsA("BasePart") and humanoid and humanoid.Health > 0 then
             local inside = isInside(humanoid, root.CFrame.Position, state)
-            local rate = if inside then o.refillPerSecond else -o.drainPerSecond
+            local rate = if inside then o.refillPerSecond else -drain
             record.oxygen = math.clamp(record.oxygen + rate * dt, 0, o.max)
             record.inside = inside
             -- 산소 부족 경고: 하락할 때 한 번, lowWarning 위로 회복하면 다시 경고할 수 있다

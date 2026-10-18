@@ -5,6 +5,7 @@
 -- 터치/낮은 화면(compact): 오른쪽 12px, 아래 190px(부스터와 점프 버튼 위, 실제 px 기준).
 -- 한 번에 하나, 대기열 순차 표시, 표시 사이 최소 3초 간격, 세션당 각 Tip 1회(재시작하면 초기화).
 -- 문구는 Config.TIPS. 트리거는 전부 클라이언트 측(StateUpdate, OxygenUpdate, 탑승 이벤트).
+-- 15차: 첫 폭풍 예고(state.event.kind == "solarStorm")에 storm, 첫 모듈 손상(modules.X.damaged)에 moduleDamage.
 
 local TweenService = game:GetService("TweenService")
 
@@ -71,6 +72,9 @@ local function tipText(key)
             damageConfig.repairHold or 4,
             damageConfig.repairEnergy or 10
         )
+    elseif key == "moduleDamage" then
+        local meteor = config.EVENTS and config.EVENTS.micrometeoroid or {}
+        return string.format(template, meteor.repairKey or "R")
     end
     return template
 end
@@ -346,6 +350,18 @@ function TipUI.onState(state)
     local cap = state.energyCap
     if type(cap) == "number" and cap > 0 and state.energy >= cap * 0.95 then
         TipUI.push("energyCap")
+    end
+
+    -- 랜덤 이벤트 (2026-10-18 15차): 첫 폭풍 예고, 첫 모듈 손상
+    local event = state.event
+    if type(event) == "table" and event.kind == "solarStorm" then
+        TipUI.push("storm")
+    end
+    for _, moduleState in pairs(state.modules or {}) do
+        if type(moduleState) == "table" and moduleState.damaged == true then
+            TipUI.push("moduleDamage")
+            break
+        end
     end
 end
 

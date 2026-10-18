@@ -1,7 +1,10 @@
 -- Simulation 순수 로직 테스트 (GDD 4절 밸런스 검증 메모 포함)
 
+local Bot = require("./bot")
 local Config = require("../src/shared/Config")
 local Simulation = require("../src/shared/Simulation")
+
+type BotResult = Bot.BotResult
 
 -- 착륙을 마치고 1일차가 시작된 상태
 local function playingState(sunlight: number?)
@@ -11,6 +14,7 @@ local function playingState(sunlight: number?)
     s.siteId = 1
     s.siteName = "Shackleton Rim"
     s.sunlight = sunlight or 1
+    s.eventSchedule = {} -- 랜덤 이벤트는 이벤트 테스트가 직접 넣는다 (기존 테스트는 이벤트 없이)
     Simulation.refreshDerived(s, Config)
     return s
 end
@@ -875,413 +879,331 @@ return function(t)
         end
     )
 
-    -- 현실적 플레이어 봇 (GDD 4절 밸런스 검증 메모, 2026-10-18 매장량과 전력 제약 반영) -----------
-    -- 하루에 한 가지 행동만 한다. 우선순위:
-    --   0) 기지에 있고 탱크에 물이 남아 있으면 하역 (행동 소모 없음, 전력이 모자라면 처리 가능한 만큼)
-    --   1) 다음 모듈을 지을 수 있고 착공 뒤에도 원정 동안 버틸 물이 남으면 착공
-    --   2) 미션대로 둘째 날 첫 물 원정 (패널 설치 다음 미션)
-    --   3) 물이 원정 동안 버틸 만큼만 남았으면 원정
-    --   4) 에너지는 충분한데 물이 모자라거나, 깔 패널이 없는데 물이 모자라면 원정
-    --   5) 패널을 하루 한도까지 설치
-    --   6) 할 일이 없으면 대기
-    -- 원정은 남은 매장지 중 왕복 일수가 가장 짧은 곳(같으면 매장량이 많은 곳)으로 간다. 원정 일수 동안 다른
-    -- 행동을 못 하고, 마지막 날 채취(fillFromDeposit)와 하역(unloadWater)을 한다.
-    -- 왕복 일수 = ceil((2 x 거리 / (로버 최고 속도 x 지형 배율) + 채우기와 하역 TRIP_OVERHEAD초) / DAY_SECONDS).
-    -- 지형 배율: 패드의 주행 회랑(최근접 얼음)은 1, 회랑이 없는 easy 1, mid 0.85, hard 0.7 (크레이터와 바위를 돌아간다).
-    -- 예전 추정(450, 300, 180, 100 studs -> 6, 5, 3, 3일)과 같은 식이다.
-    -- "원정 동안 버틸 물" = max(WATER_FLOOR, 하루 물 소비 x 다음 원정 일수)
-    local FIRST_TRIP_DAY = 2
-    local WATER_FLOOR = 10
-    local TRIP_OVERHEAD = 10
-    local USEFUL_TRIP_W = 15 -- 착공 판단 때 이보다 적게 남은 매장지는 "다녀올 곳"으로 치지 않는다
-    local FOOD_URGENT_MARGIN = 8 -- 식량이 Farm 건설 기간 + 이 일수 이하로 남으면 물 여유 없이도 Farm을 착공
-    local TERRAIN_FACTOR = { easy = 1, mid = 0.85, hard = 0.7 }
-
-    -- 착륙 패드 위치 (DevMap과 같은 식: 기준 얼음 + 방향 x 최근접 거리)
-    local function padPosition(siteIndex: number): (number, number)
-        local layout = Config.DEV_MAP.padLayout[siteIndex]
-        local ice = Config.ICE_SITES[layout.ice]
-        local distance = Config.DEV_MAP.iceDistanceBySite[siteIndex]
-        return ice.x + layout.dirX * distance, ice.z + layout.dirZ * distance
-    end
-
-    -- 왕복 주행 초 (채우기와 하역은 빼고)
-    local function driveSecondsTo(siteIndex: number, iceIndex: number): number
-        local px, pz = padPosition(siteIndex)
-        local ice = Config.ICE_SITES[iceIndex]
-        local distance = math.sqrt((ice.x - px) ^ 2 + (ice.z - pz) ^ 2)
-        local corridor = Config.DEV_MAP.padLayout[siteIndex].ice == iceIndex
-        local factor = if corridor then 1 else TERRAIN_FACTOR[ice.difficulty]
-        return 2 * distance / (Config.ROVER.maxSpeed * factor)
-    end
-
-    local function tripDaysTo(siteIndex: number, iceIndex: number): number
-        local seconds = driveSecondsTo(siteIndex, iceIndex) + TRIP_OVERHEAD
-        return math.max(1, math.ceil(seconds / Config.DAY_SECONDS))
-    end
-
-    -- 원정 한 번의 로버 배터리 소모 = 주행 초 x batteryDrainPerSecond (2026-10-18)
-    local function tripBatteryTo(siteIndex: number, iceIndex: number): number
-        return driveSecondsTo(siteIndex, iceIndex) * Config.ROVER.batteryDrainPerSecond
-    end
-
-    type BotResult = {
-        result: string,
-        day: number,
-        aOnReturn: boolean,
-        maxBlocked: number, -- 에너지 막힘 최대 연속일 (다음 모듈이 열려 있고 물도 충분한데 에너지가 모자란 기지 체류일)
-        blockedDays: number, -- 에너지 막힘 일수 합계
-        maxIdle: number, -- 완전 대기 최대 연속일 (아무 행동도 못 한 날)
-        minFood: number, -- Farm 가동 전 최저 식량
-        trips: number,
-        wasteDays: number, -- 저장 상한 때문에 발전이 버려진 날
-        partialUnloads: number, -- 전력이 모자라 일부만 처리한 하역
-        chargeDays: number, -- 기지에서 로버를 충전한 날
-        waterNeed: number, -- 건설 물 + 크루와 모듈 유지 물 (승리까지 쓴 물 전체)
-        mined: number, -- 매장지에서 캔 물 합계
-        tripLog: string, -- 원정 대상 순서 (얼음 번호)
-    }
-
-    local function nextModule(s): string?
-        for _, id in Config.MODULE_ORDER do
-            local status = s.modules[id].status
-            if status == "available" or status == "locked" then
-                return id
-            end
-        end
-        return nil
-    end
-
-    local function simulatePlayer(siteIndex: number, noTrips: boolean?): BotResult
-        local s = playingState(Config.SITES[siteIndex].sunlight)
-        -- 로버 배터리: 원정을 떠날 때 왕복 소모를 빼고, 기지에 있는 날마다 기지 에너지에서 충전한다
-        local battery = Config.ROVER.batteryMax
-        local chargeDays = 0 -- 기지에서 충전한 날 수
-        local deposits: { number } = {}
-        for index, site in Config.ICE_SITES do
-            deposits[index] = site.deposit
-        end
-        -- days일 동안 아무 행동 없이 보낼 때 쓰는 물 (건설 중 모듈이 그 사이 완공되면 유지 소비도 더한다)
-        local function waterUse(state, days: number): number
-            local projected = state
-            local total = 0
-            for _ = 1, days do
-                local _, use = Simulation.dailyConsumption(projected, Config)
-                total += use
-                projected = Simulation.applyDay(projected, Config)
-            end
-            return total
-        end
-        local function reserveFor(state, days: number): number
-            return math.max(WATER_FLOOR, waterUse(state, days))
-        end
-        -- 가장 짧은 "갈 만한" 원정 (USEFUL_TRIP_W 이상 남은 곳. 없으면 남은 곳 아무 데나)
-        local function shortestTrip(): number
-            local best, anyBest = math.huge, math.huge
-            for index, amount in deposits do
-                if amount > 0 then
-                    local days = tripDaysTo(siteIndex, index)
-                    anyBest = math.min(anyBest, days)
-                    if amount >= USEFUL_TRIP_W then
-                        best = math.min(best, days)
-                    end
-                end
-            end
-            if best == math.huge then
-                best = anyBest
-            end
-            return if best == math.huge then 0 else best
-        end
-        -- 갈 만한 매장지를 왕복 일수 순으로 둘 골라, 첫 원정을 버티고 그 물로 둘째 원정까지 버티는지
-        local function survivesTwoTrips(state): boolean
-            local list = {}
-            for index, amount in deposits do
-                if amount >= USEFUL_TRIP_W then
-                    table.insert(list, { days = tripDaysTo(siteIndex, index), amount = amount })
-                end
-            end
-            table.sort(list, function(a, b)
-                return a.days < b.days
-            end)
-            local first, second = list[1], list[2]
-            if not first then
-                return true
-            end
-            local projected = state
-            for _ = 1, first.days do
-                projected = Simulation.applyDay(projected, Config)
-            end
-            if Simulation.checkEnd(projected, Config) == "lost" then
-                return false
-            end
-            if not second then
-                return true
-            end
-            local afterFirst = Simulation.copy(projected)
-            afterFirst.water += math.min(state.rover.tankMax, first.amount)
-            return afterFirst.water >= waterUse(afterFirst, second.days)
-        end
-        -- 다음 원정 대상: 다녀오는 동안 물이 버티는 매장지 중 하루당 얻는 물(min(탱크 빈 공간, 매장량) / 왕복 일수)이
-        -- 가장 많은 곳. 버틸 수 있는 곳이 없으면 가장 가까운 곳
-        local function nextTarget(): (number?, number)
-            local best, bestDays, bestRate = nil, 0, -1
-            local nearest, nearestDays = nil, math.huge
-            local space = s.rover.tankMax - s.rover.tank
-            for index, amount in deposits do
-                -- 지금 배터리로 왕복할 수 없는 매장지는 고르지 않는다
-                if amount > 0 and tripBatteryTo(siteIndex, index) <= battery then
-                    local days = tripDaysTo(siteIndex, index)
-                    if days < nearestDays then
-                        nearest, nearestDays = index, days
-                    end
-                    local rate = math.min(space, amount) / days
-                    local survivable = waterUse(s, days) < s.water
-                    if
-                        survivable
-                        and (
-                            rate > bestRate + 1e-9
-                            or (math.abs(rate - bestRate) <= 1e-9 and days < bestDays)
-                        )
-                    then
-                        best, bestDays, bestRate = index, days, rate
-                    end
-                end
-            end
-            if best then
-                return best, bestDays
-            end
-            return nearest, if nearest then nearestDays else 0
-        end
-        -- 착공 판단과 막힘 지표용: 가장 짧은 원정 동안 버틸 물
-        local function waterReserve(state): number
-            return reserveFor(state, shortestTrip())
-        end
-
-        local tripLeft, tripTarget = 0, 0
-        local tripped, checkedReturn = false, false
-        local aOnReturn = false
-        local blocked, maxBlocked, blockedDays, idle, maxIdle = 0, 0, 0, 0, 0
-        local minFood = math.huge
-        local wasteDays, partialUnloads, waterNeed, mined = 0, 0, 0, 0
-        local log: { string } = {}
-
-        local function unload()
-            if s.rover.tank <= 0 then
-                return
-            end
-            local ok, new, _, _, warning = Simulation.unloadWater(s, Config)
-            if ok then
-                s = new
-                if warning then
-                    partialUnloads += 1
-                end
-            end
-        end
-        local function arrive()
-            local ok, new, remaining = Simulation.fillFromDeposit(s, Config, deposits[tripTarget])
-            if ok then
-                mined += deposits[tripTarget] - remaining
-                deposits[tripTarget] = remaining
-                s = new
-            end
-            unload()
-        end
-
-        for _ = 1, Config.TOTAL_DAYS + 1 do
-            local busy = false -- 오늘 행동을 했는지
-            local onTrip = false
-            local id = nextModule(s)
-            if tripLeft > 0 then
-                tripLeft -= 1
-                busy, onTrip = true, true
-                if tripLeft == 0 then
-                    arrive()
-                end
-            else
-                unload()
-                -- 충전 패드: 하루(DAY_SECONDS초) 동안 chargeRatePerSecond씩, 기지 에너지 잔량까지
-                local charge = math.min(
-                    Config.ROVER.chargeRatePerSecond * Config.DAY_SECONDS,
-                    Config.ROVER.batteryMax - battery,
-                    s.energy
-                )
-                if charge > 0 then
-                    s = Simulation.copy(s)
-                    s.energy -= charge
-                    battery += charge
-                    chargeDays += 1
-                    Simulation.refreshDerived(s, Config)
-                end
-                if tripped and not checkedReturn then
-                    checkedReturn = true
-                    aOnReturn = (Simulation.canBuild(s, Config, "A"))
-                end
-                local waterCost = if id then Config.MODULES[id].cost.water else 0
-                local canInstall = s.panelsInstalled < Config.PANELS_TOTAL
-                local energyReady = id ~= nil and s.energy >= Config.MODULES[id].cost.energy
-                local target, days = nextTarget()
-                local reserve = reserveFor(s, days)
-                local waterShort = id ~= nil and s.water < waterCost + reserve
-                local afterBuild = if id and (Simulation.canBuild(s, Config, id))
-                    then select(2, Simulation.startBuild(s, Config, id))
-                    else nil
-                -- 착공 판단: 보통은 착공 뒤에도 가장 짧은 원정 동안 버틸 물이 남을 때.
-                -- 승리 모듈은 완공 즉시 승리라, 기지에서 기다리기만 해도 실패보다 승리가 먼저 오면 착공한다
-                -- (물이 바닥나도 SHORTAGE_DAYS_TO_LOSE일 전에 완공하면 승리. 사람도 이렇게 마지막 물을 건다)
-                local canStart = false
-                if afterBuild and id == Config.WIN_MODULE then
-                    local projected = afterBuild
-                    for _ = 1, Config.MODULES[id].buildDays do
-                        projected = Simulation.applyDay(projected, Config)
-                        local result = Simulation.checkEnd(projected, Config)
-                        if result ~= "none" then
-                            canStart = result == "won"
-                            break
-                        end
-                    end
-                elseif afterBuild then
-                    canStart = afterBuild.water >= reserveFor(afterBuild, shortestTrip())
-                    -- 물 유지비가 큰 모듈(Farm)은 두 원정 앞까지 본다: 가까운 순으로 첫 원정을 버티고,
-                    -- 그 물을 더한 뒤 다음 원정도 완공 뒤 소비로 버틸 만큼 모였을 때 착공 (사람도 Farm 전에 물을 쌓는다)
-                    if canStart and Config.MODULES[id :: string].upkeep.water > 1 then
-                        canStart = survivesTwoTrips(afterBuild)
-                    end
-                    -- 식량이 급하면(Farm 건설 기간 + FOOD_URGENT_MARGIN일 안에 바닥) 물 여유가 없어도 Farm부터
-                    local foodDef = Config.MODULES[id :: string]
-                    if
-                        not canStart
-                        and foodDef.foodPerDay > 0
-                        and s.food <= foodDef.buildDays + FOOD_URGENT_MARGIN
-                    then
-                        canStart = true
-                    end
-                end
-                if afterBuild and canStart then
-                    local built = afterBuild
-                    waterNeed += waterCost
-                    s = built
-                    busy = true
-                    id = nextModule(s)
-                elseif
-                    not noTrips
-                    and target ~= nil
-                    and s.rover.tank < s.rover.tankMax
-                    and (
-                        (not tripped and s.day >= FIRST_TRIP_DAY)
-                        or s.water <= reserve
-                        or (waterShort and (energyReady or not canInstall))
-                    )
-                then
-                    tripped = true
-                    busy, onTrip = true, true
-                    tripTarget = target :: number
-                    battery = math.max(0, battery - tripBatteryTo(siteIndex, tripTarget))
-                    table.insert(log, tostring(tripTarget))
-                    tripLeft = days - 1
-                    if tripLeft == 0 then
-                        arrive()
-                    end
-                elseif canInstall then
-                    s = installMany(s, Config.PANELS_PER_DAY)
-                    busy = true
-                end
-            end
-            -- 대기 지표
-            if busy then
-                idle = 0
-            else
-                idle += 1
-                maxIdle = math.max(maxIdle, idle)
-            end
-            local def = id and Config.MODULES[id]
-            local isBlocked = not onTrip
-                and def ~= nil
-                and s.modules[id :: string].status == "available"
-                and s.water >= def.cost.water + waterReserve(s)
-                and s.energy < def.cost.energy
-            if isBlocked then
-                blocked += 1
-                blockedDays += 1
-                maxBlocked = math.max(maxBlocked, blocked)
-            else
-                blocked = 0
-            end
-            if s.modules.B.status ~= "active" then
-                minFood = math.min(minFood, s.food)
-            end
-            local _, useWater = Simulation.dailyConsumption(s, Config)
-            waterNeed += useWater
-            s = Simulation.applyDay(s, Config)
-            if s.energyWasted > 0 then
-                wasteDays += 1
-            end
-            if s.modules.B.status ~= "active" then
-                minFood = math.min(minFood, s.food)
-            end
-            local result = Simulation.checkEnd(s, Config)
-            if result ~= "none" then
-                return {
-                    result = result,
-                    day = Simulation.finishGame(s, Config, result).day,
-                    aOnReturn = aOnReturn,
-                    maxBlocked = maxBlocked,
-                    blockedDays = blockedDays,
-                    maxIdle = maxIdle,
-                    minFood = minFood,
-                    trips = s.waterTrips,
-                    wasteDays = wasteDays,
-                    partialUnloads = partialUnloads,
-                    chargeDays = chargeDays,
-                    waterNeed = waterNeed,
-                    mined = mined,
-                    tripLog = table.concat(log, ","),
-                }
-            end
-        end
+    -- 랜덤 이벤트 (2026-10-18 15차) ---------------------------------------
+    local EV = Config.EVENTS
+    local function stormEntry(day: number)
         return {
-            result = "none",
-            day = s.day,
-            aOnReturn = aOnReturn,
-            maxBlocked = maxBlocked,
-            blockedDays = blockedDays,
-            maxIdle = maxIdle,
-            minFood = minFood,
-            trips = s.waterTrips,
-            wasteDays = wasteDays,
-            partialUnloads = partialUnloads,
-            chargeDays = chargeDays,
-            waterNeed = waterNeed,
-            mined = mined,
-            tripLog = table.concat(log, ","),
+            kind = "solarStorm",
+            day = day,
+            duration = EV.solarStorm.durationDays,
+            warningDays = EV.solarStorm.warningDays,
+            roll = 0,
+            resolved = false,
+            target = "",
         }
     end
-
-    local function summary(results: { BotResult }): string
-        local parts = {}
-        for index, r in results do
-            table.insert(
-                parts,
-                string.format(
-                    "%s %s %d일(원정 %d회 [얼음 %s], 에너지 막힘 최대 %d일 합계 %d일, 완전 대기 최대 %d일, Farm 전 최저 식량 %d, 전력 버림 %d일, 일부 처리 하역 %d회, 충전 %d일, 물 사용 %d W, 채취 %d W)",
-                    Config.SITES[index].name,
-                    if r.result == "won" then "승리" else r.result,
-                    r.day,
-                    r.trips,
-                    r.tripLog,
-                    r.maxBlocked,
-                    r.blockedDays,
-                    r.maxIdle,
-                    r.minFood,
-                    r.wasteDays,
-                    r.partialUnloads,
-                    r.chargeDays,
-                    r.waterNeed,
-                    r.mined
-                )
-            )
-        end
-        return table.concat(parts, "\n        ")
+    local function meteorEntry(day: number, roll: number)
+        return {
+            kind = "micrometeoroid",
+            day = day,
+            duration = EV.micrometeoroid.bannerDays,
+            warningDays = 0,
+            roll = roll,
+            resolved = false,
+            target = "",
+        }
     end
+    local function withSchedule(state, schedule)
+        state.eventSchedule = schedule
+        Simulation.refreshDerived(state, Config)
+        return state
+    end
+    local function stepTo(state, day: number)
+        local s = state
+        while s.day < day do
+            s = Simulation.applyDay(s, Config)
+        end
+        return s
+    end
+
+    t.test(
+        "이벤트 일정: 같은 시드면 같은 일정, 시드가 다르면 달라진다",
+        function()
+            local a = Simulation.makeEventSchedule(Config, 12345)
+            local b = Simulation.makeEventSchedule(Config, 12345)
+            t.eq(#a, #b)
+            for i, entry in a do
+                t.eq(entry.kind, b[i].kind)
+                t.eq(entry.day, b[i].day)
+                t.eq(entry.roll, b[i].roll)
+            end
+            local stormDays = {}
+            for seed = 1, 50 do
+                for _, entry in Simulation.makeEventSchedule(Config, seed * 7919) do
+                    if entry.kind == "solarStorm" then
+                        stormDays[entry.day] = true
+                    end
+                end
+            end
+            local distinct = 0
+            for _ in stormDays do
+                distinct += 1
+            end
+            t.truthy(distinct >= 10, "시드 50개의 폭풍 날짜 종류 " .. distinct)
+            -- newState(seed)도 같은 일정
+            local s1 = Simulation.newState(Config, 777)
+            local s2 = Simulation.newState(Config, 777)
+            t.eq(#s1.eventSchedule, #s2.eventSchedule)
+            t.eq(s1.eventSchedule[1].day, s2.eventSchedule[1].day)
+        end
+    )
+
+    t.test(
+        "이벤트 일정 제약: 폭풍 1회 [30, 50], 운석 1~2회 [15, 80], 10일 간격, 폭풍과 겹치지 않음",
+        function()
+            local counts = { [1] = 0, [2] = 0 }
+            for seed = 1, 400 do
+                local schedule = Simulation.makeEventSchedule(Config, seed)
+                local storms, meteors = {}, {}
+                for _, entry in schedule do
+                    if entry.kind == "solarStorm" then
+                        table.insert(storms, entry)
+                    else
+                        table.insert(meteors, entry)
+                    end
+                end
+                t.eq(#storms, 1, "폭풍 수 (시드 " .. seed .. ")")
+                local storm = storms[1]
+                t.truthy(
+                    storm.day >= EV.solarStorm.startDayMin
+                        and storm.day <= EV.solarStorm.startDayMax,
+                    "폭풍 날짜 " .. storm.day
+                )
+                t.truthy(
+                    #meteors >= EV.micrometeoroid.countMin
+                        and #meteors <= EV.micrometeoroid.countMax,
+                    "운석 수 " .. #meteors
+                )
+                counts[#meteors] = (counts[#meteors] or 0) + 1
+                local stormFrom = storm.day - storm.warningDays
+                local stormTo = storm.day + storm.duration - 1
+                for i, m in meteors do
+                    t.truthy(
+                        m.day >= EV.micrometeoroid.dayMin and m.day <= EV.micrometeoroid.dayMax,
+                        "운석 날짜 " .. m.day
+                    )
+                    t.truthy(m.roll >= 0 and m.roll < 1, "roll 범위")
+                    local bannerTo = m.day + m.duration - 1
+                    t.truthy(
+                        bannerTo < stormFrom or m.day > stormTo,
+                        string.format(
+                            "운석 %d와 폭풍 %d 겹침 (시드 %d)",
+                            m.day,
+                            storm.day,
+                            seed
+                        )
+                    )
+                    for j, other in meteors do
+                        if i ~= j then
+                            t.truthy(
+                                math.abs(m.day - other.day) >= EV.micrometeoroid.minGapDays,
+                                "운석 간격"
+                            )
+                        end
+                    end
+                end
+                for i = 2, #schedule do
+                    t.truthy(schedule[i - 1].day <= schedule[i].day, "날짜 순 정렬")
+                end
+            end
+            t.truthy(counts[1] > 0 and counts[2] > 0, "1회와 2회가 모두 나온다")
+        end
+    )
+
+    t.test("EVENTS.enabled = false면 일정도 효과도 배너도 없다", function()
+        EV.enabled = false
+        local ok, err = pcall(function()
+            t.eq(#Simulation.makeEventSchedule(Config, 99), 0, "빈 일정")
+            t.eq(#Simulation.newState(Config, 99).eventSchedule, 0, "newState 빈 일정")
+            -- 일정이 들어 있어도 꺼져 있으면 무시
+            local s = installMany(playingState(1), 3)
+            setActive(s, "A")
+            s = withSchedule(s, { stormEntry(3), meteorEntry(2, 0.5) })
+            s = stepTo(s, 3)
+            t.falsy(s.modules.A.damaged, "운석 없음")
+            t.eq(s.event, nil, "배너 없음")
+            t.falsy(Simulation.stormActive(s, Config), "폭풍 없음")
+            local energy = Simulation.dailyProduction(s, Config)
+            t.near(energy, 3, "발전 그대로")
+            t.eq(Simulation.outdoorOxygenMultiplier(s, Config), 1)
+        end)
+        EV.enabled = true
+        if not ok then
+            error(err, 0)
+        end
+    end)
+
+    t.test(
+        "태양 입자 폭풍: 예고 D-2, 진행 2일 동안 발전 절반과 실외 산소 1.5배, 끝나면 원래대로",
+        function()
+            local S = 10
+            local s = withSchedule(installMany(playingState(1), 3), { stormEntry(S) })
+            s.panelsInstalled = 10
+            s = stepTo(s, S - 3)
+            t.eq(s.event, nil, "예고 전")
+            s = stepTo(s, S - 2)
+            t.eq(s.event.kind, "solarStorm")
+            t.eq(s.event.stage, "warning")
+            t.eq(s.event.daysLeft, 2)
+            t.eq(s.event.text, string.format(Config.TEXTS.stormBannerWarning, 2))
+            t.eq(s.event.eduText, Config.TEXTS.stormEdu)
+            t.near(Simulation.dailyProduction(s, Config), 10, "예고 중 발전 그대로")
+            s = stepTo(s, S)
+            t.eq(s.event.stage, "active")
+            t.eq(s.event.text, string.format(Config.TEXTS.stormBannerActive, 2))
+            t.near(
+                Simulation.dailyProduction(s, Config),
+                10 * EV.solarStorm.panelMultiplier,
+                "발전 절반"
+            )
+            t.eq(
+                Simulation.outdoorOxygenMultiplier(s, Config),
+                EV.solarStorm.outdoorOxygenMultiplier
+            )
+            local before = s.energy
+            s = Simulation.applyDay(s, Config)
+            t.near(s.energy - before, 5, "폭풍 날 순증 +5")
+            t.eq(s.event.daysLeft, 1, "남은 1일")
+            s = stepTo(s, S + EV.solarStorm.durationDays)
+            t.eq(s.event, nil, "폭풍 끝")
+            t.near(Simulation.dailyProduction(s, Config), 10, "발전 회복")
+            t.eq(Simulation.outdoorOxygenMultiplier(s, Config), 1)
+        end
+    )
+
+    t.test(
+        "미세운석: 가동 모듈 외벽 손상, 생산 정지, 유지비 계속, 수리하면 재개",
+        function()
+            local s = installMany(playingState(1), 3)
+            setActive(s, "A")
+            setActive(s, "B")
+            s.energy, s.water, s.food = 100, 100, 20
+            s = withSchedule(s, { meteorEntry(2, 0.99) })
+            s = stepTo(s, 2)
+            t.truthy(s.modules.B.damaged, "roll 0.99면 뒤쪽 후보 Farm B")
+            t.falsy(s.modules.A.damaged)
+            t.eq(s.eventSchedule[1].target, "B")
+            t.eq(s.event.kind, "micrometeoroid")
+            t.eq(s.event.text, string.format(Config.TEXTS.meteorBannerModule, "Farm B"))
+            t.eq(s.event.eduText, Config.TEXTS.meteorEdu)
+            local meteor = EV.micrometeoroid
+            t.eq(
+                s.modules.B.upkeepText,
+                string.format(Config.TEXTS.upkeepDamaged, meteor.repairKey, meteor.repairEnergy)
+            )
+            local _, _, food = Simulation.dailyProduction(s, Config)
+            t.eq(food, 0, "손상된 Farm은 식량 0")
+            local useEnergy, useWater = Simulation.dailyConsumption(s, Config)
+            t.eq(
+                useEnergy,
+                Config.MODULES.A.upkeep.energy + Config.MODULES.B.upkeep.energy,
+                "유지 전력 계속"
+            )
+            t.eq(
+                useWater,
+                Config.CREW.water + Config.MODULES.A.upkeep.water + Config.MODULES.B.upkeep.water
+            )
+            -- 가동 중지와 달리 손상은 다음 날에도 그대로
+            s = Simulation.applyDay(s, Config)
+            t.truthy(s.modules.B.damaged, "수리 전까지 유지")
+            -- 수리: 전력 부족이면 거절
+            local poor = Simulation.copy(s)
+            poor.energy = meteor.repairEnergy - 1
+            local okPoor, _, msgPoor, kindPoor = Simulation.repairModule(poor, Config, "B")
+            t.falsy(okPoor)
+            t.eq(msgPoor, string.format(Config.TEXTS.repairNeedEnergy, meteor.repairEnergy))
+            t.eq(kindPoor, "warn")
+            local okNo, _, msgNo = Simulation.repairModule(s, Config, "A")
+            t.falsy(okNo, "멀쩡한 모듈은 수리 안 함")
+            t.eq(msgNo, Config.TEXTS.moduleRepairNotNeeded)
+            local okFix, fixed, msgFix, kindFix = Simulation.repairModule(s, Config, "B")
+            t.truthy(okFix)
+            t.eq(kindFix, "good")
+            t.eq(msgFix, string.format(Config.TEXTS.moduleRepaired, "Farm B"))
+            t.falsy(fixed.modules.B.damaged)
+            t.near(fixed.energy, s.energy - meteor.repairEnergy, "전력 10")
+            local _, _, foodAfter = Simulation.dailyProduction(fixed, Config)
+            t.eq(foodAfter, Config.MODULES.B.foodPerDay, "생산 재개")
+        end
+    )
+
+    t.test(
+        "미세운석 대상: 손상 모듈과 승리 모듈은 빼고, 없으면 패널, 패널도 0이면 빗나감",
+        function()
+            -- A 손상, B 가동 -> 두 번째 운석은 B
+            local s = installMany(playingState(1), 3)
+            setActive(s, "A")
+            setActive(s, "B")
+            s.modules.A.damaged = true
+            s.energy, s.water, s.food = 100, 100, 50
+            s = withSchedule(s, { meteorEntry(2, 0.0) })
+            s = stepTo(s, 2)
+            t.truthy(s.modules.B.damaged, "남은 후보 B")
+            -- 가동 모듈 없음 -> 패널 1장
+            local p = withSchedule(
+                installMany(playingState(1), 2),
+                { meteorEntry(2, 0.5), meteorEntry(3, 0.5), meteorEntry(4, 0.5) }
+            )
+            p = stepTo(p, 2)
+            t.eq(p.panelsInstalled, 1, "패널 2 -> 1")
+            t.eq(p.eventSchedule[1].target, "panel")
+            t.eq(p.event.text, Config.TEXTS.meteorBannerPanel)
+            p = stepTo(p, 3)
+            t.eq(p.panelsInstalled, 0, "1 -> 0")
+            p = stepTo(p, 4)
+            t.eq(p.panelsInstalled, 0, "0 아래로 내려가지 않음")
+            t.eq(p.eventSchedule[3].target, "none")
+            t.eq(p.event.text, Config.TEXTS.meteorBannerMiss)
+            -- 부서진 슬롯은 다시 설치할 수 있다
+            local ok = Simulation.installPanel(p, Config)
+            t.truthy(ok, "다시 설치")
+        end
+    )
+
+    t.test(
+        "이벤트 알림: 폭풍 예고, 시작, 끝, 운석 충돌 토스트를 한 번씩",
+        function()
+            local S = 8
+            local s = installMany(playingState(1), 3)
+            setActive(s, "A")
+            s.energy, s.water, s.food = 100, 100, 50
+            s = withSchedule(s, { meteorEntry(3, 0.5), stormEntry(S) })
+            local seen = {}
+            while s.day < S + EV.solarStorm.durationDays + 1 do
+                local new = Simulation.applyDay(s, Config)
+                for _, notice in Simulation.eventNotices(s, new, Config) do
+                    table.insert(seen, { day = new.day, text = notice.text, kind = notice.kind })
+                end
+                s = new
+            end
+            local meteor = EV.micrometeoroid
+            local expected = {
+                {
+                    3,
+                    string.format(
+                        Config.TEXTS.meteorModule,
+                        "Habitat A",
+                        meteor.repairKey,
+                        meteor.repairEnergy
+                    ),
+                    "warn",
+                },
+                { S - 2, string.format(Config.TEXTS.stormWarning, 2), "warn" },
+                { S, string.format(Config.TEXTS.stormStart, EV.solarStorm.durationDays), "warn" },
+                { S + 2, Config.TEXTS.stormEnd, "good" },
+            }
+            t.eq(#seen, #expected, "알림 수")
+            for i, e in expected do
+                t.eq(seen[i].day, e[1], "알림 날 " .. i)
+                t.eq(seen[i].text, e[2])
+                t.eq(seen[i].kind, e[3])
+            end
+        end
+    )
+
+    -- 현실적 플레이어 봇: tests/bot.luau (2026-10-18 15차에 옮김. 규칙 설명도 그 파일 머리에)
+    local simulatePlayer = Bot.simulatePlayer
+    local summary = Bot.summary
 
     local results: { BotResult } = {}
     for index in Config.SITES do
@@ -1380,6 +1302,116 @@ return function(t)
                 end
                 t.truthy(farther, Config.SITES[index].name .. " 원정 " .. r.tripLog)
             end
+        end
+    )
+
+    -- 랜덤 이벤트 밸런스 (2026-10-18 15차): 같은 봇에 이벤트 일정을 넣는다.
+    -- 봇의 폭풍 대응: 진행 중에는 착공과 패널 설치를 하지 않고(로버 원정과 건물 앞 4초 수리는 한다), 손상은 다음 기회에 수리
+    local function farmFirst(siteIndex: number, schedule)
+        return simulatePlayer(siteIndex, false, { schedule = schedule })
+    end
+
+    t.test(
+        "이벤트 봇: 시드 일정 25개씩, 4곳 모두 90일 안에 승리, Farm 전 식량 5 이상",
+        function()
+            local lines = {}
+            for index, site in Config.SITES do
+                local worst, total = 0, 0
+                for seed = 1, 25 do
+                    local r =
+                        farmFirst(index, Simulation.makeEventSchedule(Config, seed * 104729 + 17))
+                    t.eq(r.result, "won", site.name .. " 시드 " .. seed)
+                    t.truthy(r.minFood >= 5, site.name .. " 최저 식량 " .. r.minFood)
+                    worst = math.max(worst, r.day)
+                    total += r.day
+                end
+                table.insert(
+                    lines,
+                    string.format("%s 평균 %.1f일, 최악 %d일", site.name, total / 25, worst)
+                )
+            end
+            print("        " .. table.concat(lines, "\n        "))
+        end
+    )
+
+    t.test("이벤트 봇: 폭풍이 30 ~ 50일 어느 날에 와도 4곳 모두 승리", function()
+        for index, site in Config.SITES do
+            local worst, worstDay = 0, 0
+            for day = EV.solarStorm.startDayMin, EV.solarStorm.startDayMax do
+                local r = farmFirst(index, { stormEntry(day) })
+                t.eq(r.result, "won", site.name .. " 폭풍 " .. day .. "일")
+                if r.day > worst then
+                    worst, worstDay = r.day, day
+                end
+            end
+            print(
+                string.format(
+                    "        %s 폭풍 최악 %d일 (폭풍 %d일 시작)",
+                    site.name,
+                    worst,
+                    worstDay
+                )
+            )
+        end
+    end)
+
+    t.test(
+        "이벤트 봇 최악: 폭풍이 Farm 완공 직후, 운석 두 번이 모두 Farm(10일 간격), 이른 운석이 패널 파괴",
+        function()
+            for index, site in Config.SITES do
+                local farmDay = simulatePlayer(index).farmDay
+                t.truthy(farmDay > 0, site.name .. " Farm 완공일")
+                local stormDay =
+                    math.clamp(farmDay + 1, EV.solarStorm.startDayMin, EV.solarStorm.startDayMax)
+                local afterFarm = farmFirst(index, { stormEntry(stormDay) })
+                t.eq(afterFarm.result, "won", site.name .. " Farm 직후 폭풍 " .. stormDay)
+                -- 운석 두 번: Farm 완공 다음 날과 10일 뒤, roll 0.99(뒤쪽 후보 = Farm), 폭풍은 가장 늦은 날
+                local m1 = farmDay + 1
+                local m2 = m1 + EV.micrometeoroid.minGapDays
+                local twice = farmFirst(index, {
+                    meteorEntry(m1, 0.99),
+                    meteorEntry(m2, 0.99),
+                    stormEntry(EV.solarStorm.startDayMax),
+                })
+                t.eq(twice.result, "won", site.name .. " 운석 두 번 Farm")
+                t.eq(twice.repairs, 2, site.name .. " 수리 두 번")
+                -- 생성기 범위(15일~)보다 이른 10일 운석: 모듈이 없어 패널 1장 파괴, 다시 깔아야 한다
+                local panel = farmFirst(index, { meteorEntry(10, 0.5) })
+                t.eq(panel.result, "won", site.name .. " 패널 파괴")
+                t.eq(panel.panelsLost, 1, site.name .. " 부서진 패널")
+                print(
+                    string.format(
+                        "        %s Farm %d일: 직후 폭풍 %d일 승리, 운석 2회 Farm %d일 승리, 패널 파괴 %d일 승리",
+                        site.name,
+                        farmDay,
+                        afterFarm.day,
+                        twice.day,
+                        panel.day
+                    )
+                )
+            end
+        end
+    )
+
+    t.test(
+        "이벤트 봇: 원정 중 Farm이 손상되면 알림을 보고 되돌아와 수리해 버틴다",
+        function()
+            -- de Gerlache: 41일 수리 뒤 바로 10일 원정, 42일 두 번째 운석이 다시 Farm (스윕에서 찾은 최악 시점)
+            local r = simulatePlayer(2, false, {
+                schedule = { meteorEntry(32, 0.99), meteorEntry(42, 0.99) },
+                abortOnFarmDamage = true,
+            })
+            t.eq(r.result, "won", "de Gerlache 운석 32, 42일")
+            t.truthy(r.aborts >= 1, "원정 되돌림 " .. r.aborts)
+            local nobile = simulatePlayer(4, false, {
+                schedule = { meteorEntry(35, 0.99), meteorEntry(45, 0.99) },
+                abortOnFarmDamage = true,
+            })
+            t.eq(nobile.result, "won", "Nobile 운석 35, 45일")
+            t.truthy(nobile.day <= Config.TOTAL_DAYS, "Nobile " .. nobile.day .. "일")
+            print(
+                string.format("        de Gerlache %d일, Nobile %d일 승리", r.day, nobile.day)
+            )
         end
     )
 end

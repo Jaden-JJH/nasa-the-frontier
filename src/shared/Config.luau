@@ -227,6 +227,40 @@ local Config = {
         repairKey = "R", -- 탑승 프롬프트(E)와 같은 섀시에 붙으므로 키를 나눈다 (Enum.KeyCode 이름)
     },
 
+    -- 랜덤 이벤트 (2026-10-18 15차, GDD "랜덤 이벤트"). 일정은 새 게임마다 시드로 정해 GameState.eventSchedule에 둔다.
+    -- 날짜는 GameState.day 기준. 이벤트는 DayTick(Simulation.applyDay) 안에서만 전진한다.
+    -- enabled = false면 일정이 비고 효과, 알림, 배너가 모두 없다.
+    EVENTS = {
+        enabled = true,
+        -- 태양 입자 폭풍: 게임당 1회. startDay부터 durationDays일 동안 진행(active), 그 전 warningDays일은 예고(warning).
+        -- 진행 중에는 패널 발전 x panelMultiplier(Simulation.dailyProduction), 실외 산소 소모 x outdoorOxygenMultiplier
+        -- (Oxygen, 실내와 로버 좌석은 영향 없음). panelMultiplier를 바꾸면 TEXTS.stormWarning, stormStart의 "절반"도 고친다
+        solarStorm = {
+            startDayMin = 30,
+            startDayMax = 50,
+            warningDays = 2,
+            durationDays = 2,
+            panelMultiplier = 0.5,
+            outdoorOxygenMultiplier = 1.5,
+        },
+        -- 미세운석: 게임당 countMin ~ countMax회, 날짜 dayMin ~ dayMax, 두 번이면 minGapDays 이상 간격.
+        -- 충돌 뒤 bannerDays일 동안 HUD 배너를 보이며, 이 배너 기간이 폭풍(예고 포함) 기간과 겹치지 않게 날짜를 고른다.
+        -- 가동 모듈(승리 모듈 제외, 이미 손상된 모듈 제외)이 있으면 그중 하나가 손상(damaged), 없으면 설치된 패널 1장 파괴.
+        -- 손상 모듈은 생산이 멈추고 유지비는 계속 낸다. 패드에서 repairKey 홀드 repairHold초, 전력 repairEnergy로 수리
+        micrometeoroid = {
+            countMin = 1,
+            countMax = 2,
+            dayMin = 15,
+            dayMax = 80,
+            minGapDays = 10,
+            bannerDays = 2,
+            repairEnergy = 10,
+            repairHold = 4,
+            repairKey = "R", -- 패드의 건설(E), 가동 중지(E) 프롬프트와 키를 나눈다 (Enum.KeyCode 이름)
+            promptDistance = 12, -- 패드 중심에서. 모듈 외벽(17 x 17) 앞에 서면 닿는 거리
+        },
+    },
+
     -- 로버 복구 (뒤집힘, 추락, 소실)
     ROVER_RECOVERY = {
         checkSeconds = 1, -- 자동 검사 주기(초)
@@ -528,6 +562,25 @@ local Config = {
         -- 산소 0은 즉시 실패 (2026-10-18 사용자 결정, 구조 페널티 방식 폐기)
         endOxygen = "%s 대원의 산소가 고갈되었습니다. 기지는 대원을 잃고 임무를 중단했습니다",
 
+        -- 랜덤 이벤트 (2026-10-18 15차). 토스트는 GameFlow(Events 모듈)가, 배너 문구는 GameState.event.text로
+        stormWarning = "태양 입자 폭풍 경보: D-%d. 폭풍 중에는 발전량이 절반이 되고 실외 산소 소모가 늘어납니다",
+        stormStart = "태양 입자 폭풍 시작: %d일간 발전 절반, 실외 활동 자제",
+        stormEnd = "폭풍이 지나갔습니다",
+        stormBannerWarning = "태양 입자 폭풍 D-%d",
+        stormBannerActive = "태양 입자 폭풍 진행 중 (남은 %d일)",
+        stormEdu = "달에는 자기장과 대기가 없어 태양 입자가 지표까지 그대로 닿습니다. NASA는 기지 안에 폭풍 대피 공간을 설계합니다.",
+        meteorModule = "미세운석 충돌: %s에 외벽 손상. %s로 수리(에너지 %d)",
+        meteorPanel = "미세운석 충돌: 태양광 패널 1장 파손",
+        meteorMiss = "운석이 기지 옆에 떨어졌습니다",
+        meteorBannerModule = "미세운석 충돌: %s 외벽 손상",
+        meteorBannerPanel = "미세운석 충돌: 태양광 패널 1장 파손",
+        meteorBannerMiss = "미세운석이 기지 옆에 떨어졌습니다",
+        meteorEdu = "대기가 없어 작은 운석도 타지 않고 그대로 떨어집니다. 지구에선 별똥별로 끝날 알갱이가 달에선 초속 수십 km로 부딪힙니다.",
+        moduleDamagedStatus = "손상, %s로 수리", -- HUD 모듈 행
+        upkeepDamaged = "외벽 손상: %s로 수리 (전력 %d)", -- ModuleState.upkeepText (패드 표지판)
+        moduleRepaired = "%s 외벽 수리 완료. 다시 정상 가동합니다",
+        moduleRepairNotNeeded = "손상된 곳이 없습니다",
+
         labelLocked = "%s (잠김)",
         labelAvailable = "%s 착공 가능",
         labelBuilding = "%s 건설 중 %d일 남음",
@@ -559,6 +612,7 @@ local Config = {
         openDoor = "열기",
         pauseModule = "가동 중지",
         resumeModule = "가동 재개",
+        repairModule = "외벽 수리", -- 미세운석 손상 모듈 (2026-10-18 15차)
     },
 
     -- 상황별 일회성 Tip 카드 문구 (클라이언트 TipUI, 세션당 1회). %d, %s는 TipUI가 Config 값으로 채운다.
@@ -571,6 +625,9 @@ local Config = {
         airlock = "문 앞에서 E로 에어락을 열고 안으로 들어가면 산소가 회복됩니다.",
         damage = "바위에 부딪히면 로버가 파손됩니다. 로버 옆에서 %s 키를 %d초 눌러 수리하세요(전력 %d).",
         energyCap = "배터리가 가득 차 전력이 버려지고 있습니다. 건설을 시작해 전력을 쓰세요.",
+        -- 랜덤 이벤트 (2026-10-18 15차): 첫 폭풍 예고, 첫 모듈 손상
+        storm = "폭풍 중에는 실내에 머물고, 폭풍 전에 물과 패널 작업을 끝내 두세요.",
+        moduleDamage = "손상된 모듈은 생산이 멈춥니다. 건물 앞에서 %s을 길게 눌러 수리하세요.",
     },
 }
 

@@ -2112,6 +2112,11 @@ check(
 
 advance(Config.LANDING_SECONDS + 0.01 - 0.55)
 check(state().phase == "playing" and state().day == 1, "착륙 5초 뒤 playing, day 1")
+-- 랜덤 이벤트(15차) 일정은 시드마다 달라 기존 검사 수치를 흔든다. 이벤트는 [랜덤 이벤트] 절이 직접 일정을 넣어 본다
+check(#state().eventSchedule >= 2, "새 게임에 이벤트 일정 (폭풍 1 + 미세운석 1~2)")
+ResourceState.patch(function(s)
+    s.eventSchedule = {}
+end)
 check(
     landingInstall.Enabled == true and landingTank.Enabled == true and consolePrompt.Enabled == true,
     "playing 후 설치, 하역, 복구 프롬프트 활성"
@@ -3823,6 +3828,288 @@ do
     )
 end
 
+-- 랜덤 이벤트 (2026-10-18 15차) ----------------------------------------------
+print("[랜덤 이벤트]")
+do
+    local Simulation = loadModule(Shared:FindFirstChild("Simulation"))
+    local meteorCfg = Config.EVENTS.micrometeoroid
+    local stormCfg = Config.EVENTS.solarStorm
+    local function advanceToDay(target)
+        local guard = 0
+        while state().day < target and guard < 300 do
+            advance(1)
+            guard += 1
+        end
+    end
+    local function notified(text)
+        for i = #sent, 1, -1 do
+            if sent[i].name == "Notify" and sent[i].args[1] == text then
+                return sent[i]
+            end
+        end
+        return nil
+    end
+    local function soundCount(key)
+        local total = 0
+        for _, entry in soundLog do
+            if entry.name == "Sfx_" .. key then
+                total += 1
+            end
+        end
+        return total
+    end
+    local function meteorEntry(day, roll)
+        return {
+            kind = "micrometeoroid",
+            day = day,
+            duration = meteorCfg.bannerDays,
+            warningDays = 0,
+            roll = roll,
+            resolved = false,
+            target = "",
+        }
+    end
+    local d0 = state().day
+    local meteorDay = d0 + 1
+    local stormDay = d0 + 5
+    ResourceState.patch(function(s)
+        s.energy = 500
+        s.water = 1000
+        s.food = 1000
+        s.modules.B.paused = false
+        s.eventSchedule = {
+            meteorEntry(meteorDay, 0.99),
+            {
+                kind = "solarStorm",
+                day = stormDay,
+                duration = stormCfg.durationDays,
+                warningDays = stormCfg.warningDays,
+                roll = 0,
+                resolved = false,
+                target = "",
+            },
+        }
+    end)
+    local padA, padB, padC =
+        base.ModulePads.PadA.Pad, base.ModulePads.PadB.Pad, base.ModulePads.PadC.Pad
+    local repairA, repairB =
+        padA:FindFirstChild("RepairPrompt"), padB:FindFirstChild("RepairPrompt")
+    check(
+        repairA ~= nil
+            and repairB ~= nil
+            and padC:FindFirstChild("RepairPrompt") ~= nil
+            and repairB.KeyboardKeyCode == roblox.Enum.KeyCode.R
+            and repairB.HoldDuration == meteorCfg.repairHold
+            and repairB.MaxActivationDistance == meteorCfg.promptDistance
+            and repairB.ActionText == Config.PROMPT_TEXTS.repairModule
+            and repairB.ObjectText == "Farm B"
+            and repairB.Style == roblox.Enum.ProximityPromptStyle.Custom
+            and repairA.Enabled == false
+            and repairB.Enabled == false,
+        "패드마다 외벽 수리 프롬프트 (R, 4초, 거리 12, Custom), 손상 전에는 꺼짐"
+    )
+    check(
+        padB:FindFirstChildOfClass("ProximityPrompt").Name ~= "RepairPrompt",
+        "Pad의 첫 프롬프트는 건설 프롬프트 그대로"
+    )
+
+    -- 미세운석: A, B 가동 중이고 roll 0.99면 뒤쪽 후보(Farm B)
+    local hitsBefore = soundCount("rover_hit")
+    advanceToDay(meteorDay)
+    local meteorText = string.format(
+        Config.TEXTS.meteorModule,
+        "Farm B",
+        meteorCfg.repairKey,
+        meteorCfg.repairEnergy
+    )
+    local meteorNote = notified(meteorText)
+    check(
+        state().modules.B.damaged == true and state().modules.A.damaged == false,
+        "미세운석: Farm B 외벽 손상"
+    )
+    check(
+        meteorNote ~= nil and meteorNote.args[2] == "warn",
+        "충돌 토스트(warn): " .. meteorText
+    )
+    check(soundCount("rover_hit") > hitsBefore, "충돌음 rover_hit")
+    do
+        local sentState = lastSent("StateUpdate").args[1]
+        local event = sentState.event
+        check(
+            event ~= nil
+                and event.kind == "micrometeoroid"
+                and event.stage == "active"
+                and event.text == string.format(Config.TEXTS.meteorBannerModule, "Farm B")
+                and event.eduText == Config.TEXTS.meteorEdu
+                and sentState.modules.B.damaged == true
+                and sentState.modules.B.upkeepText
+                    == string.format(
+                        Config.TEXTS.upkeepDamaged,
+                        meteorCfg.repairKey,
+                        meteorCfg.repairEnergy
+                    ),
+            "StateUpdate: 운석 배너, damaged, 표지판 수리 안내"
+        )
+    end
+    check(
+        repairB.Enabled == true and repairA.Enabled == false,
+        "손상된 Farm B만 수리 프롬프트 켜짐"
+    )
+    do
+        local before = state()
+        advanceToDay(meteorDay + 1)
+        local B = Config.MODULES.B
+        local A = Config.MODULES.A
+        check(
+            state().food == before.food - Config.CREW.food
+                and state().water
+                    == before.water - Config.CREW.water - A.upkeep.water - B.upkeep.water,
+            "손상된 Farm: 식량 생산 없음, 물 유지비는 계속"
+        )
+    end
+    ResourceState.patch(function(s)
+        s.energy = meteorCfg.repairEnergy - 1
+    end)
+    signalFor(repairB, "Triggered"):Fire(alice)
+    advance(0)
+    check(
+        state().modules.B.damaged == true
+            and lastSent("Notify").args[1]
+                == string.format(Config.TEXTS.repairNeedEnergy, meteorCfg.repairEnergy),
+        "전력이 모자라면 수리 거절"
+    )
+    ResourceState.patch(function(s)
+        s.energy = 500
+    end)
+    local repairSoundsBefore = soundCount("rover_repair")
+    signalFor(repairB, "PromptButtonHoldBegan"):Fire(alice)
+    advance(0)
+    check(
+        soundCount("rover_repair") > repairSoundsBefore,
+        "수리 홀드 동안 공구 소리 루프"
+    )
+    signalFor(repairB, "Triggered"):Fire(alice)
+    advance(0)
+    check(
+        state().modules.B.damaged == false
+            and state().energy == 500 - meteorCfg.repairEnergy
+            and lastSent("Notify").args[1] == string.format(Config.TEXTS.moduleRepaired, "Farm B")
+            and repairB.Enabled == false,
+        "수리: 전력 10, 손상 해제, 알림, 프롬프트 꺼짐"
+    )
+
+    -- 태양 입자 폭풍: 예고 D-2, 시작, 발전 절반, 실외 산소 1.5배, 끝
+    advanceToDay(stormDay - stormCfg.warningDays)
+    local warnText = string.format(Config.TEXTS.stormWarning, stormCfg.warningDays)
+    do
+        local note = notified(warnText)
+        local event = lastSent("StateUpdate").args[1].event
+        check(
+            note ~= nil
+                and note.args[2] == "warn"
+                and event ~= nil
+                and event.kind == "solarStorm"
+                and event.stage == "warning"
+                and event.daysLeft == stormCfg.warningDays
+                and event.text == string.format(Config.TEXTS.stormBannerWarning, 2)
+                and event.eduText == Config.TEXTS.stormEdu,
+            "폭풍 예고 토스트와 배너 D-2"
+        )
+    end
+    advanceToDay(stormDay)
+    do
+        local note = notified(string.format(Config.TEXTS.stormStart, stormCfg.durationDays))
+        local s = state()
+        local panelsEnergy = s.panelsInstalled * Config.PANEL_OUTPUT * (s.sunlight or 0)
+        local produced = Simulation.dailyProduction(s, Config)
+        check(
+            note ~= nil
+                and s.event ~= nil
+                and s.event.stage == "active"
+                and s.event.text == string.format(Config.TEXTS.stormBannerActive, 2),
+            "폭풍 시작 토스트, 배너 '진행 중 (남은 2일)'"
+        )
+        check(
+            math.abs(produced - panelsEnergy * stormCfg.panelMultiplier) < 1e-6,
+            string.format("폭풍 중 발전 절반 (%.2f / %.2f)", produced, panelsEnergy)
+        )
+    end
+    do
+        -- 실외 산소 소모 x1.5: 로버에서 내려 밖에서 2초
+        -- 산소 판정은 SeatPart가 로버 좌석인지로 본다. 잠깐 다른 파트를 가리켜 실외로 만든다 (Ref에 nil은 못 넣는다)
+        local seatBefore = humanoid.SeatPart
+        local rootBefore = root.CFrame
+        humanoid.SeatPart = Instance.new("Part")
+        root.CFrame = CFrame.new(pad1.CFrame.Position + Vector3.new(0, 3, 200))
+        advance(0.2)
+        local start = lastSent("OxygenUpdate").args[1]
+        advance(2)
+        local drop = start - lastSent("OxygenUpdate").args[1]
+        local expected = 2 * Config.OXYGEN.drainPerSecond * stormCfg.outdoorOxygenMultiplier
+        check(
+            math.abs(drop - expected) <= 0.6,
+            string.format(
+                "폭풍 중 실외 산소 2초에 %.2f 감소 (기대 %.2f)",
+                drop,
+                expected
+            )
+        )
+        root.CFrame = base.Lander.OxygenZone.CFrame
+        advance(0.2)
+        if seatBefore then
+            humanoid.SeatPart = seatBefore
+        end
+        root.CFrame = rootBefore -- 뒤 절(에어락 등)이 보던 자리로 되돌린다
+    end
+    advanceToDay(stormDay + stormCfg.durationDays)
+    do
+        local note = notified(Config.TEXTS.stormEnd)
+        check(
+            note ~= nil and note.args[2] == "good" and state().event == nil,
+            "폭풍 끝 토스트(good), 배너 사라짐"
+        )
+        check(
+            Simulation.outdoorOxygenMultiplier(state(), Config) == 1,
+            "폭풍 뒤 산소 배율 1"
+        )
+    end
+
+    -- 모듈이 모두 손상이면 패널 1장 파괴, 월드 패널도 줄어든다
+    local panelsFolder = base.SolarField.Panels
+    local count = state().panelsInstalled
+    local panelDay = state().day + 1
+    ResourceState.patch(function(s)
+        s.modules.A.damaged = true
+        s.modules.B.damaged = true
+        s.eventSchedule = { meteorEntry(panelDay, 0.5) }
+    end)
+    advanceToDay(panelDay)
+    check(
+        count > 0
+            and state().panelsInstalled == count - 1
+            and panelsFolder:FindFirstChild("Panel" .. count) == nil
+            and (count == 1 or panelsFolder:FindFirstChild("Panel" .. (count - 1)) ~= nil),
+        string.format(
+            "패널 파괴: %d -> %d, 월드 Panel%d 제거",
+            count,
+            state().panelsInstalled,
+            count
+        )
+    )
+    check(notified(Config.TEXTS.meteorPanel) ~= nil, "패널 파괴 토스트")
+    check(
+        padA:FindFirstChild("RepairPrompt").Enabled and repairB.Enabled,
+        "손상된 A, B 수리 프롬프트 켜짐"
+    )
+    ResourceState.patch(function(s)
+        s.modules.A.damaged = false
+        s.modules.B.damaged = false
+        s.eventSchedule = {}
+        s.energy = 1000
+    end)
+    ResourceState.publish()
+end
+
 -- 배속 ------------------------------------------------------------------
 print("[배속]")
 -- 허용 배속은 Config.SPEEDS 기준 (2026-10-18: { 1 }만 허용, 2배속 제거)
@@ -5071,6 +5358,9 @@ local function runDecorScenario()
     local Server2 = dm2:GetService("ServerScriptService").Server
     local ResourceState2 = loadModule2(Server2.ResourceState)
     check(ResourceState2.get().phase == "playing", "두 번째 place도 playing")
+    ResourceState2.patch(function(st)
+        st.eventSchedule = {} -- 랜덤 이벤트 없이 (위 [랜덤 이벤트] 절에서 따로 본다)
+    end)
     do
         -- 착륙지가 정해지면 그 기지에서 가장 가까운 얼음 쪽 하늘로 다시 조준
         local baseOrigin = Workspace2.Base:GetPivot().Position

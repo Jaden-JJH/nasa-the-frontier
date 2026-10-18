@@ -38,6 +38,7 @@ export type ModuleState = {
     paused: boolean,      -- 2026-10-18 추가. 가동 중지(현재 Farm만 지원). true면 유지비와 생산 모두 없음
     upkeepText: string,   -- 2026-10-18 추가. 가동 중 유지비 요약 한 줄(예: "물 -2/일, 전력 -6/일, 식량 +2/일"), paused면 "대기 중", 미가동이면 ""
     shortfall: { energy: number, water: number },  -- 2026-10-18 추가. 착공에 부족한 양, 충분하면 0
+    damaged: boolean,     -- 2026-10-18 15차 추가. 미세운석 외벽 손상. true면 생산(식량) 정지, 유지비는 계속, 가동 중지(paused)로 풀리지 않고 수리해야 false. upkeepText는 "외벽 손상: R로 수리 (전력 10)"
 }
 export type GameState = {
     phase: "selecting" | "landing" | "playing" | "won" | "lost",
@@ -71,12 +72,35 @@ export type GameState = {
     missionStage: string,     -- 2026-10-18 추가. "panels" | "board_rover" | "find_ice" | "unload" | "build_A" | "build_B" | "build_C" | "done". 클라이언트가 목표 대상 Highlight에 사용
     daysLeft: { water: number, food: number },  -- 2026-10-18 추가. 현재 소비율 기준 남은 일수(소비 0이면 999)
     stallReason: string,      -- 2026-10-18 추가. 모듈 정지 사유 한국어 한 줄, 정지 아니면 ""
+    event: ActiveEvent?,      -- 2026-10-18 15차 추가. 지금 예고 중이거나 진행 중인 랜덤 이벤트(HUD 배너). 없으면 nil
+    eventSchedule: { EventEntry },  -- 2026-10-18 15차 추가. 이번 게임 이벤트 일정(서버 규칙용). StateUpdate에 함께 실리지만 클라이언트는 읽지 않는다(예고는 event로만 보여 준다)
+}
+
+-- 랜덤 이벤트 (2026-10-18 15차). 수치와 문구는 Config.EVENTS, Config.TEXTS
+export type EventKind = "solarStorm" | "micrometeoroid"
+export type ActiveEvent = {
+    kind: EventKind,
+    stage: "warning" | "active",  -- warning: 폭풍 예고(시작 warningDays일 전부터), active: 폭풍 진행 중 또는 운석 충돌 뒤 bannerDays일
+    daysLeft: number,             -- warning: 시작까지 남은 일수(D-n), active: 끝까지 남은 일수(오늘 포함)
+    text: string,                 -- 배너 한 줄. 예: "태양 입자 폭풍 D-2", "태양 입자 폭풍 진행 중 (남은 1일)", "미세운석 충돌: Farm B 외벽 손상"
+    eduText: string,              -- 배너 아래 교육 한 줄 (TEXTS.stormEdu, meteorEdu)
+}
+export type EventEntry = {
+    kind: EventKind,
+    day: number,          -- 폭풍: 진행 첫날. 운석: 충돌 날(그날로 넘어가는 DayTick에 처리)
+    duration: number,     -- 폭풍: 진행 일수. 운석: 배너 일수
+    warningDays: number,  -- 폭풍 예고 일수, 운석 0
+    roll: number,         -- 운석 대상 고르기 난수 0..1
+    resolved: boolean,    -- 운석을 처리했는지
+    target: string,       -- 운석 결과 "A" | "B" | "C" | "panel" | "none", 폭풍은 ""
 }
 ```
 
+랜덤 이벤트 규칙(2026-10-18 15차): 일정은 새 게임마다 서버가 시드로 정한다(`Simulation.newState(config, seed)`). 폭풍은 진행 중 패널 발전 x EVENTS.solarStorm.panelMultiplier(0.5), 실외 산소 소모 x outdoorOxygenMultiplier(1.5, 실내와 로버 좌석은 영향 없음). 운석은 손상되지 않은 가동 모듈(승리 모듈 제외) 중 roll로 하나를 damaged로, 없으면 설치된 패널 1장 파괴(0 아래 없음), 패널도 0이면 빗나감. 일정과 효과는 DayTick에서만 전진한다.
+
 **OxygenUpdate** `(oxygen: number, max: number, inside: boolean)` - FireClient, 해당 플레이어에게만. 값이 바뀔 때 전송 (최대 초당 5회).
 
-**Notify** `(text: string, kind: "info" | "warn" | "good")` - FireClient 또는 FireAllClients. 토스트 메시지. 예: "오늘 설치 한도에 도달했습니다", "자원이 부족합니다: Water 20 필요", "Habitat A 완공".
+**Notify** `(text: string, kind: "info" | "warn" | "good")` - FireClient 또는 FireAllClients. 토스트 메시지. 예: "오늘 설치 한도에 도달했습니다", "자원이 부족합니다: Water 20 필요", "Habitat A 완공". 랜덤 이벤트(15차): 폭풍 예고 TEXTS.stormWarning(warn), 시작 stormStart(warn), 끝 stormEnd(good), 운석 meteorModule / meteorPanel(warn), meteorMiss(info), 수리 moduleRepaired(good).
 
 **SiteSelectionOpen** `(info: SiteSelectionInfo)` - FireAllClients. phase가 selecting일 때 전송. 늦게 들어온 플레이어에게도 FireClient.
 
@@ -133,13 +157,15 @@ export type GameOverInfo = {
 | GameClock.lua | DayTick 신호. Config.DAY_SECONDS / speed 간격. 일시정지(phase가 playing 아닐 때) |
 | ResourceState.lua | GameState 단일 테이블 보유. 변경 함수와 `publish()`(StateUpdate 송신). 순수 계산은 Shared.Simulation 호출 |
 | LandingSite.lua | 선택 단계, 권한자, 타임아웃, BaseKit 복제와 배치 |
-| SolarPanels.lua | InstallPad 프롬프트, 하루 설치 제한, 슬롯에 패널 복제 |
+| SolarPanels.lua | InstallPad 프롬프트, 하루 설치 제한, 슬롯에 패널 복제. syncCount(15차): 월드 패널 수를 state.panelsInstalled에 맞춘다(운석 파괴면 번호가 큰 Panel{n}부터 지우고 충돌음, 다음 설치가 같은 슬롯을 채운다) |
 | Construction.lua | PadA/B/C 프롬프트, 비용 검증, 건설 타이머, 고스트/완성 모델 전환, 선행 조건 |
 | WaterLoop.lua | 로버 탱크(Attribute "Tank"), 얼음 지점 프롬프트(매장량만큼 채움, 고갈 처리), 물탱크 프롬프트(하역, 로버가 TANK_UNLOAD_DISTANCE 안에 있을 때만, 하역 1 W당 WATER_PROCESS_ENERGY_PER_W 에너지 소모, 에너지가 모자라면 처리 가능한 만큼만), 로버 복구(수동 프롬프트 + 자동) |
 | Sfx.lua | 2026-10-18 추가. 서버 3D 효과음 재생 헬퍼. Shared.SoundIds의 키로 Sound를 만들어 파트에 붙여 재생(id 0이면 무음). 루프 사운드는 핸들을 돌려줘 멈출 수 있음 |
 | RoverBattery.lua | 2026-10-18 추가. 로버 배터리 소모(주행 중, 속도 > 1일 때만), 0이면 RoverDrive 속도 배율 0. 충전 패드 판정과 충전(기지 에너지 차감). 25% 이하 경고 Notify 1회(충전되면 리셋) |
 | RoverDamage.lua | 2026-10-18 추가. 바위(Attribute BoulderLayer)와 12 studs/s 이상 충돌 시 파손 +1(1초 중복 방지), 파손당 최고 속도 10% 감소(파손 1: 16.2, 파손 2: 14.4), 3이면 정지. 로버 섀시의 "수리" 프롬프트(키 R, 홀드 4초, 에너지 10, 좌석 비어 있을 때)로 복구. 탑승 프롬프트(E)와 같은 섀시라 키를 나눔. Config.ROVER_DAMAGE.enabled로 끌 수 있음 |
-| Oxygen.lua | 플레이어별 산소. 실내 판정(OxygenZone 파트 안 또는 VehicleSeat 착석). 0이면 즉시 GameFlow.lose(2026-10-18 12차). 그 외 사망(리셋)에는 Food -1, Water -2 |
+| Events.lua | 2026-10-18 15차 추가. DayTick 앞뒤 상태를 Simulation.eventNotices로 비교해 랜덤 이벤트 토스트(폭풍 예고, 시작, 끝, 운석 충돌)를 보내고 운석이 모듈을 때리면 그 Pad에서 rover_hit 효과음. 규칙은 전부 Simulation |
+| ModuleRepair.lua | 2026-10-18 15차 추가. PadA/B/C의 Pad 파트마다 "외벽 수리" 프롬프트(이름 RepairPrompt, 키 EVENTS.micrometeoroid.repairKey R, 홀드 repairHold 4초, 거리 promptDistance 12). 그 모듈이 damaged이고 플레이 중일 때만 켜짐. Simulation.repairModule(전력 repairEnergy 10, 모자라면 거절 토스트). 홀드 동안 rover_repair 루프. 건설 프롬프트가 Pad의 첫 프롬프트로 남도록 Construction 다음에 붙인다 |
+| Oxygen.lua | 플레이어별 산소. 실외 소모에 Simulation.outdoorOxygenMultiplier(폭풍 중 1.5)를 곱한다(15차). 실내 판정(OxygenZone 파트 안 또는 VehicleSeat 착석). 0이면 즉시 GameFlow.lose(2026-10-18 12차). 그 외 사망(리셋)에는 Food -1, Water -2 |
 | GameFlow.lua | phase 전이, 승리/실패 판정, 재시작 |
 | DevMap.lua | Workspace.LandingPads가 없으면 그레이박스 맵과 ServerStorage.BaseKit을 Part로 생성 |
 
@@ -150,6 +176,11 @@ export type GameOverInfo = {
 - `Simulation.canBuild(state, config, moduleId) -> ok, reasonText`
 - `Simulation.fillFromDeposit(tank, tankMax, deposit) -> fill, newTank, newDeposit` (2026-10-18 추가)
 - `Simulation.checkEnd(state, config) -> "none" | "won" | "lost", reasonText`
+- `Simulation.newState(config, seed?) -> GameState` (2026-10-18 15차: seed로 이벤트 일정. 없으면 os.time())
+- `Simulation.makeEventSchedule(config, seed) -> { EventEntry }` (같은 시드면 같은 일정. EVENTS.enabled = false면 빈 목록)
+- `Simulation.currentEvent(state, config) -> ActiveEvent?`, `Simulation.stormActive(state, config) -> boolean`, `Simulation.outdoorOxygenMultiplier(state, config) -> number`
+- `Simulation.eventNotices(prev, new, config) -> { { text, kind, target? } }` (DayTick 토스트 목록)
+- `Simulation.repairModule(state, config, moduleId) -> ok, newState, text, kind`
 
 ## 4. 맵 인스턴스 계약 (Workspace, ServerStorage)
 
@@ -179,7 +210,7 @@ ServerStorage
         Slot1 .. Slot25 (Part)      패널이 놓일 자리(2026-10-18: 30 -> 25, 5 x 5). 설치되면 PanelTemplate 복제본이 위에 생김
     ModulePads (Folder)
       PadA, PadB, PadC (Model)    Attribute ModuleId(string, A/B/C). 클라이언트 표지판이 이걸로 찾는다
-        Pad (Part)                  ProximityPrompt 부착 대상. ActionText "건설 시작". PadB는 완공 후 두 번째 프롬프트 "가동 중지" / "가동 재개"(2026-10-18 추가, 서버 Construction이 관리)
+        Pad (Part)                  ProximityPrompt 부착 대상. ActionText "건설 시작". PadB는 완공 후 두 번째 프롬프트 "가동 중지" / "가동 재개"(2026-10-18 추가, 서버 Construction이 관리). 세 패드 모두 "외벽 수리" 프롬프트 RepairPrompt(키 R, 15차, 서버 ModuleRepair, 손상일 때만 켜짐)
         Ghost (Model)               반투명 미리보기. 착공 가능할 때 표시, 착공하면 숨김(2026-10-18 변경). 건설 중에는 Built가 진행률만큼 땅에서 솟아오름
         Built (Model)               완공 모델. active 전에는 Parent를 ServerStorage로 빼두거나 투명
         OxygenZone (Part)           PadA에만 있음
@@ -198,7 +229,7 @@ ProximityPrompt 공통: `RequiresLineOfSight = false`, `MaxActivationDistance = 
 | TitleUI.lua | 타이틀 화면. 시작 버튼을 누르면 로컬에서만 숨김 (서버 phase는 이미 selecting) |
 | SiteSelectUI.lua | SiteSelectionOpen 수신. 카드 4장. 권한자만 버튼 활성. 남은 시간 표시. SelectSite 송신 |
 | LandingCamera.lua | LandingSequence 수신. Config.LANDING_SECONDS 동안 카메라 Scriptable로 하강 연출 후 Custom 복귀 |
-| HUD.lua | StateUpdate 수신. Energy/Water/Food/Day, 순증감(+3/일 형식, 음수는 빨강), 패널 n/30 (오늘 k/3), 모듈 A/B/C 상태와 진행바, 로버 탱크, 미션 텍스트, 2배속 토글(SetSpeed) |
+| HUD.lua | (15차) 상단 중앙 Day 패널 아래 랜덤 이벤트 배너: state.event.text 한 줄(예고는 중립 회색, 진행 중은 빨강) + eduText 14pt, event가 nil이면 숨김. topCenter AutomaticSize 안에서 자라 compact 토스트를 밀어 낸다. 모듈 행과 칩에 damaged면 "손상, R로 수리"(빨강). StateUpdate 수신. Energy/Water/Food/Day, 순증감(+3/일 형식, 음수는 빨강), 패널 n/30 (오늘 k/3), 모듈 A/B/C 상태와 진행바, 로버 탱크, 미션 텍스트, 2배속 토글(SetSpeed) |
 | OxygenBar.lua | OxygenUpdate 수신. 실외일 때 강조, 20 이하 경고 |
 | PromptUI.lua | 커스텀 ProximityPrompt 표시(키 아이콘, ObjectText, ActionText, 홀드 진행 바). 서버 프롬프트는 전부 Style Custom |
 | PadSignUI.lua | 모듈 패드 위 표지판(이름, 상태 배지, 진행 바, 비용). PadX의 ModuleId Attribute와 state.modules 사용 |
@@ -237,4 +268,14 @@ SITES = {
   { id = 4, name = "Nobile Crater", sunlight = 0.60, iceDistanceLabel = "매우 가깝다", hazardLabel = "높음", description = "얼음이 코앞이지만 지형이 험하다" },
 },
 MISSION_TEXTS = { ... }  -- 단계별 미션 문구는 Config에 두고 서버가 state.missionText로 내려준다
+EVENTS = {  -- 2026-10-18 15차 랜덤 이벤트
+  enabled = true,
+  solarStorm = { startDayMin = 30, startDayMax = 50, warningDays = 2, durationDays = 2, panelMultiplier = 0.5, outdoorOxygenMultiplier = 1.5 },
+  micrometeoroid = { countMin = 1, countMax = 2, dayMin = 15, dayMax = 80, minGapDays = 10, bannerDays = 2,
+                     repairEnergy = 10, repairHold = 4, repairKey = "R", promptDistance = 12 },
+},
+-- TEXTS 추가 키(15차): stormWarning, stormStart, stormEnd, stormBannerWarning, stormBannerActive, stormEdu,
+--   meteorModule, meteorPanel, meteorMiss, meteorBannerModule, meteorBannerPanel, meteorBannerMiss, meteorEdu,
+--   moduleDamagedStatus, upkeepDamaged, moduleRepaired, moduleRepairNotNeeded
+-- PROMPT_TEXTS.repairModule = "외벽 수리", TIPS.storm(첫 폭풍 예고), TIPS.moduleDamage(첫 모듈 손상, TipUI 트리거)
 ```

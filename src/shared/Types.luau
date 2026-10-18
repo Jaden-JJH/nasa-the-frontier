@@ -16,6 +16,11 @@ export type EndResult = Simulation.EndResult
 export type MissionStage = Simulation.MissionStage
 export type Shortfall = Simulation.Shortfall -- ModuleState.shortfall { energy, water }
 export type DaysLeft = Simulation.DaysLeft -- GameState.daysLeft { water, food }
+-- 랜덤 이벤트 (2026-10-18 15차)
+export type EventKind = Simulation.EventKind -- "solarStorm" | "micrometeoroid"
+export type EventStage = Simulation.EventStage -- "warning" | "active"
+export type ActiveEvent = Simulation.ActiveEvent -- GameState.event { kind, stage, daysLeft, text, eduText }
+export type EventEntry = Simulation.EventEntry -- GameState.eventSchedule 한 줄 (서버 규칙용)
 
 export type NotifyKind = "info" | "warn" | "good"
 

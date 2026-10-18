@@ -15,7 +15,15 @@ type GameState = Simulation.GameState
 
 local ResourceState = {}
 
-local state: GameState = Simulation.newState(Config)
+-- 새 게임마다 다른 랜덤 이벤트 일정을 쓰도록 시드를 뽑는다 (2026-10-18 15차)
+local seedRandom = Random.new()
+local SEED_MAX = 2147483646
+
+local function newSeed(): number
+    return math.floor(seedRandom:NextNumber() * SEED_MAX) + 1
+end
+
+local state: GameState = Simulation.newState(Config, newSeed())
 
 function ResourceState.get(): GameState
     return state
@@ -34,7 +42,7 @@ end
 
 -- 새 게임 상태로 초기화 (phase = selecting)
 function ResourceState.reset()
-    state = Simulation.newState(Config)
+    state = Simulation.newState(Config, newSeed())
 end
 
 -- 모든 플레이어에게 현재 상태 송신. 파생 필드(missionStage, daysLeft, stallReason, 모듈 unlocked와

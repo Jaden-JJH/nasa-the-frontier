@@ -93,7 +93,13 @@ local function animateUnfold(panel: Instance, slot: BasePart, final: CFrame)
         local steps = math.max(1, math.ceil(Config.PANEL_UNFOLD_SECONDS * Config.ANIMATION_HZ))
         for step = 1, steps do
             task.wait(Config.PANEL_UNFOLD_SECONDS / steps)
-            if myGeneration ~= generation or panel.Parent == nil then
+            if myGeneration ~= generation then
+                return
+            end
+            if panel.Parent == nil then
+                -- 펼치는 중에 사라졌다 (미세운석 파괴). 프롬프트가 영영 꺼져 있지 않게 센 값을 되돌린다
+                unfolding = math.max(0, unfolding - 1)
+                SolarPanels.refresh()
                 return
             end
             local alpha = step / steps
@@ -133,6 +139,31 @@ end
 -- 펼치는 중인지 (테스트용)
 function SolarPanels.isUnfolding(): boolean
     return unfolding > 0
+end
+
+-- 월드 패널 수를 state.panelsInstalled에 맞춘다 (2026-10-18 15차). 미세운석이 패널을 부수면 수가 줄어든다:
+-- 번호가 큰 패널(Panel{n})부터 지워 다음 설치가 같은 슬롯을 다시 채운다. 모자라면 빈 번호를 채운다(연출 없음)
+function SolarPanels.syncCount()
+    local folder = panelsFolder
+    if not folder then
+        return
+    end
+    local count = ResourceState.get().panelsInstalled
+    for _, child in folder:GetChildren() do
+        local index = tonumber(string.match(child.Name, "^Panel(%d+)$"))
+        if index and index > count then
+            local slot = slots[index]
+            if slot then
+                Sfx.play("rover_hit", slot)
+            end
+            child:Destroy()
+        end
+    end
+    for index = 1, math.min(count, #slots) do
+        if not folder:FindFirstChild("Panel" .. index) then
+            spawnPanel(index)
+        end
+    end
 end
 
 -- 프롬프트 문구와 활성 상태를 현재 상태에 맞춘다

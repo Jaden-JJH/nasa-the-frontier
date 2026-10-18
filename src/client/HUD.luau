@@ -3,6 +3,7 @@
 -- 배치(1280x720 기준): 좌측 열(자원 패널 아래에 모듈 3개), 상단 중앙 Day와 미션,
 -- 우측 열(패널, 로버, 배터리, 부스트, 배속 버튼이 있으면 그 아래). 토스트는 우측 열 하단에 붙는다.
 -- compact(터치 전용 또는 낮은 화면): 모듈 패널은 숨기고 Day 패널 아래 A/B/C 칩 한 줄로 대신한다.
+-- 15차: Day 패널 바로 아래 랜덤 이벤트 배너(state.event, 없으면 숨김), 모듈 행과 칩에 미세운석 손상 표시.
 
 local TweenService = game:GetService("TweenService")
 
@@ -263,6 +264,47 @@ function HUD.init(ctx)
         Preset = "body",
         TextWrapped = true,
     })
+    -- 랜덤 이벤트 배너 (2026-10-18 15차): Day 패널 아래 한 줄 + 교육 한 줄. event가 nil이면 숨김.
+    -- 예고는 중립색, 진행 중은 빨강 (주황은 산소 전용이라 쓰지 않는다). topCenter의 AutomaticSize 안에서 자라
+    -- compact에서 topCenter 아래에 붙는 토스트를 함께 밀어 내린다
+    refs.eventTitle = UI.create("TextLabel", {
+        Name = "EventTitle",
+        LayoutOrder = 1,
+        Size = UDim2.fromScale(1, 0),
+        AutomaticSize = Enum.AutomaticSize.Y,
+        Text = "",
+        Preset = "heading",
+        TextSize = 18,
+        TextWrapped = true,
+    })
+    refs.eventEdu = UI.create("TextLabel", {
+        Name = "EventEdu",
+        LayoutOrder = 2,
+        Size = UDim2.fromScale(1, 0),
+        AutomaticSize = Enum.AutomaticSize.Y,
+        Text = "",
+        TextColor3 = Colors.textDim,
+        Preset = "caption",
+        TextSize = 14,
+        TextWrapped = true,
+    })
+    refs.eventStroke = UI.stroke(Colors.neutral, 1.5)
+    refs.eventBanner = UI.create("Frame", {
+        Name = "EventBanner",
+        LayoutOrder = 3,
+        Size = UDim2.fromScale(1, 0),
+        AutomaticSize = Enum.AutomaticSize.Y,
+        BackgroundColor3 = Colors.panel,
+        BackgroundTransparency = 0.12,
+        Visible = false,
+    }, {
+        UI.corner(10),
+        UI.padding({ 6, 8, 12, 12 }),
+        UI.list(Enum.FillDirection.Vertical, 2),
+        refs.eventStroke,
+        refs.eventTitle,
+        refs.eventEdu,
+    })
     local topCenter = UI.create("Frame", {
         Name = "TopCenter",
         AnchorPoint = Vector2.new(0.5, 0),
@@ -289,6 +331,7 @@ function HUD.init(ctx)
             refs.site,
             refs.mission,
         }),
+        refs.eventBanner,
     })
 
     -- 우측 열: 패널, 로버, 배터리, 부스트 (배속 버튼이 있으면 그 아래)
@@ -394,7 +437,7 @@ function HUD.init(ctx)
     refs.modulesPanel = modulesPanel
     refs.chipRow = UI.create("Frame", {
         Name = "ModuleChips",
-        LayoutOrder = 3,
+        LayoutOrder = 4,
         Size = UDim2.new(1, 0, 0, 28),
         BackgroundTransparency = 1,
         Visible = false,
@@ -483,6 +526,7 @@ local CHIP_STYLE = {
     available = { bg = Colors.panelLight, fg = Colors.good },
     building = { bg = Colors.energy, fg = Colors.bg },
     active = { bg = Colors.good, fg = Colors.bg },
+    damaged = { bg = Colors.bad, fg = Colors.text }, -- 미세운석 손상 (2026-10-18 15차)
 }
 
 local function updateChip(row, moduleId, moduleState)
@@ -492,14 +536,28 @@ local function updateChip(row, moduleId, moduleState)
         suffix = string.format("%d일", moduleState.daysLeft)
     end
     local style = CHIP_STYLE[status] or CHIP_STYLE.locked
+    if moduleState.damaged == true then
+        suffix = "손상"
+        style = CHIP_STYLE.damaged
+    end
     row.chipLabel.Text = moduleId .. " " .. suffix
     row.chipLabel.TextColor3 = style.fg
     row.chip.BackgroundColor3 = style.bg
 end
 
+-- 손상 모듈 행 문구 ("손상, R로 수리")
+local function damagedText()
+    local meteor = config.EVENTS and config.EVENTS.micrometeoroid
+    return string.format(config.TEXTS.moduleDamagedStatus, meteor and meteor.repairKey or "R")
+end
+
 local function updateModule(row, moduleState)
     local status = moduleState.status
-    if status == "building" then
+    if moduleState.damaged == true then
+        row.status.Text = damagedText()
+        row.status.TextColor3 = Colors.bad
+        row.bar.root.Visible = false
+    elseif status == "building" then
         row.status.Text = string.format("건설 중 %d일 남음", moduleState.daysLeft)
         row.status.TextColor3 = Colors.energy
         row.bar.root.Visible = true
@@ -753,6 +811,21 @@ function HUD.update(state)
     currentSpeed = state.speed
     if refs.speed then
         refs.speed.Text = string.format("%dx", state.speed)
+    end
+
+    -- 랜덤 이벤트 배너
+    local event = state.event
+    if type(event) == "table" and type(event.text) == "string" then
+        local active = event.stage == "active"
+        local color = if active then Colors.bad else Colors.neutral
+        refs.eventBanner.Visible = true
+        refs.eventTitle.Text = event.text
+        refs.eventTitle.TextColor3 = color
+        refs.eventStroke.Color = color
+        refs.eventEdu.Text = if type(event.eduText) == "string" then event.eduText else ""
+        refs.eventEdu.Visible = refs.eventEdu.Text ~= ""
+    else
+        refs.eventBanner.Visible = false
     end
 
     local stallReason = state.stallReason
