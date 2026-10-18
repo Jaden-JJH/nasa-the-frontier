@@ -39,6 +39,7 @@ export type ModuleState = {
     upkeepText: string,   -- 2026-10-18 추가. 가동 중 유지비 요약 한 줄(예: "물 -2/일, 전력 -6/일, 식량 +2/일"), paused면 "대기 중", 미가동이면 ""
     shortfall: { energy: number, water: number },  -- 2026-10-18 추가. 착공에 부족한 양, 충분하면 0
     damaged: boolean,     -- 2026-10-18 15차 추가. 미세운석 외벽 손상. true면 생산(식량) 정지, 유지비는 계속, 가동 중지(paused)로 풀리지 않고 수리해야 false. upkeepText는 "외벽 손상: R로 수리 (전력 10)"
+    activatedDay: number?, -- 2026-10-18 15차 후속 추가. 가동을 시작한 날(완공 DayTick 뒤의 day). 가동 전이면 nil. 미세운석 유예 기간 판정용
 }
 export type GameState = {
     phase: "selecting" | "landing" | "playing" | "won" | "lost",
@@ -96,7 +97,7 @@ export type EventEntry = {
 }
 ```
 
-랜덤 이벤트 규칙(2026-10-18 15차): 일정은 새 게임마다 서버가 시드로 정한다(`Simulation.newState(config, seed)`). 폭풍은 진행 중 패널 발전 x EVENTS.solarStorm.panelMultiplier(0.5), 실외 산소 소모 x outdoorOxygenMultiplier(1.5, 실내와 로버 좌석은 영향 없음). 운석은 손상되지 않은 가동 모듈(승리 모듈 제외) 중 roll로 하나를 damaged로, 없으면 설치된 패널 1장 파괴(0 아래 없음), 패널도 0이면 빗나감. 일정과 효과는 DayTick에서만 전진한다.
+랜덤 이벤트 규칙(2026-10-18 15차): 일정은 새 게임마다 서버가 시드로 정한다(`Simulation.newState(config, seed)`). 폭풍은 진행 중 패널 발전 x EVENTS.solarStorm.panelMultiplier(0.5), 실외 산소 소모 x outdoorOxygenMultiplier(1.5, 실내와 로버 좌석은 영향 없음). 운석은 손상되지 않은 가동 모듈(승리 모듈 제외, 가동 첫날부터 graceDaysAfterActivation(5)일 안인 모듈 제외, noRepeatTarget이면 직전 운석이 때린 모듈 제외) 중 roll로 하나를 damaged로, 없으면 설치된 패널 1장 파괴(0 아래 없음), 패널도 0이면 빗나감. 일정과 효과는 DayTick에서만 전진한다.
 
 **OxygenUpdate** `(oxygen: number, max: number, inside: boolean)` - FireClient, 해당 플레이어에게만. 값이 바뀔 때 전송 (최대 초당 5회).
 
@@ -274,7 +275,8 @@ EVENTS = {  -- 2026-10-18 15차 랜덤 이벤트
   enabled = true,
   solarStorm = { startDayMin = 30, startDayMax = 50, warningDays = 2, durationDays = 2, panelMultiplier = 0.5, outdoorOxygenMultiplier = 1.5 },
   micrometeoroid = { countMin = 1, countMax = 2, dayMin = 15, dayMax = 80, minGapDays = 10, bannerDays = 2,
-                     repairEnergy = 10, repairHold = 4, repairKey = "R", promptDistance = 12 },
+                     repairEnergy = 10, repairHold = 4, repairKey = "R", promptDistance = 12,
+                     graceDaysAfterActivation = 5, noRepeatTarget = true },
 },
 -- TEXTS 추가 키(15차): stormWarning, stormStart, stormEnd, stormBannerWarning, stormBannerActive, stormEdu,
 --   meteorModule, meteorPanel, meteorMiss, meteorBannerModule, meteorBannerPanel, meteorBannerMiss, meteorEdu,

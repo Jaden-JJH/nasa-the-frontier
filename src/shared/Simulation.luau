@@ -35,6 +35,7 @@ export type ModuleState = {
     paused: boolean, -- 가동 중지 (2026-10-18, 현재 Farm만). true면 유지비와 생산 모두 없음. 선행 조건과 저장 상한은 그대로
     upkeepText: string, -- 표지판용 한 줄 "물 -2/일, 전력 -6/일, 식량 +2/일", 가동 중지면 "대기 중", 손상이면 수리 안내
     damaged: boolean, -- 미세운석 외벽 손상 (2026-10-18 15차). 생산 정지, 유지비는 계속. 수리 전까지 풀리지 않는다
+    activatedDay: number?, -- 가동을 시작한 날(완공 DayTick 뒤의 day). 가동 전이면 nil. 운석 유예 기간 판정용 (15차 후속)
 }
 
 -- 랜덤 이벤트 (2026-10-18 15차) ------------------------------------------
@@ -152,6 +153,7 @@ local function newModule(status: ModuleStatus, progress: number, daysLeft: numbe
         paused = false,
         upkeepText = "",
         damaged = false,
+        activatedDay = nil,
     }
 end
 
@@ -167,6 +169,7 @@ local function copyModules(modules: Modules): Modules
             paused = m.paused,
             upkeepText = m.upkeepText,
             damaged = m.damaged == true,
+            activatedDay = m.activatedDay,
         }
     end
     return out
@@ -584,15 +587,38 @@ function Simulation.eventNotices(prev: GameState, new: GameState, config: Config
     return notices
 end
 
--- 미세운석 충돌 처리 (복사본을 직접 고친다). 손상되지 않은 가동 모듈(승리 모듈 제외) 중 roll로 하나,
--- 없으면 설치된 패널 1장 파괴, 패널도 없으면 빗나감
+-- 미세운석 충돌 처리 (복사본을 직접 고친다). 후보 = 손상되지 않은 가동 모듈 중 승리 모듈이 아니고,
+-- 가동 첫날부터 graceDaysAfterActivation일이 지났고(공정성, 15차 후속), noRepeatTarget이면 직전 운석이 때린
+-- 모듈이 아닌 것. 후보 중 roll로 하나, 없으면 설치된 패널 1장 파괴, 패널도 없으면 빗나감
 local function resolveMeteor(state: GameState, config: Config, entry: EventEntry)
     entry.resolved = true
+    local meteor = config.EVENTS.micrometeoroid
+    local lastTarget: string? = nil
+    if meteor.noRepeatTarget then
+        local lastDay = -math.huge
+        for _, other in state.eventSchedule do
+            if
+                other ~= entry
+                and other.kind == "micrometeoroid"
+                and other.resolved
+                and other.day < entry.day
+                and other.day > lastDay
+            then
+                lastDay = other.day
+                lastTarget = other.target
+            end
+        end
+    end
     local candidates: { string } = {}
     for _, id in config.MODULE_ORDER do
         local m = state.modules[id]
         if m and m.status == "active" and not m.damaged and id ~= config.WIN_MODULE then
-            table.insert(candidates, id)
+            local activated = m.activatedDay
+            local inGrace = activated ~= nil
+                and state.day - activated < meteor.graceDaysAfterActivation
+            if not inGrace and id ~= lastTarget then
+                table.insert(candidates, id)
+            end
         end
     end
     if #candidates > 0 then
@@ -752,6 +778,7 @@ function Simulation.applyDay(state: GameState, config: Config): GameState
                 m.status = "active"
                 m.progress = 1
                 m.daysLeft = 0
+                m.activatedDay = state.day + 1 -- 가동 첫날 (아래 new.day와 같다)
             else
                 m.progress = (buildDays - m.daysLeft) / buildDays
             end

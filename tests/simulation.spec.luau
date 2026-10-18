@@ -1394,24 +1394,91 @@ return function(t)
     )
 
     t.test(
-        "이벤트 봇: 원정 중 Farm이 손상되면 알림을 보고 되돌아와 수리해 버틴다",
+        "이벤트 봇: 15차 최악 격자에서 지던 운석 시점도 공정성 규칙으로 버틴다",
         function()
-            -- de Gerlache: 41일 수리 뒤 바로 10일 원정, 42일 두 번째 운석이 다시 Farm (스윕에서 찾은 최악 시점)
-            local r = simulatePlayer(2, false, {
-                schedule = { meteorEntry(32, 0.99), meteorEntry(42, 0.99) },
-                abortOnFarmDamage = true,
-            })
-            t.eq(r.result, "won", "de Gerlache 운석 32, 42일")
-            t.truthy(r.aborts >= 1, "원정 되돌림 " .. r.aborts)
-            local nobile = simulatePlayer(4, false, {
-                schedule = { meteorEntry(35, 0.99), meteorEntry(45, 0.99) },
-                abortOnFarmDamage = true,
-            })
-            t.eq(nobile.result, "won", "Nobile 운석 35, 45일")
-            t.truthy(nobile.day <= Config.TOTAL_DAYS, "Nobile " .. nobile.day .. "일")
-            print(
-                string.format("        de Gerlache %d일, Nobile %d일 승리", r.day, nobile.day)
+            -- 규칙 전 패배: de Gerlache 운석 32, 42일 / Nobile 35, 45일 (둘 다 Farm, roll 0.99)
+            local cases = { { 2, 32, 42 }, { 4, 35, 45 }, { 4, 35, 47 }, { 4, 36, 46 } }
+            local outcomes = {}
+            for _, c in cases do
+                local r = farmFirst(c[1], { meteorEntry(c[2], 0.99), meteorEntry(c[3], 0.99) })
+                local name = Config.SITES[c[1]].name
+                t.eq(r.result, "won", string.format("%s 운석 %d, %d일", name, c[2], c[3]))
+                table.insert(outcomes, string.format("%s %d,%d -> %d일", name, c[2], c[3], r.day))
+            end
+            print("        " .. table.concat(outcomes, ", "))
+        end
+    )
+
+    t.test(
+        "운석 공정성: 가동 첫날부터 유예 기간 안 모듈은 맞지 않는다",
+        function()
+            local grace = EV.micrometeoroid.graceDaysAfterActivation
+            local s = installMany(playingState(1), 3)
+            s.energy, s.water, s.food = 500, 500, 50
+            setActive(s, "A")
+            s.modules.A.activatedDay = 1
+            s.modules.B = moduleState("building", 0.8, 1)
+            s.modules.B.damaged = false
+            -- B는 2일에 가동 시작. 유예 마지막 날(2 + grace - 1)과 그다음 날에 운석
+            local lastGraceDay = 2 + grace - 1
+            s = withSchedule(s, { meteorEntry(lastGraceDay, 0.99) })
+            s = stepTo(s, 2)
+            t.eq(s.modules.B.status, "active")
+            t.eq(s.modules.B.activatedDay, 2, "가동 첫날 기록")
+            t.eq(Simulation.copy(s).modules.B.activatedDay, 2, "copy가 activatedDay를 유지")
+            s = stepTo(s, lastGraceDay)
+            t.falsy(s.modules.B.damaged, "유예 기간 안 Farm은 후보에서 빠짐")
+            t.truthy(s.modules.A.damaged, "남은 후보 A가 맞음")
+            -- 유예가 끝난 다음 날이면 B도 후보
+            local later = installMany(playingState(1), 3)
+            later.energy, later.water, later.food = 500, 500, 50
+            setActive(later, "A")
+            setActive(later, "B")
+            later.modules.A.activatedDay = 1
+            later.modules.B.activatedDay = 2
+            later = withSchedule(later, { meteorEntry(2 + grace, 0.99) })
+            later = stepTo(later, 2 + grace)
+            t.truthy(later.modules.B.damaged, "유예가 끝나면 Farm도 맞을 수 있다")
+        end
+    )
+
+    t.test(
+        "운석 공정성: 직전 운석이 때린 모듈은 다음 운석에서 빠지고, 후보가 없으면 패널",
+        function()
+            local s = installMany(playingState(1), 3)
+            s.energy, s.water, s.food = 500, 500, 50
+            setActive(s, "A")
+            setActive(s, "B")
+            s = withSchedule(
+                s,
+                { meteorEntry(2, 0.99), meteorEntry(4, 0.99), meteorEntry(6, 0.99) }
             )
+            s = stepTo(s, 2)
+            t.truthy(s.modules.B.damaged, "첫 운석 B")
+            local fixed = select(2, Simulation.repairModule(s, Config, "B"))
+            fixed = stepTo(fixed, 4)
+            t.falsy(
+                fixed.modules.B.damaged,
+                "수리했어도 직전 대상 B는 연속으로 맞지 않음"
+            )
+            t.truthy(fixed.modules.A.damaged, "두 번째 운석은 A")
+            t.eq(fixed.eventSchedule[2].target, "A")
+            -- 세 번째: A는 손상 중이고 직전 대상, B만 남는다
+            fixed = stepTo(fixed, 6)
+            t.truthy(fixed.modules.B.damaged, "세 번째 운석은 다시 B (직전 대상은 A)")
+
+            -- 가동 모듈이 B 하나뿐이고 직전 대상이 B면 패널 1장
+            local only = installMany(playingState(1), 3)
+            only.energy, only.water, only.food = 500, 500, 50
+            setActive(only, "B")
+            only = withSchedule(only, { meteorEntry(2, 0.5), meteorEntry(3, 0.5) })
+            only = stepTo(only, 2)
+            only = select(2, Simulation.repairModule(only, Config, "B"))
+            local panels = only.panelsInstalled
+            only = stepTo(only, 3)
+            t.falsy(only.modules.B.damaged, "직전 대상이라 B 제외")
+            t.eq(only.panelsInstalled, panels - 1, "후보가 없으면 패널 파괴")
+            t.eq(only.eventSchedule[2].target, "panel")
         end
     )
 end

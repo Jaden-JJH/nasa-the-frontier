@@ -245,7 +245,8 @@ local Config = {
         },
         -- 미세운석: 게임당 countMin ~ countMax회, 날짜 dayMin ~ dayMax, 두 번이면 minGapDays 이상 간격.
         -- 충돌 뒤 bannerDays일 동안 HUD 배너를 보이며, 이 배너 기간이 폭풍(예고 포함) 기간과 겹치지 않게 날짜를 고른다.
-        -- 가동 모듈(승리 모듈 제외, 이미 손상된 모듈 제외)이 있으면 그중 하나가 손상(damaged), 없으면 설치된 패널 1장 파괴.
+        -- 가동 모듈(승리 모듈, 이미 손상된 모듈, 유예 기간 모듈, 직전 대상 제외)이 있으면 그중 하나가 손상(damaged),
+        -- 없으면 설치된 패널 1장 파괴.
         -- 손상 모듈은 생산이 멈추고 유지비는 계속 낸다. 패드에서 repairKey 홀드 repairHold초, 전력 repairEnergy로 수리
         micrometeoroid = {
             countMin = 1,
@@ -258,6 +259,10 @@ local Config = {
             repairHold = 4,
             repairKey = "R", -- 패드의 건설(E), 가동 중지(E) 프롬프트와 키를 나눈다 (Enum.KeyCode 이름)
             promptDistance = 12, -- 패드 중심에서. 모듈 외벽(17 x 17) 앞에 서면 닿는 거리
+            -- 공정성 (15차 후속, 심사 한 판에서 운으로 지는 경우를 없앤다): 가동 첫날부터 이 일수 안인 모듈은
+            -- 후보에서 뺀다(Farm 완공 직후 식량이 가장 낮을 때 맞는 것 방지). 0이면 유예 없음
+            graceDaysAfterActivation = 5,
+            noRepeatTarget = true, -- 직전 운석이 때린 모듈은 다음 운석 후보에서 뺀다. 후보가 비면 패널, 그다음 빗나감
         },
     },
 

@@ -3877,6 +3877,9 @@ do
         s.water = 1000
         s.food = 1000
         s.modules.B.paused = false
+        -- 가동 직후 유예(graceDaysAfterActivation)가 지난 모듈로 만든다 (바로 위 [건설] 절에서 막 완공됐다)
+        s.modules.A.activatedDay = 1
+        s.modules.B.activatedDay = 1
         s.eventSchedule = {
             meteorEntry(meteorDay, 0.99),
             {
