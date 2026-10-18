@@ -1,7 +1,8 @@
 --!nonstrict
 -- 상황별 일회성 Tip 카드. 토스트(우상단, 사건 알림)와 미션 문구(상단 중앙, 목표)와 달리
 -- 우측 하단에 뜬다(14차, 사용자 지시). 아래에서 올라오며 나타나고 여러 줄은 위로 자란다.
--- PC: 오른쪽 16px, 아래 16px, 폭 360. 터치/낮은 화면(compact): 오른쪽 12px, 아래 190px(부스터와 점프 버튼 위).
+-- PC: 오른쪽 16, 아래 16, 폭 360(가상 좌표, Layout 배율로 함께 커진다. 1080p는 1.25배).
+-- 터치/낮은 화면(compact): 오른쪽 12px, 아래 190px(부스터와 점프 버튼 위, 실제 px 기준).
 -- 한 번에 하나, 대기열 순차 표시, 표시 사이 최소 3초 간격, 세션당 각 Tip 1회(재시작하면 초기화).
 -- 문구는 Config.TIPS. 트리거는 전부 클라이언트 측(StateUpdate, OxygenUpdate, 탑승 이벤트).
 
@@ -14,7 +15,9 @@ local UI = require(script.Parent.UI)
 
 local TipUI = {}
 
-local CARD_WIDTH = 360
+local CARD_WIDTH = 360 -- 가상 좌표(배율 적용 전)
+local BODY_TEXT_SIZE = 18 -- 본문. 1080p에서 22.5px
+local BADGE_TEXT_SIZE = 15
 local FADE_IN = 0.3
 local HOLD = 6
 local FADE_OUT = 0.5
@@ -22,9 +25,9 @@ local MIN_GAP = 3
 local RISE = 24 -- 등장 시 아래에서 올라오는 거리(px)
 local SINK = 12 -- 퇴장 시 아래로 가라앉는 거리(px)
 local PC_MARGIN = 16 -- PC: 오른쪽, 아래 여백
-local COMPACT_RIGHT = 12
-local COMPACT_BOTTOM = 190 -- 부스터 버튼(하단 110~174) 위 + 여유. 점프 버튼도 이 아래에 있다
-local COMPACT_SIDE_PAD = 24 -- compact 폭 = min(360, 뷰포트 폭 - 24)
+local COMPACT_RIGHT = 12 -- 실제 px (부스터 버튼은 배율을 안 쓰므로 px로 맞춘다)
+local COMPACT_BOTTOM = 190 -- 실제 px. 부스터 버튼(하단 110~174) 위 + 여유. 점프 버튼도 이 아래에 있다
+local COMPACT_SIDE_PAD = 24 -- 실제 px. compact 폭 = min(360, 뷰포트 폭 - 24)
 local FALLBACK_VIEWPORT = Vector2.new(1280, 720)
 local TIP_SOUND_VOLUME = 0.3
 
@@ -35,6 +38,7 @@ local BASE_GRAY = Color3.fromRGB(120, 110, 90)
 
 local config
 local gui
+local tipRoot
 local group
 local textLabel
 local card
@@ -118,16 +122,21 @@ local function waitFor(seconds, myGeneration)
     return generation == myGeneration
 end
 
--- 카드 폭(px)과 우하단 여백. compact 여부는 표시할 때마다 읽는다.
+-- 카드 폭과 우하단 여백(가상 좌표). 카드는 Layout 루트 안에 있어 배율만큼 커지므로
+-- 실제 px로 정한 compact 여백은 배율로 나눠 넣는다. compact 여부는 표시할 때마다 읽는다.
 local function cardLayout()
     local viewport = gui.AbsoluteSize
     if viewport.X <= 0 or viewport.Y <= 0 then
         viewport = FALLBACK_VIEWPORT
     end
+    local scale = Layout.scale()
+    local virtualWidth = viewport.X / scale
     if Layout.isCompact() then
-        return math.min(CARD_WIDTH, viewport.X - COMPACT_SIDE_PAD), COMPACT_RIGHT, COMPACT_BOTTOM
+        return math.min(CARD_WIDTH, virtualWidth - COMPACT_SIDE_PAD / scale),
+            COMPACT_RIGHT / scale,
+            COMPACT_BOTTOM / scale
     end
-    return math.min(CARD_WIDTH, viewport.X - PC_MARGIN * 2), PC_MARGIN, PC_MARGIN
+    return math.min(CARD_WIDTH, virtualWidth - PC_MARGIN * 2), PC_MARGIN, PC_MARGIN
 end
 
 local function cardPosition(right, bottom, dy)
@@ -204,6 +213,7 @@ end
 function TipUI.init(ctx)
     config = ctx.Config
     gui = UI.gui("Tip", 14)
+    tipRoot = Layout.root(gui)
 
     textLabel = UI.create("TextLabel", {
         Name = "Text",
@@ -213,20 +223,20 @@ function TipUI.init(ctx)
         Text = "",
         TextColor3 = INK,
         Preset = "body",
-        TextSize = 16,
+        TextSize = BODY_TEXT_SIZE,
         TextWrapped = true,
         TextXAlignment = Enum.TextXAlignment.Left,
     })
     local badge = UI.create("TextLabel", {
         Name = "TipBadge",
         LayoutOrder = 1,
-        Size = UDim2.fromOffset(42, 20),
+        Size = UDim2.fromOffset(46, 22),
         BackgroundTransparency = 0,
         BackgroundColor3 = AMBER,
         Text = "TIP",
         TextColor3 = INK,
         Preset = "caption",
-        TextSize = 14,
+        TextSize = BADGE_TEXT_SIZE,
         Font = UI.FontBold,
     }, { UI.roundCorner() })
 
@@ -273,7 +283,7 @@ function TipUI.init(ctx)
         BackgroundTransparency = 1,
         GroupTransparency = 1,
         Visible = false,
-        Parent = gui,
+        Parent = tipRoot,
     }, {
         card,
     })
