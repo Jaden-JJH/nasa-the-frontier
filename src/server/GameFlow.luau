@@ -11,12 +11,15 @@ local Types = require(ReplicatedStorage.Shared.Types)
 local Airlock = require(script.Parent.Airlock)
 local BaseLights = require(script.Parent.BaseLights)
 local Construction = require(script.Parent.Construction)
+local Contributions = require(script.Parent.Contributions)
 local Events = require(script.Parent.Events)
 local GameClock = require(script.Parent.GameClock)
 local KitImports = require(script.Parent.KitImports)
 local LandingSite = require(script.Parent.LandingSite)
 local ModuleRepair = require(script.Parent.ModuleRepair)
 local Oxygen = require(script.Parent.Oxygen)
+local RecordBoard = require(script.Parent.RecordBoard)
+local Records = require(script.Parent.Records)
 local ResourceState = require(script.Parent.ResourceState)
 local RoverBattery = require(script.Parent.RoverBattery)
 local RoverBoost = require(script.Parent.RoverBoost)
@@ -55,6 +58,8 @@ local function onBasePlaced(base: Model)
     -- 착륙 유도등: 기지가 놓이는 순간이 착륙 연출 시작이다 (LandingSequence와 같은 틱)
     BaseLights.attach(base)
     BaseLights.playLanding(Config.LANDING_SECONDS)
+    -- 명예의 전당 기록판 (16차). 장식이므로 오류가 나도 착륙 흐름은 계속
+    ServerUtil.safeCall("RecordBoard", RecordBoard.attach, base)
     -- 행성을 이 기지에서 가장 가까운 얼음 쪽 하늘로
     ServerUtil.safeCall("KitImports Planet", KitImports.aimPlanetFrom, base:GetPivot().Position)
 end
@@ -75,6 +80,10 @@ end
 
 -- 착륙 연출이 끝나 playing이 되면 프롬프트를 켜고 시계를 시작한다
 local function onPlaying()
+    -- 아무것도 하지 않은 대원도 "함께 한 일" 표에 나오게 지금 있는 플레이어 행을 만든다
+    for _, player in Players:GetPlayers() do
+        Contributions.ensure(player)
+    end
     refreshPrompts(nil)
     GameClock.start(ResourceState.get().speed)
 end
@@ -91,6 +100,9 @@ local function endGame(result: Simulation.EndResult, reason: string, midDay: boo
     refreshPrompts(nil)
     ResourceState.publish()
     local chooser = LandingSite.getChooser()
+    for _, player in Players:GetPlayers() do
+        Contributions.ensure(player)
+    end
     local info: Types.GameOverInfo = {
         won = result == "won",
         reason = reason,
@@ -100,9 +112,20 @@ local function endGame(result: Simulation.EndResult, reason: string, midDay: boo
         siteName = finished.siteName or "",
         restartAvailableAt = workspace:GetServerTimeNow() + Config.RESULT_MIN_SECONDS,
         chooserUserId = if chooser then chooser.UserId else 0,
+        crew = Contributions.crew(Config.RECORDS.crewRows),
     }
     lastGameOver = info
     Remotes.get("GameOver"):FireAllClients(info)
+    -- 승리 기록은 GameOver 뒤에 비동기로 저장하고, 끝나면 Records 이벤트로 순위를 보낸다
+    if info.won then
+        Records.submit(
+            Records.makeEntry(
+                info.day,
+                info.siteName,
+                Contributions.names(Config.RECORDS.crewNameLimit)
+            )
+        )
+    end
 end
 
 -- DayTick 1회: 하루 계산 -> 화면 반영 -> 경고 -> 종료 판정 -> 송신
@@ -153,6 +176,7 @@ end
 local function beginNewGame(leaving: Player?)
     lastGameOver = nil
     lastWasteNoticeDay = nil
+    Contributions.reset()
     ResourceState.reset()
     WaterLoop.resetDeposits()
     Oxygen.resetAll()
@@ -176,6 +200,7 @@ local function restart(leaving: Player?)
     RoverDamage.detach()
     RoverBattery.detach()
     BaseLights.detach()
+    RecordBoard.detach()
     RoverDrive.detach()
     Oxygen.detach()
     local base = ServerUtil.getBase()
@@ -239,6 +264,7 @@ end
 
 local function onPlayerAdded(player: Player)
     ResourceState.publishTo(player)
+    Records.sendTo(player)
     Oxygen.addPlayer(player)
     LandingSite.onPlayerAdded(player)
     Spacesuit.watch(player)
@@ -271,6 +297,9 @@ function GameFlow.start()
     started = true
 
     LandingSite.init()
+    -- 승리 기록: 서버 시작 때 1회 불러온다 (비동기). 목록이 바뀌면 기지 기록판 글자를 갱신
+    Records.onChanged(RecordBoard.refresh)
+    Records.init()
     WaterLoop.init()
     Oxygen.init()
     RoverRecovery.init()

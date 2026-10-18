@@ -9,6 +9,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Config = require(ReplicatedStorage.Shared.Config)
 local Simulation = require(ReplicatedStorage.Shared.Simulation)
+local Contributions = require(script.Parent.Contributions)
 local KitImports = require(script.Parent.KitImports)
 local ResourceState = require(script.Parent.ResourceState)
 local ServerUtil = require(script.Parent.ServerUtil)
@@ -248,6 +249,7 @@ local function onTriggered(player: Player, id: string)
         return
     end
     ResourceState.set(newState)
+    Contributions.add(player, "builds", 1)
     local entry = entries[id]
     Sfx.play("build_start", entry and entry.pad)
     Construction.sync(prev, newState)

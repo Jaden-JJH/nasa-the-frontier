@@ -254,6 +254,24 @@ local BASE_LAYOUT = {
     },
 }
 
+-- 기지 기록판 "명예의 전당" (2026-10-19 16차, 서버 RecordBoard가 기지를 놓을 때 만든다). Origin 기준 로컬 좌표.
+-- 자리: 판 앞쪽 오른편 빈터 (충전 패드 x -6..6, z -22..-10의 오른쪽 앞, 정면 경사로 x -5..5보다 7 이상 오른쪽,
+-- 패널 설치대 x 31..37, z -16..-10의 왼쪽 앞, 착륙 패드 가장자리 z -24 바깥, 판 앞 가장자리 z -30 안).
+-- 착륙선 문(0, -1)을 바라보게 돌리면 테두리 양끝이 약 (12.6, -29.4), (21.4, -23.6), 다리가 약 (13.8, -28.6), (20.2, -24.4).
+-- 문을 나서는 사람과 충전 패드의 로버에서 오른쪽 앞에 보인다.
+-- 문 -> 패널 설치대 직선(z -1 ~ -13)과 로버 동선(x -5..5)을 막지 않는다
+local RECORD_BOARD = {
+    center = Vector3.new(17, 0, -26.5), -- 판 중심 xz (y는 아래 높이 값으로 정한다)
+    faceToward = Vector3.new(0, 0, -1), -- 앞면(글자)이 바라보는 점: 착륙선 문 중심
+    size = Vector3.new(10, 6, 0.4), -- 가로, 세로, 두께
+    groundY = -1, -- 판(콘크리트) 윗면 (Origin 기준)
+    lift = 1.5, -- 판 아랫면 = 지면 + 이 값 (다리 위)
+    legSize = Vector3.new(0.4, 0, 0.4), -- 다리 굵기 (높이는 lift + legEmbed)
+    legEmbed = 0.5, -- 다리를 지면 아래로 묻는 길이 (판이 없는 평지 경로에서도 떠 보이지 않게)
+    legInset = 1.2, -- 판 양끝에서 다리 중심까지
+    trim = 0.25, -- 노란 테두리 폭 (판 뒤에 이만큼 큰 판)
+}
+
 -- 패드 간격 넓히기 (무게중심 기준)
 do
     local sum = Vector3.zero
@@ -2965,6 +2983,7 @@ end
 
 -- 착륙 유도등 체이스 수치 (BaseLights가 읽는다)
 DevMap.GUIDE = BASE_LAYOUT.guide
+DevMap.RECORD_BOARD = RECORD_BOARD
 
 -- 이번 세션에 계획한 산 (그레이박스 지형을 만들지 않았으면 nil)
 function DevMap.getMountains(): MountainPlan?

@@ -9,6 +9,7 @@ local ServerStorage = game:GetService("ServerStorage")
 
 local Config = require(ReplicatedStorage.Shared.Config)
 local Simulation = require(ReplicatedStorage.Shared.Simulation)
+local Contributions = require(script.Parent.Contributions)
 local ResourceState = require(script.Parent.ResourceState)
 local ServerUtil = require(script.Parent.ServerUtil)
 local Sfx = require(script.Parent.Sfx)
@@ -197,6 +198,7 @@ local function onTriggered(player: Player)
         return
     end
     ResourceState.set(newState)
+    Contributions.add(player, "panels", 1)
     Sfx.play("panel_install", prompt and prompt.Parent)
     spawnPanel(newState.panelsInstalled, true)
     ResourceState.notify(player, message, "good")

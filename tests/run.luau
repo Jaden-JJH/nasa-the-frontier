@@ -1,5 +1,5 @@
 -- 테스트 진입점: 저장소 루트에서 lune run tests/run.luau
--- 1) 순수 로직 단위 테스트 (Simulation)
+-- 1) 순수 로직 단위 테스트 (Simulation, Ranking)
 -- 2) 서버 통합 스모크 (tests/server_smoke.luau): rojo로 place를 새로 빌드해 별도 lune 프로세스로 돌린다.
 --    Roblox API 흉내가 단위 테스트 환경에 섞이지 않도록 하위 프로세스로 분리했다.
 --    rojo가 없거나 저장소 루트가 아니면 건너뛰고 그 사실을 출력한다.
@@ -15,6 +15,7 @@ local SMOKE_SCRIPT = "tests/server_smoke.luau"
 
 local specs = {
     { name = "Simulation", run = require("./simulation.spec") },
+    { name = "Ranking", run = require("./ranking.spec") },
 }
 
 for _, spec in specs do

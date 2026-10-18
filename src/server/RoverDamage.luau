@@ -14,6 +14,7 @@ local RunService = game:GetService("RunService")
 
 local Config = require(ReplicatedStorage.Shared.Config)
 local Simulation = require(ReplicatedStorage.Shared.Simulation)
+local Contributions = require(script.Parent.Contributions)
 local ResourceState = require(script.Parent.ResourceState)
 local RoverDrive = require(script.Parent.RoverDrive)
 local ServerUtil = require(script.Parent.ServerUtil)
@@ -139,6 +140,7 @@ local function onRepair(player: Player)
         return
     end
     ResourceState.set(new)
+    Contributions.add(player, "repairs", 1)
     ResourceState.notifyAll(message, ResourceState.kind(kind))
     stopRepairLoop()
     Sfx.play("rover_repair", chassis)

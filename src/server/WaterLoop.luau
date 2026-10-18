@@ -9,6 +9,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Config = require(ReplicatedStorage.Shared.Config)
 local Simulation = require(ReplicatedStorage.Shared.Simulation)
+local Contributions = require(script.Parent.Contributions)
 local ResourceState = require(script.Parent.ResourceState)
 local ServerUtil = require(script.Parent.ServerUtil)
 local Sfx = require(script.Parent.Sfx)
@@ -223,6 +224,8 @@ local function onTankTriggered(player: Player)
         return
     end
     ResourceState.set(newState)
+    -- 하역량 = 탱크에서 빠진 양 (전력이 모자라 일부만 처리하면 처리한 만큼)
+    Contributions.add(player, "water", state.rover.tank - newState.rover.tank)
     Sfx.play("water_unload", tankPart)
     Sfx.play("water_processing", tankPart)
     WaterLoop.mirrorTank()

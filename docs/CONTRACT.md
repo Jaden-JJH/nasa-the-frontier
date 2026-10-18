@@ -137,6 +137,29 @@ export type GameOverInfo = {
     siteName: string,
     restartAvailableAt: number,  -- 2026-10-18 추가. workspace:GetServerTimeNow() 기준 재도전 가능 시각(결과 화면 후 RESULT_MIN_SECONDS)
     chooserUserId: number,       -- 2026-10-18 추가. 재도전을 결정할 수 있는 플레이어
+    crew: { CrewRow },           -- 2026-10-19 16차 추가. 플레이어별 기여도, 기여 합이 큰 순(최대 RECORDS.crewRows 4명). 순위 표기 없음(협력 게임, MVP 없음)
+}
+export type CrewRow = {          -- 2026-10-19 16차. 나간 플레이어도 남는다. 새 게임(beginNewGame)마다 초기화
+    name: string,                -- DisplayName
+    panels: number,              -- 패널 설치 성공 수 (SolarPanels)
+    water: number,               -- 물 하역량 W, 전력 부족으로 일부만 처리하면 처리한 양 (WaterLoop)
+    builds: number,              -- 착공 수 (Construction)
+    repairs: number,             -- 로버 수리 + 모듈 외벽 수리 (RoverDamage, ModuleRepair)
+    deaths: number,              -- 산소 고갈(산소 0) + 쓰러짐(초기화, 추락) 횟수 (Oxygen). 합은 요약의 oxygenDeaths와 같다
+}
+```
+
+정렬용 기여 합 = panels + builds + repairs + water x RECORDS.crewWaterWeight(0.1). 같으면 먼저 들어온 순. GameOver에는 rank를 넣지 않는다.
+
+**Records** `(payload: RecordsPayload)` - 2026-10-19 16차 추가. 승리 기록 상위 목록. 플레이어 입장 때 FireClient(서버 시작 로드가 끝났으면 즉시, 아니면 로드가 끝날 때 FireAllClients), 승리 기록 저장이 끝나면 FireAllClients(submitted = true). GameOver는 지금처럼 즉시 보내고 순위는 이 이벤트가 뒤따른다.
+
+```lua
+export type RecordEntry = { days: number, site: string, crew: { string }, at: number, version: number }  -- Shared.Ranking.Entry. crew는 기여 순 최대 RECORDS.crewNameLimit(4)명, at은 os.time()
+export type RecordsPayload = {
+    entries: { RecordEntry },    -- 상위 RECORDS.maxEntries(10)개, 순위 순 (일수 오름차순, 같으면 at 오름차순)
+    rank: number?,               -- submitted일 때 이번 승리의 순위. 상위 밖이면 nil
+    status: "loading" | "ok" | "offline",  -- offline: DataStore를 못 써서 이번 서버 메모리 기록만 (TEXTS.recordsOffline 표시)
+    submitted: boolean,          -- true면 방금 끝난 승리를 반영한 결과
 }
 ```
 
@@ -169,6 +192,9 @@ export type GameOverInfo = {
 | Oxygen.lua | 플레이어별 산소. 실외 소모에 Simulation.outdoorOxygenMultiplier(폭풍 중 1.5)를 곱한다(15차). 실내 판정(OxygenZone 파트 안 또는 VehicleSeat 착석). 0이면 즉시 GameFlow.lose(2026-10-18 12차). 그 외 사망(리셋)에는 Food -1, Water -2 |
 | GameFlow.lua | phase 전이, 승리/실패 판정, 재시작 |
 | DevMap.lua | Workspace.LandingPads가 없으면 그레이박스 맵과 ServerStorage.BaseKit을 Part로 생성 |
+| Contributions.lua | 2026-10-19 16차 추가. 플레이어별 기여도(서버 메모리, UserId 키, 나간 플레이어도 유지). 각 시스템 성공 지점에서 add(player, field, amount). reset()은 beginNewGame. crew(limit)은 GameOverInfo.crew, names(limit)은 승리 기록 승무원 |
+| Records.lua | 2026-10-19 16차 추가. DataStore(RECORDS.datastoreName "FrontierRecords", 키 "top")에 상위 10개. 서버 시작 때 1회 GetAsync, 승리 때 submit -> UpdateAsync 병합 후 순위 계산. 모든 호출은 task.spawn 안에서 pcall + 1회 재시도(RECORDS.retryDelay 1초). 서비스가 없거나 실패하면 서버 메모리 목록으로 전환(status offline). 프롬프트 처리 함수 안에서 yield하지 않는다 |
+| RecordBoard.lua | 2026-10-19 16차 추가. 기지가 놓일 때(onBasePlaced) Base 아래에 RecordBoard 파트와 SurfaceGui "명예의 전당"(상위 5줄, 상태 문구)을 만들고 Records가 바뀌면 글자만 갱신. 재시작 때 detach. 자리는 DevMap.RECORD_BOARD |
 
 `src/shared/Simulation.lua`는 Roblox API를 전혀 쓰지 않는 순수 함수 모음이다 (Lune 테스트 대상):
 - `Simulation.dailyProduction(state, config) -> energy, water, food` (패널, Farm)
@@ -183,6 +209,12 @@ export type GameOverInfo = {
 - `Simulation.eventNotices(prev, new, config) -> { { text, kind, target? } }` (DayTick 토스트 목록)
 - `Simulation.repairModule(state, config, moduleId) -> ok, newState, text, kind`
 
+`src/shared/Ranking.lua`(2026-10-19 16차)도 순수 함수 모음이다 (Lune 테스트 대상, 서버 Records와 클라이언트 표시가 같이 쓴다):
+- `Ranking.insert(list, entry, maxEntries) -> newList, rank?` (원본은 바꾸지 않음. 상위 밖이거나 잘못된 항목이면 rank nil. 같은 기록은 두 번 넣지 않음)
+- `Ranking.sanitize(raw, maxEntries) -> { Entry }` (저장값에서 올바른 항목만 정렬, 중복 제거, 상한)
+- `Ranking.isValid(entry)`, `Ranking.before(a, b)`, `Ranking.find(list, entry) -> rank?`
+- `Ranking.formatLine(entry, rank, config) -> "1위  32일  Shackleton Rim  Alice, Bob 외 1명  10/19"` (날짜는 RECORDS.utcOffsetHours 9, 한국 시간)
+
 ## 4. 맵 인스턴스 계약 (Workspace, ServerStorage)
 
 디자이너가 Studio에서 만들거나 DevMap이 Part로 생성한다. 이름과 Attribute가 정확히 일치해야 코드가 찾는다.
@@ -196,6 +228,9 @@ Workspace
     Ice1 .. Ice8 (Part, Anchored)   얼음 지점(2026-10-18: 3곳에서 8곳으로, 위치와 매장량은 Config.ICE_SITES). 매장량 easy 30, 30 / mid 40, 50, 40 / hard 70, 70, 65 (합계 395). Attributes: Deposit(number, 남은 매장량 W), DepositMax(number), Difficulty(string: "easy" | "mid" | "hard"). hard 지점은 바위 고리(입구 60도)로 둘러싸임.
                                      채취하면 Deposit이 줄고 0이면 결정이 사라지며 프롬프트가 꺼진다(Part는 남음). 클라이언트 레이더는 Deposit > 0인 지점만 표시하고 60 studs 안에서 매장량 숫자를 보여 준다
   Base (Model)                      LandingSite가 BaseKit을 복제해 선택 패드 위에 놓은 결과. 시작 시 없음
+    RecordBoard (Part, Anchored)    2026-10-19 16차. 서버 RecordBoard가 기지를 놓을 때 생성(키트에는 없음). 10 x 6 x 0.4 어두운 판, 자식 Trim(노란 Neon 테두리), Leg1, Leg2,
+                                     SurfaceGui RecordGui(Front, PixelsPerStud 50, LightInfluence 0) > Root > Title, Line1..Line5, Status.
+                                     자리: Origin 기준 (17, -26.5), 착륙선 문(0, -1)을 바라봄 (DevMap.RECORD_BOARD)
 
 ServerStorage
   BaseKit (Model, PrimaryPart = Origin)
@@ -227,7 +262,7 @@ ProximityPrompt 공통: `RequiresLineOfSight = false`, `MaxActivationDistance = 
 | 모듈 | 책임 |
 |---|---|
 | Main.client.lua | Remotes 연결, 각 UI 모듈 init, phase에 따라 어느 화면을 보일지 결정 |
-| TitleUI.lua | 타이틀 화면. 시작 버튼을 누르면 로컬에서만 숨김 (서버 phase는 이미 selecting) |
+| TitleUI.lua | 타이틀 화면. 시작 버튼을 누르면 로컬에서만 숨김 (서버 phase는 이미 selecting). 2026-10-19 16차: 오른쪽 "명예의 전당" 패널(상위 5개, Records 수신 때 갱신, 비면 TEXTS.recordsEmpty). compact(Layout.isCompact)면 시작 버튼 아래로 |
 | SiteSelectUI.lua | SiteSelectionOpen 수신. 카드 4장. 권한자만 버튼 활성. 남은 시간 표시. SelectSite 송신 |
 | LandingCamera.lua | LandingSequence 수신. Config.LANDING_SECONDS 동안 카메라 Scriptable로 하강 연출 후 Custom 복귀 |
 | HUD.lua | (15차) 상단 중앙 Day 패널 아래 랜덤 이벤트 배너: state.event.text 한 줄(예고는 중립 회색, 진행 중은 빨강) + eduText 14pt, event가 nil이면 숨김. topCenter AutomaticSize 안에서 자라 compact 토스트를 밀어 낸다. 모듈 행과 칩에 damaged면 "손상, R로 수리"(빨강). StateUpdate 수신. Energy/Water/Food/Day, 순증감(+3/일 형식, 음수는 빨강), 패널 n/30 (오늘 k/3), 모듈 A/B/C 상태와 진행바, 로버 탱크, 미션 텍스트, 2배속 토글(SetSpeed) |
@@ -239,7 +274,7 @@ ProximityPrompt 공통: `RequiresLineOfSight = false`, `MaxActivationDistance = 
 | DockSignUI.lua | 2026-10-18 추가. ChargePad 위 표지판: DockState와 state.rover.battery로 "도킹됨, 하차하면 충전 시작" / "충전 중 38/50" / "충전 완료" |
 | RadarUI.lua | 로컬 계산. 자신이 DriverSeat에 앉아 있을 때만 표시. Workspace.IceSites 각 파트까지 거리로 점 크기와 방향 표시, Config.RADAR_RANGE 안이면 비프(사운드 선택). 2026-10-18 14차: PC는 좌하단 지름 180, compact(터치 전용 또는 낮은 화면)는 자원 패널 아래 140, 뷰포트가 바뀌면 다시 배치. 거리 문구는 왼쪽 정렬 한 줄(넘치면 말줄임), 배터리 문구는 2줄 |
 | ToastUI.lua | Notify 수신. 3초 표시 후 사라짐. 최대 3개 스택 |
-| ResultUI.lua | GameOver 수신. 승리/실패 공용. 요약 수치. 재도전 버튼(RequestRestart). 2026-10-18 15차: 맨 아래 "오늘 배운 것"에 FactUI.seenTitles(3) 제목 목록, 없으면 FactUI.resultText(won) 한 문장 |
+| ResultUI.lua | 2026-10-19 16차: 요약 아래 "함께 한 일" 표(이름, 패널, 물, 착공, 수리, 산소 고갈은 0이 아닐 때만, 14pt, 4명까지), 승리면 "역대 N위" 배지(Records submitted로 갱신, 저장 전 "기록 저장 중", 상위 밖이면 "상위 10위 밖, 1위 X일"), 명예의 전당 상위 5개(offline이면 상태 문구). 카드는 세로 ScrollingFrame으로 화면 높이 - 24를 넘으면 스크롤. GameOver 수신. 승리/실패 공용. 요약 수치. 재도전 버튼(RequestRestart). 2026-10-18 15차: 맨 아래 "오늘 배운 것"에 FactUI.seenTitles(3) 제목 목록, 없으면 FactUI.resultText(won) 한 문장 |
 | FactUI.lua | 2026-10-18 15차 추가. 교육 사실 카드("알고 있나요?"). 화면 오른쪽 세로 중앙(Layout 배율), 한 번에 하나, 세션당 각 1회, 최소 4초 간격, 선택/착륙/결과 화면에서 억제. StateUpdate(phase, panelsInstalled, waterTrips, modules.status), OxygenUpdate(50 미만), RoverBoost.drivingChanged(첫 탑승 20초 뒤)로 트리거. 상태 트리거는 Tip과 겹치지 않게 4초 지연. seenTitles(n)/resultText(won)를 ResultUI에 제공 |
 | Facts.lua (shared) | 2026-10-18 15차 추가. 사실 문구 목록 { key, title, body, trigger }와 byKey. body의 {site}는 착륙지 이름으로 치환. trigger가 result인 항목은 결과 화면 전용 |
 
@@ -282,4 +317,11 @@ EVENTS = {  -- 2026-10-18 15차 랜덤 이벤트
 --   meteorModule, meteorPanel, meteorMiss, meteorBannerModule, meteorBannerPanel, meteorBannerMiss, meteorEdu,
 --   moduleDamagedStatus, upkeepDamaged, moduleRepaired, moduleRepairNotNeeded
 -- PROMPT_TEXTS.repairModule = "외벽 수리", TIPS.storm(첫 폭풍 예고), TIPS.moduleDamage(첫 모듈 손상, TipUI 트리거)
+RECORDS = {  -- 2026-10-19 16차 기여도와 승리 기록
+  enabled = true, datastoreName = "FrontierRecords", key = "top", maxEntries = 10, showTop = 5,
+  crewNameLimit = 4, crewShowNames = 2, crewRows = 4, crewWaterWeight = 0.1, nameMaxLength = 20,
+  retryDelay = 1, utcOffsetHours = 9, version = 1,
+},
+-- TEXTS 추가 키(16차): recordsTitle, recordsEmpty, recordsLoading, recordsOffline, recordSaving, recordRank, recordOutside,
+--   recordLine, recordCrewMore, recordDate, crewTitle, crewName, crewPanels, crewWater, crewBuilds, crewRepairs, crewDeaths
 ```

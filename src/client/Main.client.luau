@@ -48,6 +48,7 @@ local REMOTE_NAMES = {
     "SiteSelectionOpen",
     "LandingSequence",
     "GameOver",
+    "Records",
     "SelectSite",
     "SetSpeed",
     "RequestRestart",
@@ -151,4 +152,10 @@ end)
 remotes.GameOver.OnClientEvent:Connect(function(result)
     ResultUI.show(result)
     SoundFX.onGameOver(result)
+end)
+
+-- 승리 기록 상위 목록과 이번 순위 (16차): 타이틀 명예의 전당, 결과 화면 배지와 목록
+remotes.Records.OnClientEvent:Connect(function(payload)
+    TitleUI.setRecords(payload)
+    ResultUI.setRecords(payload)
 end)

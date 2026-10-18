@@ -19,6 +19,7 @@ Remotes.NAMES = {
     "SiteSelectionOpen",
     "LandingSequence",
     "GameOver",
+    "Records", -- (payload: RecordsPayload) 승리 기록 상위 목록과 이번 순위 (2026-10-19 16차)
     -- 클라이언트 -> 서버
     "SelectSite",
     "SetSpeed",

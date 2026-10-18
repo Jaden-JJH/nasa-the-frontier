@@ -10,6 +10,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Config = require(ReplicatedStorage.Shared.Config)
 local Simulation = require(ReplicatedStorage.Shared.Simulation)
+local Contributions = require(script.Parent.Contributions)
 local ResourceState = require(script.Parent.ResourceState)
 local ServerUtil = require(script.Parent.ServerUtil)
 local Sfx = require(script.Parent.Sfx)
@@ -47,6 +48,7 @@ local function onTriggered(player: Player, id: string)
         return
     end
     ResourceState.set(new)
+    Contributions.add(player, "repairs", 1)
     local entry = entries[id]
     Sfx.play("rover_repair", entry and entry.pad)
     ResourceState.notifyAll(message, ResourceState.kind(kind))

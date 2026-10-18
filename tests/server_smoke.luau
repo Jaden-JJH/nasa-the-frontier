@@ -466,6 +466,37 @@ roblox.implementProperty("Players", "PlayerRemoving", function(inst)
     return signalFor(inst, "PlayerRemoving")
 end)
 
+-- 승리 기록 DataStore 흉내 (16차). 기본(absent)은 Lune과 같이 GetDataStore가 없어 오류다 (서버는 메모리 목록으로 대체).
+-- [기록 저장소] 절에서 mode = "ok"로 바꿔 GetAsync, UpdateAsync 병합과 실패 재시도를 본다
+local fakeDataStore =
+    { mode = "absent", data = {}, failGet = 0, failUpdate = 0, gets = 0, updates = 0, name = nil }
+roblox.implementMethod("DataStoreService", "GetDataStore", function(_, name)
+    if fakeDataStore.mode == "absent" then
+        error("GetDataStore is not a valid member of DataStoreService")
+    end
+    fakeDataStore.name = name
+    return {
+        GetAsync = function(_, key)
+            fakeDataStore.gets += 1
+            if fakeDataStore.failGet > 0 then
+                fakeDataStore.failGet -= 1
+                error("502: API Services rejected request")
+            end
+            return fakeDataStore.data[key]
+        end,
+        UpdateAsync = function(_, key, transform)
+            if fakeDataStore.failUpdate > 0 then
+                fakeDataStore.failUpdate -= 1
+                error("502: API Services rejected request")
+            end
+            fakeDataStore.updates += 1
+            local new = transform(fakeDataStore.data[key])
+            fakeDataStore.data[key] = new
+            return new
+        end,
+    }
+end)
+
 -- 모듈 로더 -------------------------------------------------------------
 local Random = {}
 function Random.new(seed)
@@ -500,6 +531,7 @@ local function makeLoader(dataModel, warnSink, patch)
                 time = function()
                     return 1700000000 + math.floor(now)
                 end,
+                date = os.date,
             },
             warn = function(...)
                 local text = table.concat(table.pack(...), " ")
@@ -511,6 +543,7 @@ local function makeLoader(dataModel, warnSink, patch)
             Vector3 = Vector3,
             CFrame = CFrame,
             Color3 = roblox.Color3,
+            UDim = roblox.UDim,
             UDim2 = roblox.UDim2,
             Vector2 = roblox.Vector2,
             NumberRange = roblox.NumberRange,
@@ -619,6 +652,52 @@ local Config = loadModule(Shared:FindFirstChild("Config"))
 local ResourceState = loadModule(Server:FindFirstChild("ResourceState"))
 local function state()
     return ResourceState.get()
+end
+-- 기여도와 기록 (16차) 도우미: 최상위 지역 변수 한도 때문에 표 하나에 모은다
+local rec = {}
+function rec.row(name)
+    for _, row in loadModule(Server:FindFirstChild("Contributions")).crew() do
+        if row.name == name then
+            return row
+        end
+    end
+    return nil
+end
+function rec.field(name, field)
+    local row = rec.row(name)
+    return if row then row[field] else 0
+end
+function rec.crewRow(info, name)
+    for _, row in info.crew or {} do
+        if row.name == name then
+            return row
+        end
+    end
+    return nil
+end
+function rec.lastRecords(target)
+    for i = #sent, 1, -1 do
+        if sent[i].name == "Records" and (target == nil or sent[i].target == target) then
+            return sent[i].args[1]
+        end
+    end
+    return nil
+end
+-- 기지 기록판 글자: 줄 목록, 상태 문구, 판 파트
+function rec.board(baseModel)
+    local board = baseModel and baseModel:FindFirstChild("RecordBoard")
+    local gui = board and board:FindFirstChild("RecordGui")
+    local frame = gui and gui:FindFirstChild("Root")
+    if not frame then
+        return nil, nil, board
+    end
+    local lines = {}
+    for i = 1, Config.RECORDS.showTop do
+        local label = frame:FindFirstChild("Line" .. i)
+        lines[i] = if label then label.Text else nil
+    end
+    local status = frame:FindFirstChild("Status")
+    return lines, status and status.Text, board
 end
 
 check(Workspace:FindFirstChild("LandingPads") ~= nil, "DevMap: LandingPads 생성")
@@ -2035,6 +2114,87 @@ check(
     ).Magnitude < 0.01,
     "Origin이 Pad1 윗면에 놓임"
 )
+-- 기여도와 기록 (16차): 입장 때 Records(Lune에는 DataStore가 없어 offline), 기지 기록판 생성과 자리
+do
+    local toBob = rec.lastRecords(bob)
+    check(
+        toBob ~= nil
+            and toBob.status == "offline"
+            and #toBob.entries == 0
+            and toBob.submitted == false
+            and toBob.rank == nil,
+        "입장 때 Records: 저장소 없음이면 offline, 빈 목록"
+    )
+    local lines, statusText, board = rec.board(base)
+    local spec = Config.RECORDS
+    check(
+        board ~= nil
+            and board:IsA("Part")
+            and board.Anchored
+            and math.abs(board.Size.X - 10) < 1e-6
+            and math.abs(board.Size.Y - 6) < 1e-6,
+        "기지 기록판 RecordBoard (Anchored, 10 x 6)"
+    )
+    check(
+        lines ~= nil
+            and lines[1] == Config.TEXTS.recordsEmpty
+            and lines[2] == ""
+            and #lines == spec.showTop
+            and statusText == Config.TEXTS.recordsOffline,
+        "기록판: 빈 목록 문구와 '저장소 연결 안 됨'"
+    )
+    -- 자리: 판 안, 정면 경사로 차선(x -5..5) 밖, 충전 패드, 물탱크, 패널 설치대, 착륙선과 겹치지 않음, 문을 바라봄
+    local placeOk, why = true, "ok"
+    local avoid = {
+        base.ChargePad,
+        base.WaterTank,
+        base.SolarField.InstallPad,
+        base.Lander.Floor,
+        base.Rover.Chassis,
+    }
+    local function toLocal(point)
+        return origin.CFrame:PointToObjectSpace(point)
+    end
+    local apron = base:FindFirstChild("Apron")
+    for _, sx in { -1, 1 } do
+        for _, sz in { -1, 1 } do
+            local corner = board.CFrame * Vector3.new(sx * (board.Size.X / 2 + 0.3), 0, sz * 0.4)
+            local p = toLocal(corner)
+            if math.abs(p.X) < 5 + 2 then
+                placeOk, why = false, string.format("경사로 차선과 가까움 x %.1f", p.X)
+            end
+            if
+                apron
+                and not insidePart(apron, Vector3.new(corner.X, apron.CFrame.Position.Y, corner.Z))
+            then
+                placeOk, why = false, string.format("판 밖 (%.1f, %.1f)", p.X, p.Z)
+            end
+            for _, part in avoid do
+                local flat = Vector3.new(corner.X, part.CFrame.Position.Y, corner.Z)
+                if insidePart(part, flat) then
+                    placeOk, why = false, "겹침 " .. part.Name
+                end
+            end
+        end
+    end
+    local door = base.Lander.Entry.Door.CFrame.Position
+    local toDoor =
+        Vector3.new(door.X - board.CFrame.Position.X, 0, door.Z - board.CFrame.Position.Z).Unit
+    local look = board.CFrame.LookVector
+    if Vector3.new(look.X, 0, look.Z).Unit:Dot(toDoor) < 0.99 then
+        placeOk, why = false, "문을 바라보지 않음"
+    end
+    local bottom = toLocal(board.CFrame.Position).Y - board.Size.Y / 2
+    check(
+        placeOk and bottom > -1,
+        string.format(
+            "기록판 자리: 판 앞쪽 오른편, 동선과 시설을 피하고 문을 바라봄 (%s, 중심 %.1f, %.1f)",
+            why,
+            toLocal(board.CFrame.Position).X,
+            toLocal(board.CFrame.Position).Z
+        )
+    )
+end
 check(
     lastSent("LandingSequence") ~= nil and lastSent("LandingSequence").args[1] == 1,
     "LandingSequence(siteId=1)"
@@ -2502,8 +2662,13 @@ local energyBeforeUnload = state().energy
 ResourceState.patch(function(st)
     st.energy = 5
 end)
+rec.mark = rec.field("Bob", "water")
 signalFor(tankPrompt, "Triggered"):Fire(bob)
 advance(0)
+check(
+    rec.field("Bob", "water") == rec.mark + 10,
+    "기여도: 하역한 Bob의 물 +10 W (처리한 양만)"
+)
 check(
     state().water == water0 + 10
         and state().rover.tank == ice1Deposit - 10
@@ -4170,9 +4335,11 @@ check(
 ResourceState.patch(function(s)
     s.energy = Config.MODULES.C.cost.energy + 50
 end)
+rec.mark = rec.field("Alice", "builds")
 signalFor(padCPrompt, "Triggered"):Fire(alice)
 advance(0)
 check(state().modules.C.status == "building", "C 착공")
+check(rec.field("Alice", "builds") == rec.mark + 1, "기여도: 착공한 Alice +1")
 local restartRemote = dm:GetService("ReplicatedStorage").Remotes.RequestRestart
 signalFor(restartRemote, "OnServerEvent"):Fire(bob)
 advance(0)
@@ -4210,6 +4377,75 @@ check(
     "결과 10초 안 재시작 거부 (" .. lastSent("Notify").args[1] .. ")"
 )
 print("        GameOver: day " .. over.args[1].day .. ", reason " .. over.args[1].reason)
+-- 기여도 표와 승리 기록 (16차)
+do
+    local info = over.args[1]
+    local crew = info.crew or {}
+    local a, b = rec.crewRow(info, "Alice"), rec.crewRow(info, "Bob")
+    local sorted, deaths, waterSum, panelSum = true, 0, 0, 0
+    local Contributions = loadModule(Server:FindFirstChild("Contributions"))
+    for i, row in crew do
+        deaths += row.deaths
+        waterSum += row.water
+        panelSum += row.panels
+        if i > 1 and Contributions.score(crew[i - 1]) < Contributions.score(row) then
+            sorted = false
+        end
+    end
+    check(
+        #crew == 2 and a ~= nil and b ~= nil and sorted and #crew <= Config.RECORDS.crewRows,
+        "GameOver.crew: Alice, Bob 두 행, 기여 합이 큰 순"
+    )
+    check(
+        a ~= nil
+            and a.builds >= 1
+            and b ~= nil
+            and b.water >= 10
+            and panelSum >= 1
+            and waterSum >= 10,
+        string.format(
+            "GameOver.crew 수치: Alice 착공 %d, 패널 합 %d, 물 합 %d W",
+            a and a.builds or -1,
+            panelSum,
+            waterSum
+        )
+    )
+    check(
+        deaths == info.oxygenDeaths and a ~= nil and a.deaths == 1,
+        "GameOver.crew 산소 고갈 합 = 요약의 산소 고갈 횟수 (Alice 초기화 사망 1)"
+    )
+    -- 승리 기록: GameOver 뒤 Records(submitted)가 따라온다. 저장소가 없으니 메모리 목록 1위
+    local payload = rec.lastRecords("all")
+    local entry = payload and payload.entries[1]
+    check(
+        payload ~= nil
+            and payload.submitted == true
+            and payload.rank == 1
+            and payload.status == "offline"
+            and #payload.entries == 1
+            and entry.days == info.day
+            and entry.site == "Shackleton Rim"
+            and entry.crew[1] == crew[1].name
+            and #entry.crew == 2
+            and entry.version == Config.RECORDS.version
+            and math.abs(entry.at - (info.restartAvailableAt - Config.RESULT_MIN_SECONDS)) < 1,
+        "승리 뒤 Records: submitted, 역대 1위, offline, 일수, 착륙지, 승무원 기여 순"
+    )
+    check(info.rank == nil, "GameOver에는 rank를 넣지 않음")
+    local lines, statusText = rec.board(Workspace.Base)
+    check(
+        lines ~= nil
+            and string.find(
+                lines[1],
+                string.format("1위  %d일  Shackleton Rim", info.day),
+                1,
+                true
+            ) == 1
+            and lines[2] == ""
+            and statusText == Config.TEXTS.recordsOffline,
+        "기지 기록판 갱신: '" .. tostring(lines and lines[1]) .. "'"
+    )
+end
 local dayAtWin = state().day
 advance(Config.DAY_SECONDS * 3)
 check(state().day == dayAtWin, "승리 후 시계 정지")
@@ -4310,6 +4546,64 @@ check(
 local base2 = Workspace.Base
 check(#base2.SolarField.Panels:GetChildren() == 0, "새 게임 패널 0")
 
+-- 기여도 (16차): 새 게임에서 초기화, 패널, 하역, 로버 수리 가산 (새 기지 base2) ------------
+print("[기여도]")
+do
+    local function total(row)
+        return row.panels + row.water + row.builds + row.repairs + row.deaths
+    end
+    local a0, b0 = rec.row("Alice"), rec.row("Bob")
+    check(
+        a0 ~= nil and b0 ~= nil and total(a0) == 0 and total(b0) == 0,
+        "새 게임: 기여도 초기화, 플레이 시작 때 전원 행"
+    )
+    local install = base2.SolarField.InstallPad:FindFirstChildOfClass("ProximityPrompt")
+    signalFor(install, "Triggered"):Fire(bob)
+    advance(0)
+    check(
+        state().panelsInstalled == 1 and rec.field("Bob", "panels") == 1,
+        "기여도: 패널 설치한 Bob +1"
+    )
+    -- 하역: 로버는 충전 패드(물탱크 옆)에 주차되어 있다
+    ResourceState.patch(function(st)
+        st.rover.tank = 10
+        st.energy = 50
+    end)
+    signalFor(base2.WaterTank:FindFirstChildOfClass("ProximityPrompt"), "Triggered"):Fire(alice)
+    advance(0)
+    check(rec.field("Alice", "water") == 10, "기여도: 하역한 Alice +10 W")
+    -- 로버 수리 (좌석이 빈 로버)
+    ResourceState.patch(function(st)
+        st.rover.damage = 1
+    end)
+    local repairPrompt = nil
+    for _, d in base2.Rover:GetDescendants() do
+        if d:IsA("ProximityPrompt") and d.ActionText == Config.PROMPT_TEXTS.repairRover then
+            repairPrompt = d
+        end
+    end
+    check(repairPrompt ~= nil, "base2 로버 수리 프롬프트")
+    signalFor(repairPrompt, "Triggered"):Fire(bob)
+    advance(0)
+    check(
+        state().rover.damage == 0 and rec.field("Bob", "repairs") == 1,
+        "기여도: 로버 수리한 Bob +1"
+    )
+    signalFor(repairPrompt, "Triggered"):Fire(alice)
+    advance(0)
+    check(
+        rec.field("Alice", "repairs") == 0,
+        "기여도: 거절된 수리(멀쩡한 로버)는 세지 않음"
+    )
+    -- 재시작 뒤 새 기지에도 기록판, 지난 승리 기록 1줄
+    local lines = rec.board(base2)
+    check(
+        lines ~= nil and string.find(lines[1], "1위", 1, true) == 1 and lines[2] == "",
+        "새 기지 기록판에 지난 승리 기록"
+    )
+    rec.recordsSent = countSent("Records")
+end
+
 -- 부족 실패 -------------------------------------------------------------
 print("[실패]")
 -- 산소 영향을 없애려고 캐릭터를 착륙선 안으로
@@ -4324,6 +4618,16 @@ check(
     over.args[1].won == false and over.args[1].reason == "물이 3일 연속 바닥났습니다",
     "실패 사유: " .. over.args[1].reason
 )
+check(
+    #over.args[1].crew == 2
+        and over.args[1].crew[1].name == "Bob"
+        and over.args[1].crew[1].panels == 1
+        and over.args[1].crew[1].repairs == 1
+        and over.args[1].crew[2].name == "Alice"
+        and over.args[1].crew[2].water == 10,
+    "실패 GameOver.crew: 기여 합 순(Bob 패널 1 + 수리 1 > Alice 물 10 W)"
+)
+check(countSent("Records") == rec.recordsSent, "실패는 기록을 저장하지 않음")
 
 -- 리스폰하면 우주복을 다시 입힌다
 do
@@ -4482,6 +4786,14 @@ do
             .. tostring(oxygenOver.args[1].day)
             .. ")"
     )
+    do
+        local row = rec.crewRow(oxygenOver.args[1], "Alice")
+        local bobRow = rec.crewRow(oxygenOver.args[1], "Bob")
+        check(
+            row ~= nil and row.deaths == 1 and bobRow ~= nil and bobRow.deaths == 0,
+            "기여도: 산소 고갈 실패 GameOver.crew에 Alice 산소 고갈 1"
+        )
+    end
     local bobOxygen = nil
     for i = #sent, 1, -1 do
         if sent[i].name == "OxygenUpdate" and sent[i].target == bob then
@@ -5547,6 +5859,171 @@ local function runDecorScenario()
     table.remove(players, table.find(players, carol))
 end
 runDecorScenario()
+
+-- 기록 저장소 (16차): DataStore 흉내로 불러오기, UpdateAsync 병합, 1회 재시도, 실패 시 메모리 대체 ----------
+-- 별도 place와 로더에서 Records 모듈만 새로 불러 상태를 독립시킨다 (경고는 각 로더 sink에 모은다)
+local function runRecordsStoreScenario()
+    print("[기록 저장소]")
+    local R = Config.RECORDS
+    local dmR = roblox.deserializePlace(fs.readFile(placePath))
+    local sharedR = dmR:GetService("ReplicatedStorage").Shared
+    local serverR = dmR:GetService("ServerScriptService").Server
+    local function fresh(patchConfig)
+        local sink = {}
+        local loader = makeLoader(dmR, sink)
+        loader(sharedR.Remotes).init()
+        if patchConfig then
+            patchConfig(loader(sharedR.Config))
+        end
+        return loader(serverR.Records), sink
+    end
+    local function entry(days, at, names)
+        return {
+            days = days,
+            site = "de Gerlache Ridge",
+            crew = names or { "Dana" },
+            at = at,
+            version = 1,
+        }
+    end
+    local function warnedIn(sink, part)
+        for _, w in sink do
+            if string.find(w, part, 1, true) then
+                return true
+            end
+        end
+        return false
+    end
+    local function lastSubmitted()
+        local payload = rec.lastRecords("all")
+        return if payload and payload.submitted then payload else nil
+    end
+
+    fakeDataStore.mode = "ok"
+    local seed = {}
+    for i = 0, 9 do
+        table.insert(seed, entry(39 - i, 1000 + (39 - i) - 30, { "P" .. i }))
+    end
+    table.insert(seed, { days = 0, site = "x", crew = {}, at = 1 }) -- 잘못된 항목
+    table.insert(seed, "broken")
+    fakeDataStore.data[R.key] = seed
+
+    -- 1) 불러오기: 정렬, 잘못된 항목 제거, status ok
+    local Records, sink = fresh()
+    Records.init()
+    advance(0)
+    local list, status = Records.get()
+    check(
+        Records.isLoaded()
+            and status == "ok"
+            and #list == 10
+            and list[1].days == 30
+            and list[10].days == 39
+            and fakeDataStore.name == R.datastoreName,
+        "저장소 불러오기: 상위 10개 정렬, 잘못된 항목 제거, status ok"
+    )
+    -- 2) 동률은 먼저 세운 기록이 앞: 31일(나중) -> 3위, 39일 밀려남
+    Records.submit(entry(31, 5000))
+    advance(0)
+    local payload = lastSubmitted()
+    local stored = fakeDataStore.data[R.key]
+    check(
+        payload ~= nil
+            and payload.rank == 3
+            and payload.status == "ok"
+            and #stored == 10
+            and stored[3].at == 5000
+            and stored[2].days == 31
+            and stored[10].days == 38
+            and fakeDataStore.updates == 1,
+        "UpdateAsync 병합: 같은 31일이면 먼저 세운 기록 다음(3위), 10개 유지"
+    )
+    -- 3) 상위 밖
+    Records.submit(entry(50, 6000))
+    advance(0)
+    payload = lastSubmitted()
+    check(
+        payload ~= nil and payload.rank == nil and payload.status == "ok" and #payload.entries == 10,
+        "상위 10위 밖이면 rank 없음 (목록 그대로)"
+    )
+    -- 4) 1회 재시도 성공
+    fakeDataStore.failUpdate = 1
+    Records.submit(entry(20, 7000))
+    advance(0)
+    check(lastSubmitted().rank == nil, "재시도 대기 중에는 결과를 보내지 않음")
+    advance(R.retryDelay + 0.1)
+    payload = lastSubmitted()
+    check(
+        payload.rank == 1 and payload.status == "ok" and #sink == 0 and stored ~= nil,
+        "UpdateAsync 1회 실패 뒤 재시도 성공: 1위, 경고 없음"
+    )
+    -- 5) 두 번 다 실패: 경고 한 줄, 메모리 목록으로 대체 (offline), 저장소는 그대로
+    local updatesBefore = fakeDataStore.updates
+    fakeDataStore.failUpdate = 2
+    Records.submit(entry(21, 8000))
+    advance(R.retryDelay + 0.1)
+    payload = lastSubmitted()
+    stored = fakeDataStore.data[R.key]
+    check(
+        payload.rank == 2
+            and payload.status == "offline"
+            and fakeDataStore.updates == updatesBefore
+            and stored[2].days == 30
+            and warnedIn(sink, "UpdateAsync 실패"),
+        "UpdateAsync 두 번 실패: 메모리 목록 2위, offline, 경고 한 줄"
+    )
+    check(#sink == 1, "저장 실패 경고는 한 줄 (" .. #sink .. ")")
+    -- 6) 불러오기 실패: offline, 빈 목록, 이후 제출은 저장소를 건드리지 않음
+    fakeDataStore.failGet = 2
+    local Records2, sink2 = fresh()
+    Records2.init()
+    advance(R.retryDelay + 0.1)
+    local list2, status2 = Records2.get()
+    updatesBefore = fakeDataStore.updates
+    Records2.submit(entry(40, 9000))
+    advance(0)
+    payload = lastSubmitted()
+    check(
+        status2 == "offline"
+            and #list2 == 0
+            and warnedIn(sink2, "GetAsync 실패")
+            and payload.rank == 1
+            and payload.status == "offline"
+            and fakeDataStore.updates == updatesBefore,
+        "GetAsync 실패(Studio API 꺼짐): offline, 이번 서버 기록만"
+    )
+    -- 7) 불러오기 전에 이기면 로드 끝까지 기다렸다 병합 (첫 GetAsync 실패 -> 재시도 성공)
+    fakeDataStore.failGet = 1
+    local Records3, sink3 = fresh()
+    local sentBefore = countSent("Records")
+    Records3.init()
+    Records3.submit(entry(25, 9500))
+    advance(0)
+    check(
+        not Records3.isLoaded() and countSent("Records") == sentBefore,
+        "로드 전 제출은 대기 (아직 아무것도 보내지 않음)"
+    )
+    advance(R.retryDelay * 2 + 0.2)
+    payload = lastSubmitted()
+    check(
+        Records3.isLoaded() and payload.rank == 2 and payload.status == "ok" and #sink3 == 0,
+        "로드가 끝난 뒤 병합 저장: 2위 (20일 다음)"
+    )
+    -- 8) RECORDS.enabled = false면 저장소를 부르지 않는다
+    local getsBefore = fakeDataStore.gets
+    local Records4 = fresh(function(cfg)
+        cfg.RECORDS.enabled = false
+    end)
+    Records4.init()
+    advance(0)
+    local _, status4 = Records4.get()
+    check(
+        status4 == "offline" and fakeDataStore.gets == getsBefore,
+        "RECORDS.enabled = false: 저장소 호출 없음, offline"
+    )
+    fakeDataStore.mode = "absent"
+end
+runRecordsStoreScenario()
 
 print("")
 print(

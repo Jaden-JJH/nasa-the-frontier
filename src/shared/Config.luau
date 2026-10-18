@@ -455,6 +455,23 @@ local Config = {
         seed = 20261017, -- 바위 배치 난수 시드 (항상 같은 맵)
     },
 
+    -- 기여도 표와 승리 기록 랭킹 (2026-10-19 16차). 문구는 TEXTS의 record*, crew* 키
+    RECORDS = {
+        enabled = true, -- false면 DataStore를 쓰지 않고 이번 서버 기록만 보인다
+        datastoreName = "FrontierRecords",
+        key = "top",
+        maxEntries = 10, -- 저장하는 상위 기록 수
+        showTop = 5, -- 결과 화면, 타이틀, 기지 기록판에 보이는 줄 수
+        crewNameLimit = 4, -- 기록 한 줄에 저장하는 승무원 이름 수
+        crewShowNames = 2, -- 목록 한 줄에 보이는 이름 수 (나머지는 "외 n명")
+        crewRows = 4, -- 결과 화면 "함께 한 일" 표의 최대 행 (GameOverInfo.crew 길이)
+        crewWaterWeight = 0.1, -- 표 정렬용 기여 합에서 물 1 W의 무게 (10 W = 패널 1장)
+        nameMaxLength = 20, -- 저장하는 이름과 착륙지 글자 수 상한 (DataStore 크기 보호)
+        retryDelay = 1, -- DataStore 호출 실패 뒤 재시도까지 대기(초). 재시도는 1회
+        utcOffsetHours = 9, -- 기록 날짜(월/일)를 한국 시간으로 보인다
+        version = 1, -- 기록 항목 형식 버전
+    },
+
     -- 단계별 미션 문구. 서버가 state.missionText로 내려준다
     -- %d, %s 자리는 Simulation.missionText가 Config 값으로 채운다
     MISSION_TEXTS = {
@@ -585,6 +602,25 @@ local Config = {
         upkeepDamaged = "외벽 손상: %s로 수리 (전력 %d)", -- ModuleState.upkeepText (패드 표지판)
         moduleRepaired = "%s 외벽 수리 완료. 다시 정상 가동합니다",
         moduleRepairNotNeeded = "손상된 곳이 없습니다",
+
+        -- 기여도와 기록 (2026-10-19 16차). 결과 화면, 타이틀, 기지 기록판
+        recordsTitle = "명예의 전당",
+        recordsEmpty = "아직 기록이 없습니다. 첫 기록을 세워 보세요",
+        recordsLoading = "기록을 불러오는 중",
+        recordsOffline = "저장소 연결 안 됨, 이번 서버 기록만 표시",
+        recordSaving = "기록 저장 중",
+        recordRank = "역대 %d위", -- 결과 화면 배지
+        recordOutside = "상위 %d위 밖, 1위 %d일",
+        recordLine = "%d위  %d일  %s  %s  %s", -- 순위, 일수, 착륙지, 승무원, 월/일
+        recordCrewMore = "%s 외 %d명",
+        recordDate = "%d/%d", -- 월/일
+        crewTitle = "함께 한 일",
+        crewName = "이름",
+        crewPanels = "패널",
+        crewWater = "물(W)",
+        crewBuilds = "착공",
+        crewRepairs = "수리",
+        crewDeaths = "산소 고갈",
 
         labelLocked = "%s (잠김)",
         labelAvailable = "%s 착공 가능",
