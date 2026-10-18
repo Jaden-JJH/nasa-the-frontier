@@ -71,6 +71,8 @@
 
 후보(미검증): 없음. id 0으로 남은 키도 없다.
 
+2026-10-18 2차 점검에서 일부 키의 id가 바뀌었다. 위 표의 해당 행은 문서 맨 아래 "2차 점검" 변경 표가 우선한다. 현재 id 0인 키는 없다.
+
 ## 품질 메모 (Studio에서 들어보고 판단할 것)
 
 - rover_engine_loop(18초), interior_hum_loop(18초): 루프 권장 길이(2~15초)보다 길지만 이름에 Constant, 지속음이 들어 있다. 이음매가 거슬리면 대체한다.
@@ -99,3 +101,60 @@
 - 에어락과 산소: airlock, pressurize, air burst, scuba, regulator, breathing, valve
 - 흐름: rocket, thruster, whoosh, fanfare, stinger, victory, game over, descending tone, teleport, phasing
 - 분위기: air conditioning hum, room tone, force field, spaceship interior
+
+## 2026-10-18 2차 점검
+
+사용자 피드백(panel_install, panel_unfold가 띵 하는 완료음처럼 들림, boost 두 키 무음)에 따라 36개 키 전체를 다시 점검했다. 키 이름과 구조는 그대로이고 id, volume, note만 바꿨다.
+
+### 검증 방법 (1차와 동일 + 음향 측정)
+
+- 검색, 상세, 공개 여부는 위 "검증 방법" 1~3번을 그대로 썼다. 최종 파일의 id 36개 전부 비인증 assetdelivery 요청이 200이었다. 후보 선정은 ProSoundEffects 음원으로 한정했다.
+- 이름과 길이만으로는 판단이 어려워 후보와 기존 음원을 공개 CDN 주소로 받아 ffmpeg로 분석했다(받은 파일은 실행하지 않고 데이터로만 읽음). 항목은 실제 길이, 평균과 최대 음량(dBFS), 시간대별 음량 곡선(앞 무음, 끝 페이드, 중간 끊김)이다.
+- 이 분석으로 확인한 사실: 기존 panel_unfold(Servo Motor 11)는 서보음이 맞지만 최대 음량이 -20 dBFS로 매우 작아 거의 안 들린다. 기존 panel_install(Locking Wrench 3)은 0.6초 안에 끝나는 짧은 단발이다. 즉 이름은 기계음이지만 약하거나 짧아 완료음처럼 느껴질 수 있었다. 실제 청취 확인은 Studio에서 해야 한다.
+- 한계: 두 톤 비프 판별은 주파수 분석(Goertzel)으로 했고, 소리의 질감은 귀로 확인하지 못했다.
+
+### 변경 표 (id 교체 8개)
+
+| 키 | 이전 id | 새 id | 에셋 이름 | 길이 | 제작자 | 검증 | 이유 |
+|---|---|---|---|---|---|---|---|
+| panel_install | 9116320146 | 9116727630 | Metal Latches 15 (SFX) | 1.5s | ProSoundEffects | 200 | 금속 래치 클릭. 최대 -6.5 dBFS로 기존(-8.6)과 비슷하지만 평균 음량이 -27 dB로 높고 0.4초 동안 울림이 남아 존재감이 있다. |
+| panel_unfold | 9118934517 | 9118329245 | Robot Servo 6 (SFX) | 2.1s | ProSoundEffects | 200 | 일정한 서보 구동음. 기존 Servo Motor 11은 최대 -20 dBFS로 너무 작았다. 새 음원은 최대 -8.8 dBFS, 곡선이 평탄하다. 펼침 1.5초보다 0.6초 길어 끝을 호출 쪽에서 페이드아웃하면 된다. |
+| rover_boost_loop | 0 | 9114253664 | Electric Motor Revs 1 (SFX) | 4.2s | ProSoundEffects | 200 | 전기 모터 고회전. 루프 후보 중 앞 0.1초, 끝 0.3초만 페이드이고 중간 음량이 -35 dB로 일정해 이음매가 가장 덜 거슬린다. |
+| rover_boost_ready | 0 | 9113399643 | Beeps Short And Long Bursts 8 (SFX) | 1.3s | ProSoundEffects | 200 | 짧은 낮은 음(약 2.0 kHz) 뒤에 긴 높은 음(약 2.7 kHz)이 이어지는 두 톤 비프. 주파수 분석으로 두 음 구조를 확인했다. |
+| rover_dock | 9113867249 | 9113561873 | Boxcar Latch 6 (SFX) | 1.6s | ProSoundEffects | 200 | 기존은 0.5초 컴퓨터 비프(UI 음)였다. 도크 결합은 금속 래치 소리가 맞다. 최대 -2.8 dBFS로 충분히 크다. |
+| rover_broken | 9118805558 | 9118805673 | Sci Fi Alarm Buzzy Whining Klaxon 3 (SFX) | 2.5s | ProSoundEffects | 200 | 같은 클랙슨 계열의 짧은 버전. 기존은 6.9초라 단발 상한 4초를 넘었다. |
+| rover_repair | 9118047105 | 9118047507 | Ratchet Wrench Gear Winding 1 (SFX) | 2.9s | ProSoundEffects | 200 | 같은 래칫 렌치 계열의 짧은 버전. 기존은 10.3초라 4초 홀드에 비해 너무 길었다. 4초 홀드는 호출 쪽에서 반복하거나 끝에 Stop 처리한다. |
+| ice_mine_loop | 9117875538 | 9125883730 | Rock Scrape On Concrete Constant Dragging Dr (SFX) | 6.3s | ProSoundEffects | 200 | 기존 Power Drill 1은 중간 음량이 -45 dB로 매우 작고 앞 0.2초가 무음이라 루프 때 끊겼다. 새 음원은 앞 무음 0초, 중간 -28 dB로 일정한 긁는 소리라 "드릴 또는 긁는 소리" 요구에 맞는다. |
+
+### 음량만 조정한 키
+
+| 키 | 이전 | 새 값 | 이유 |
+|---|---|---|---|
+| ice_mine_loop | 0.6 | 0.45 | 루프 상한 0.45. 새 음원은 기존보다 훨씬 크므로 상한으로 충분하다. |
+| mission_advance | 0.6 | 0.5 | UI 상한 0.5. |
+| water_processing | 0.4 | 0.5 | 단발 하한 0.5. 원본이 -44 dB로 작은 편이다. |
+
+### 점검했지만 유지한 키와 근거
+
+| 키 | 현재 음원 | 유지 이유 |
+|---|---|---|
+| rover_engine_loop | 9125767745 (18s) | 15초 초과이지만 중간 음량이 -25 dB로 끝까지 일정하고 앞과 끝 음량이 같아 페이드 없는 지속음이다. 15초 이하 후보는 모두 끝이 페이드되어 이음매가 더 나빴다. |
+| interior_hum_loop | 9125446543 (18s) | 위와 같다. 평탄도가 낮은 잡음형 허밍이고 앞과 끝 음량이 같다. 10초 안팎의 같은 계열은 끝이 -60 dB 이하로 사라졌다. |
+| rover_charge_loop | 9114246115 (3.2s) | 중간이 일정한 전기 허밍이다. 같은 계열 Electric Hum 4는 0.3초마다 끊겨서 오히려 나쁘고, 끊김 없는 후보는 -34 dB 이하로 너무 작았다. 앞 0.5초가 무음이라 루프 때 약간 쉬는 구간이 생기는 것이 남은 약점이다. |
+| build_loop | 9116639168 (4.9s) | 망치질 단발이 반복되는 음원이라 앞 무음 0.25초가 오히려 박자에 묻힌다. 기계음 요구에 맞다. |
+| build_start | 9117882918 (3.5s) | 이름이 Power Up Accelerating Motors로 기계음이 맞다. 앞 0.5초가 거의 무음이라 반응이 약간 늦게 느껴질 수 있다. |
+| water_unload | 9120577126 (3.9s) | Water Pour 계열로 액체 소리가 맞고 4초 이내다. 대체 후보(Plastic Water Jug Glugs 등)가 더 낫다는 근거가 없다. |
+| water_processing | 9120578114 (3.4s) | 펌프 소리가 맞다. 펌프 계열이 전부 -40 dB대로 작아 대안이 없다. 음량만 올렸다. |
+| airlock_open, airlock_close | 9125610263, 9116644054 | 유압 해치, 금속 해치로 이름과 용도가 맞다. |
+| notify_good | 9114132512 (5.4s) | 문 차임이라 토스트에는 약간 어색하고 단발 4초를 넘지만 소리는 약 2초 안에 거의 사라진다(-35 dB 이하). 더 나은 완료 토스트 음원을 확신하지 못해 유지했다. Roblox GUI - Purchase(17208380755)나 Notification Low(17208372272)를 Studio에서 들어보고 바꿀 수 있다. |
+| rover_charge_full | 9126073938 | 완료 차임이 의도된 용도라 UI 계열 음원이 맞다. |
+| win, lose, build_complete, landing_thrust | 기존 | 요청에 따라 길이 상한 예외 대상이다. |
+| 나머지(rover_board, rover_exit, rover_hit, rover_recover, rover_battery_low, ice_collected, ice_depleted, oxygen_*, ui_click, notify_warn) | 기존 | 이름과 길이가 노트에 부합하고 4초 이내이거나 루프 길이 기준에 맞는다. |
+
+### 루프 이음매에 관한 메모
+
+Roblox 라이브러리 음원은 대부분 앞뒤에 짧은 페이드나 무음이 있어 Sound.Looped만으로는 이음매가 약간 들릴 수 있다. 그럴 때는 Sound의 PlaybackRegion(PlaybackRegionsEnabled)으로 음원 중간의 일정한 구간만 반복하면 해결된다. 이는 코드 쪽 작업이라 이번 범위에서는 건드리지 않았다.
+
+### 볼륨 점검 결과
+
+루프는 0.2~0.45(interior 0.2, charge 0.3, build 0.3, breath 0.25, engine 0.35, boost 0.45, ice 0.45), 단발은 0.5~0.8, UI(ui_click, mission_advance, notify_warn, notify_good)는 0.5 이하로 모두 범위 안이다. 단 ui_click, notify_warn은 길이가 1초 미만이다.
