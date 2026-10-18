@@ -1187,8 +1187,8 @@ local function runTerrainChecks()
     )
     check(
         terrainInstance:GetMaterialColor(roblox.Enum.Material.Sand)
-            == roblox.Color3.fromRGB(128, 126, 122),
-        "Sand 재질 색 = 달 표토 회색 (128, 126, 122)"
+            == roblox.Color3.fromRGB(110, 108, 104),
+        "Sand 재질 색 = 달 표토 회색 (110, 108, 104)"
     )
     check(
         Workspace.DevTerrain:FindFirstChild("MoonGround") == nil,
@@ -1758,7 +1758,19 @@ local function runTerrainChecks()
         atmosphere1.Density == 0 and atmosphere1.Haze == 0 and atmosphere1.Glare == 0,
         "Atmosphere 밀도, Haze, Glare 0"
     )
-    check(math.abs(lighting.ClockTime - 2.5) < 1e-6, "ClockTime 2.5")
+    check(
+        math.abs(lighting.ClockTime) < 1e-6 and lighting.GeographicLatitude == 70,
+        "ClockTime 0, 위도 70 (광원 고도 20도)"
+    )
+    check(
+        lighting.Brightness == 6
+            and lighting.ShadowSoftness == 0
+            and lighting.GlobalShadows == true
+            and lighting.EnvironmentDiffuseScale == 0
+            and lighting.FogEnd >= 1e5
+            and lighting.Ambient == roblox.Color3.fromRGB(40, 40, 48),
+        "달 조명: 밝기 6, 그림자 부드러움 0, 낮은 주변광, 안개 1e5"
+    )
     local planet = Workspace:FindFirstChild("Decor") and Workspace.Decor:FindFirstChild("Planet")
     local sphere = planet and planet:FindFirstChild("Sphere")
     check(

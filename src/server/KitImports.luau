@@ -46,6 +46,7 @@ local BASE_DECOR_FOLDER = "KitDecor" -- Base.KitDecor: 재시작 때 Base와 함
 local PLANET_DISTANCE = 900 -- 기지에서 행성 중심까지
 local PLANET_ELEVATION = 20 -- 고도각
 local PLANET_DIAMETER = 260
+local LIGHT_CLEARANCE_DEG = 30 -- 지구와 태양 그림 중심 사이 최소 각도
 -- 밤 조명에는 직사광이 없어 행성이 어두우므로 Neon으로 스스로 빛나게 한다. TextureID는 그대로 두고,
 -- Neon이 텍스처를 덮어 단색으로 보이는 경우에 대비해 색은 지구 바다빛 계열로 (메시가 없으면 이 색의 구)
 local PLANET_GLOW_COLOR = Color3.fromRGB(120, 170, 230)
@@ -503,7 +504,36 @@ function KitImports.aimPlanetFrom(origin: Vector3): Vector3?
         end
     end
     local elevation = math.rad(PLANET_ELEVATION)
-    local direction = heading * math.cos(elevation) + Vector3.yAxis * math.sin(elevation)
+    -- 광원(태양 텍스처)과 겹치지 않게: 지구 시반지름 약 8.3도 + 태양 그림 반지름 7도 + 여유 = 30도 이상 떨어뜨린다.
+    -- 겹치면 얼음 방향에서 가장 가까운 쪽으로 수평 회전한다. GetMoonDirection을 못 읽으면 그대로 둔다.
+    local okMoon, moon = pcall(function()
+        return game:GetService("Lighting"):GetMoonDirection()
+    end)
+    local lightDir = if okMoon and typeof(moon) == "Vector3" and moon.Y > 0 then moon.Unit else nil
+    local function aimed(h: Vector3): Vector3
+        return h * math.cos(elevation) + Vector3.yAxis * math.sin(elevation)
+    end
+    if lightDir then
+        local minDot = math.cos(math.rad(LIGHT_CLEARANCE_DEG))
+        if aimed(heading):Dot(lightDir) > minDot then
+            for step = 1, 36 do
+                local found = false
+                for _, sign in { 1, -1 } do
+                    local h = CFrame.Angles(0, math.rad(sign * step * 5), 0)
+                        :VectorToWorldSpace(heading)
+                    if aimed(h):Dot(lightDir) <= minDot then
+                        heading = h
+                        found = true
+                        break
+                    end
+                end
+                if found then
+                    break
+                end
+            end
+        end
+    end
+    local direction = aimed(heading)
     local center = origin + direction * PLANET_DISTANCE
     KitImports.placeCenter(planet, center)
     return center

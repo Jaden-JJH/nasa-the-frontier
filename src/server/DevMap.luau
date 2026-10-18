@@ -330,7 +330,7 @@ local COLORS = {
     landingPad = Color3.fromRGB(150, 150, 155),
     ice = Color3.fromRGB(170, 225, 255),
     boulder = Color3.fromRGB(90, 88, 86), -- 표토와 어울리는 회색 바위 (KitImports 바위 메시도 이 색)
-    regolith = Color3.fromRGB(128, 126, 122), -- 달 표토 (Terrain 재질 색)
+    regolith = Color3.fromRGB(110, 108, 104), -- 달 표토 (Terrain 재질 색)
     mountain = Color3.fromRGB(78, 77, 75), -- 산 (Terrain Rock 재질 색, 표토보다 어둡다)
     chargePad = Color3.fromRGB(38, 40, 46), -- 로버 충전 패드 (어두운 판)
     chargeTrim = Color3.fromRGB(245, 200, 40), -- 충전 패드 노란 테두리
@@ -366,20 +366,38 @@ local COLORS = {
 
 -- 하늘 (맵 종류와 관계없이 적용). Sky는 Attribute KeepSky = true가 아니면 덮어쓴다.
 -- 밤에는 Roblox가 달 자리에 MoonTexture를 그리므로 내장 태양 텍스처를 써서 검은 하늘에 태양이 뜨게 한다.
--- ClockTime 2.5: 달(태양) 자리가 비스듬히 보이는 시각
+-- 광원(그림자 방향)은 이 "달 자리" 천체다. 고도각 계산 (Roblox 공식 문서는 천체 경로 기하를 설명하지 않아
+-- 아래는 적도 분점 모델 가정이며, 실제 값은 시작 로그의 GetMoonDirection 측정값으로 확인한다):
+--   달 고도 sin(el) = cos(위도) * cos(15도 * ClockTime)
+--   ClockTime 0은 달이 가장 높은 시각이므로 el = 90도 - 위도.
+--   위도 70 -> 고도 20도. 시각이 아닌 위도로 정해 두어 시각 부호 가정과 새벽 밝아짐(5.5시 이후)을 모두 피한다.
+-- 고도 20도는 높이 95인 산이 태양을 가리려면 약 261 이내여야 하는데, 지형 가장자리 산은 그보다 멀다.
 local SKY = {
     moonTextureId = "rbxasset://sky/sun.jpg",
     moonAngularSize = 14,
     starCount = 3000,
-    clockTime = 2.5,
+    clockTime = 0,
+    geographicLatitude = 70,
 }
 
--- 조명 (그레이박스 맵을 만들 때만 적용)
--- 자정(0시)으로 두어 하늘을 검게 하고, 주변광을 밝게 올려 지면이 보이게 한다
+-- 조명 (그레이박스 맵을 만들 때만 적용). 달은 대기가 없어 산란광이 없다.
+-- Attribute KeepLighting = true가 Lighting에 있으면 이 값들을 덮어쓰지 않는다 (Studio에서 직접 조정할 때).
+-- Studio에서 Lighting.Technology를 ShadowMap 또는 Future로 두어야 그림자가 나온다 (스크립트로 바꿀 수 없다).
 local LIGHTING = {
-    brightness = 3,
-    ambient = Color3.fromRGB(130, 130, 140),
-    outdoorAmbient = Color3.fromRGB(170, 170, 180),
+    -- 직사광: 고도 20도에서 평평한 지면은 sin(20도) = 0.34배만 받으므로 밝기를 올려 보상
+    brightness = 6,
+    -- 그림자 안: 지구 반사광과 주변 지형 반사광 정도의 약한 차가운 회색
+    ambient = Color3.fromRGB(40, 40, 48),
+    outdoorAmbient = Color3.fromRGB(70, 72, 85),
+    colorShiftTop = Color3.fromRGB(255, 248, 235), -- 햇빛은 거의 백색, 아주 약간 따뜻하게
+    colorShiftBottom = Color3.fromRGB(0, 0, 0),
+    globalShadows = true,
+    shadowSoftness = 0, -- 대기 산란이 없어 그림자 경계가 칼같이 날카롭다
+    environmentDiffuseScale = 0, -- 검은 하늘은 빛을 반사하지 않는다
+    environmentSpecularScale = 0,
+    fogStart = 90000, -- 대기가 없어 지평선까지 선명
+    fogEnd = 100000,
+    exposureCompensation = 0.25,
 }
 
 -- 파트 생성 도우미 ------------------------------------------------------
@@ -620,11 +638,32 @@ local function sitePadPosition(index: number): Vector3
     return ice + layout.direction.Unit * distance
 end
 
--- 그레이박스 맵 밝기 (주변광을 올려 밤하늘 아래에서도 지면이 보이게)
-local function buildLighting()
+local lightingNote = "Lighting 미적용(그레이박스 맵 아님)" -- 시작 로그용
+
+-- 그레이박스 맵 조명 (달 사실감: 날카로운 긴 그림자, 어두운 그림자 안, 선명한 지평선).
+-- Lighting의 Attribute KeepLighting = true면 건드리지 않는다. 반환: 로그용 요약
+local function buildLighting(): string
+    if Lighting:GetAttribute("KeepLighting") == true then
+        return "Lighting 유지(KeepLighting)"
+    end
     Lighting.Brightness = LIGHTING.brightness
     Lighting.Ambient = LIGHTING.ambient
     Lighting.OutdoorAmbient = LIGHTING.outdoorAmbient
+    Lighting.ColorShift_Top = LIGHTING.colorShiftTop
+    Lighting.ColorShift_Bottom = LIGHTING.colorShiftBottom
+    Lighting.GlobalShadows = LIGHTING.globalShadows
+    Lighting.ShadowSoftness = LIGHTING.shadowSoftness
+    Lighting.EnvironmentDiffuseScale = LIGHTING.environmentDiffuseScale
+    Lighting.EnvironmentSpecularScale = LIGHTING.environmentSpecularScale
+    Lighting.FogStart = LIGHTING.fogStart
+    Lighting.FogEnd = LIGHTING.fogEnd
+    Lighting.ExposureCompensation = LIGHTING.exposureCompensation
+    return string.format(
+        "Lighting 적용(밝기 %g, 그림자 부드러움 %g, 노출 %g)",
+        LIGHTING.brightness,
+        LIGHTING.shadowSoftness,
+        LIGHTING.exposureCompensation
+    )
 end
 
 -- 하늘: Sky(태양 텍스처), Atmosphere(달에는 대기가 없다), ClockTime. 반환: 로그용 설명 두 개
@@ -659,7 +698,10 @@ local function setupSky(): (string, string)
         atmosphere.Glare = 0
         atmosphereNote = "Atmosphere 밀도 0"
     end
-    Lighting.ClockTime = SKY.clockTime
+    if Lighting:GetAttribute("KeepLighting") ~= true then
+        Lighting.ClockTime = SKY.clockTime
+        Lighting.GeographicLatitude = SKY.geographicLatitude
+    end
     return skyNote, atmosphereNote
 end
 
@@ -1676,7 +1718,7 @@ local function buildTerrainAndSites(rect: Rect): GroundStats
         end
     end
     buildBoulders(terrain, sites, rect, rockFootprints, stats)
-    buildLighting()
+    lightingNote = buildLighting()
     return stats
 end
 
@@ -2980,12 +3022,25 @@ function DevMap.ensure()
         planetCenter = KitImports.aimPlanetFrom(origin)
     end)
     local center = planetCenter
+    local elevationNote = "측정 불가"
+    pcall(function()
+        local moon = Lighting:GetMoonDirection()
+        elevationNote = string.format("%.1f도", math.deg(math.asin(math.clamp(moon.Y, -1, 1))))
+    end)
     print(
         string.format(
-            "[DevMap] 하늘: %s, %s, ClockTime %.1f, 행성 위치 %s, 행성 %s",
+            "[DevMap] 조명: %s, ClockTime %.1f, 위도 %g, 광원 고도각 %s",
+            lightingNote,
+            Lighting.ClockTime,
+            Lighting.GeographicLatitude,
+            elevationNote
+        )
+    )
+    print(
+        string.format(
+            "[DevMap] 하늘: %s, %s, 행성 위치 %s, 행성 %s",
             skyNote,
             atmosphereNote,
-            SKY.clockTime,
             if center
                 then string.format("(%.0f, %.0f, %.0f)", center.X, center.Y, center.Z)
                 else "없음",
