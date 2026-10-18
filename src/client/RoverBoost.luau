@@ -91,15 +91,17 @@ function RoverBoost.init(_ctx)
         local gui = UI.gui("RoverBoost", 13)
         touchButton = UI.create("TextButton", {
             Name = "BoostButton",
-            Position = UDim2.fromOffset(12 + 180 + 10, 128 + 26),
-            Size = UDim2.fromOffset(96, 56),
+            -- 오른손 엄지로 점프와 함께 누르도록 점프 버튼 위(우하단 기준)
+            AnchorPoint = Vector2.new(1, 1),
+            Position = UDim2.new(1, -24, 1, -110),
+            Size = UDim2.fromOffset(96, 64),
             BackgroundColor3 = Colors.panelLight,
             TextColor3 = Colors.text,
             Text = "부스터",
             Preset = "heading",
             Visible = false,
             Parent = gui,
-        }, { UI.corner(10), UI.stroke(Colors.oxygen, 2) })
+        }, { UI.corner(10), UI.stroke(Colors.energy, 2) })
         -- 누르는 동안 눌린 상태(주황)
         local function setPressed(pressed)
             touchButton.BackgroundColor3 = if pressed then Colors.oxygen else Colors.panelLight

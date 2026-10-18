@@ -5,6 +5,7 @@
 
 local TweenService = game:GetService("TweenService")
 
+local Layout = require(script.Parent.Layout)
 local RoverBoost = require(script.Parent.RoverBoost)
 local UI = require(script.Parent.UI)
 local Colors = UI.Colors
@@ -14,6 +15,7 @@ local HUD = {}
 local config
 local setSpeedRemote
 local gui
+local hudRoot
 local refs = {}
 local currentSpeed = 1
 local batteryTweens = nil
@@ -25,6 +27,8 @@ local boostFlashUntil = 0
 local updateBoost -- 앞서 선언(쿨다운 반짝임이 다시 호출)
 local BOOST_COLOR = Color3.fromRGB(255, 150, 50)
 local BOOST_DIM = Color3.fromRGB(170, 100, 40)
+
+local STATUS_CHIP = { locked = "잠김", available = "가능", active = "가동" }
 
 local STATUS_TEXT = {
     locked = "잠김",
@@ -62,7 +66,7 @@ local function makeResourceRow(parent, order, name, color)
         Text = "",
         TextColor3 = Colors.textDim,
         Preset = "caption",
-        TextSize = 12,
+        TextSize = 14,
         TextXAlignment = Enum.TextXAlignment.Left,
         Visible = false,
     })
@@ -190,17 +194,29 @@ function HUD.init(ctx)
     setSpeedRemote = ctx.remotes.SetSpeed
     gui = UI.gui("HUD", 10, false)
     gui.Enabled = false
+    hudRoot = Layout.root(gui)
 
-    -- 좌상단: 자원
-    local resources = UI.create("Frame", {
-        Name = "Resources",
+    -- 좌측 열: 자원 패널 아래에 모듈 패널 (PC)
+    local leftColumn = UI.create("Frame", {
+        Name = "LeftColumn",
         Position = UDim2.fromOffset(12, 12),
         Size = UDim2.fromOffset(330, 0),
         AutomaticSize = Enum.AutomaticSize.Y,
+        BackgroundTransparency = 1,
+        Parent = hudRoot,
+    }, { UI.list(Enum.FillDirection.Vertical, 8) })
+
+    -- 자원
+    local resources = UI.create("Frame", {
+        Name = "Resources",
+        LayoutOrder = 1,
+        Size = UDim2.fromScale(1, 0),
+        AutomaticSize = Enum.AutomaticSize.Y,
         BackgroundColor3 = Colors.panel,
         BackgroundTransparency = 0.12,
-        Parent = gui,
+        Parent = leftColumn,
     }, { UI.corner(10), UI.padding(10), UI.list(Enum.FillDirection.Vertical, 4) })
+    refs.resources = resources
     refs.energy = makeResourceRow(resources, 1, "Energy", Colors.energy)
     refs.water = makeResourceRow(resources, 2, "Water", Colors.water)
     refs.food = makeResourceRow(resources, 3, "Food", Colors.food)
@@ -233,7 +249,7 @@ function HUD.init(ctx)
         Size = UDim2.new(1, 0, 0, 18),
         Preset = "caption",
         Text = "",
-        TextColor3 = Colors.water,
+        TextColor3 = Colors.textDim,
         Visible = false,
     })
     refs.mission = UI.create("TextLabel", {
@@ -246,14 +262,14 @@ function HUD.init(ctx)
         Preset = "body",
         TextWrapped = true,
     })
-    UI.create("Frame", {
+    local topCenter = UI.create("Frame", {
         Name = "TopCenter",
         AnchorPoint = Vector2.new(0.5, 0),
         Position = UDim2.new(0.5, 0, 0, 10),
         Size = UDim2.fromOffset(460, 0),
         AutomaticSize = Enum.AutomaticSize.Y,
         BackgroundTransparency = 1,
-        Parent = gui,
+        Parent = hudRoot,
     }, {
         UI.list(Enum.FillDirection.Vertical, 6),
         refs.banner,
@@ -274,16 +290,26 @@ function HUD.init(ctx)
         }),
     })
 
-    -- 우상단: 패널과 로버 탱크
-    local topRight = UI.create("Frame", {
-        Name = "TopRight",
+    -- 우측 열: 패널, 로버, 배터리, 부스트 (배속 버튼이 있으면 그 아래)
+    local rightColumn = UI.create("Frame", {
+        Name = "RightColumn",
         AnchorPoint = Vector2.new(1, 0),
         Position = UDim2.new(1, -12, 0, 12),
         Size = UDim2.fromOffset(260, 0),
         AutomaticSize = Enum.AutomaticSize.Y,
+        BackgroundTransparency = 1,
+        Parent = hudRoot,
+    }, { UI.list(Enum.FillDirection.Vertical, 8) })
+    refs.rightColumn = rightColumn
+    refs.topCenter = topCenter
+    local topRight = UI.create("Frame", {
+        Name = "TopRight",
+        LayoutOrder = 1,
+        Size = UDim2.fromScale(1, 0),
+        AutomaticSize = Enum.AutomaticSize.Y,
         BackgroundColor3 = Colors.panel,
         BackgroundTransparency = 0.12,
-        Parent = gui,
+        Parent = rightColumn,
     }, { UI.corner(10), UI.padding(10), UI.list(Enum.FillDirection.Vertical, 2) })
     refs.panels = makeInfoRow(topRight, 1, "패널")
     refs.tank = makeInfoRow(topRight, 2, "로버 탱크")
@@ -291,19 +317,19 @@ function HUD.init(ctx)
     refs.batteryBar = UI.progressBar(Colors.energy, 8)
     refs.batteryBar.root.AnchorPoint = Vector2.new(0, 0.5)
     refs.batteryBar.root.Position = UDim2.fromScale(0, 0.5)
-    refs.batteryBar.root.Size = UDim2.new(1, -68, 0, 8)
+    refs.batteryBar.root.Size = UDim2.new(1, -78, 0, 8)
     refs.batteryBadgeText = UI.create("TextLabel", {
         Size = UDim2.fromScale(1, 1),
         Text = "",
         TextColor3 = Colors.bg,
         Preset = "badge",
-        TextSize = 12,
+        TextSize = 14,
     })
     refs.batteryBadge = UI.create("Frame", {
         Name = "BatteryBadge",
         AnchorPoint = Vector2.new(1, 0.5),
         Position = UDim2.fromScale(1, 0.5),
-        Size = UDim2.fromOffset(62, 18),
+        Size = UDim2.fromOffset(72, 18),
         BackgroundColor3 = Colors.water,
         Visible = false,
     }, { UI.corner(6), refs.batteryBadgeText })
@@ -320,15 +346,15 @@ function HUD.init(ctx)
     refs.boostBar = UI.progressBar(BOOST_COLOR, 8)
     refs.boostBar.root.AnchorPoint = Vector2.new(0, 0.5)
     refs.boostBar.root.Position = UDim2.fromScale(0, 0.5)
-    refs.boostBar.root.Size = UDim2.new(1, -68, 0, 8)
+    refs.boostBar.root.Size = UDim2.new(1, -78, 0, 8)
     refs.boostState = UI.create("TextLabel", {
         Name = "BoostState",
         AnchorPoint = Vector2.new(1, 0.5),
         Position = UDim2.fromScale(1, 0.5),
-        Size = UDim2.fromOffset(62, 18),
+        Size = UDim2.fromOffset(72, 18),
         Text = "",
         Preset = "badge",
-        TextSize = 12,
+        TextSize = 14,
         TextXAlignment = Enum.TextXAlignment.Right,
     })
     refs.boostRow = UI.create("Frame", {
@@ -346,7 +372,7 @@ function HUD.init(ctx)
         Text = "",
         TextColor3 = Colors.textDim,
         Preset = "caption",
-        TextSize = 12,
+        TextSize = 14,
         TextXAlignment = Enum.TextXAlignment.Left,
         Visible = false,
         Parent = topRight,
@@ -354,20 +380,50 @@ function HUD.init(ctx)
     refs.roverBadge = makeInfoRow(topRight, 7, "로버 상태")
     refs.roverBadge.Parent.Visible = false
 
-    -- 우측: 모듈 3개 (y=300, 토스트 영역을 피한다)
+    -- 좌측 열: 모듈 3개 (PC). compact에서는 숨기고 상단 중앙의 A/B/C 칩 한 줄로 대신한다.
     local modulesPanel = UI.create("Frame", {
         Name = "Modules",
-        AnchorPoint = Vector2.new(1, 0),
-        Position = UDim2.new(1, -12, 0, 300),
-        Size = UDim2.fromOffset(260, 0),
+        LayoutOrder = 2,
+        Size = UDim2.fromScale(1, 0),
         AutomaticSize = Enum.AutomaticSize.Y,
         BackgroundColor3 = Colors.panel,
         BackgroundTransparency = 0.12,
-        Parent = gui,
+        Parent = leftColumn,
     }, { UI.corner(10), UI.padding(10), UI.list(Enum.FillDirection.Vertical, 6) })
+    refs.modulesPanel = modulesPanel
+    refs.chipRow = UI.create("Frame", {
+        Name = "ModuleChips",
+        LayoutOrder = 3,
+        Size = UDim2.new(1, 0, 0, 28),
+        BackgroundTransparency = 1,
+        Visible = false,
+        Parent = topCenter,
+    }, {
+        UI.create("UIListLayout", {
+            FillDirection = Enum.FillDirection.Horizontal,
+            Padding = UDim.new(0, 6),
+            HorizontalAlignment = Enum.HorizontalAlignment.Center,
+            SortOrder = Enum.SortOrder.LayoutOrder,
+        }),
+    })
     refs.modules = {}
     for index, moduleId in ipairs(config.MODULE_ORDER) do
-        refs.modules[moduleId] = makeModuleRow(modulesPanel, index, moduleId)
+        local row = makeModuleRow(modulesPanel, index, moduleId)
+        local chipLabel = UI.create("TextLabel", {
+            Size = UDim2.fromScale(1, 1),
+            Text = moduleId,
+            Preset = "badge",
+            TextSize = 14,
+        })
+        row.chip = UI.create("Frame", {
+            Name = "Chip" .. moduleId,
+            LayoutOrder = index,
+            Size = UDim2.fromOffset(92, 28),
+            BackgroundColor3 = Colors.neutral,
+            Parent = refs.chipRow,
+        }, { UI.corner(8), chipLabel })
+        row.chipLabel = chipLabel
+        refs.modules[moduleId] = row
     end
 
     -- 우하단: 속도 토글
@@ -375,16 +431,13 @@ function HUD.init(ctx)
     if #config.SPEEDS > 1 then
         refs.speed = UI.create("TextButton", {
             Name = "SpeedButton",
-            -- 모바일은 상단 중앙 Day 패널(폭 460) 오른쪽 옆, PC는 우하단
-            AnchorPoint = if UI.isTouchOnly() then Vector2.new(0, 0) else Vector2.new(1, 1),
-            Position = if UI.isTouchOnly()
-                then UDim2.new(0.5, 238, 0, 10)
-                else UDim2.new(1, -12, 1, -12),
-            Size = UDim2.fromOffset(72, 44),
+            -- 우측 열의 패널 아래
+            LayoutOrder = 2,
+            Size = UDim2.new(1, 0, 0, 40),
             BackgroundColor3 = Colors.panelLight,
             Text = "1x",
             Preset = "heading",
-            Parent = gui,
+            Parent = rightColumn,
         }, { UI.corner(10), UI.stroke(Colors.accent, 1) })
         refs.speed.Activated:Connect(function()
             local speeds = config.SPEEDS
@@ -398,6 +451,49 @@ function HUD.init(ctx)
             setSpeedRemote:FireServer(nextSpeed)
         end)
     end
+
+    -- compact(터치 전용 또는 낮은 화면)이면 모듈 패널을 칩 한 줄로 접고 Day 패널 폭을 줄인다
+    local function applyLayout()
+        local compact = Layout.isCompact()
+        refs.modulesPanel.Visible = not compact
+        refs.chipRow.Visible = compact
+        refs.topCenter.Size = UDim2.fromOffset(if compact then 320 else 460, 0)
+    end
+    applyLayout()
+    Layout.changed:Connect(applyLayout)
+end
+
+-- 다른 모듈이 배치 기준으로 쓰는 프레임
+function HUD.getRightColumn()
+    return refs.rightColumn
+end
+
+function HUD.getTopCenter()
+    return refs.topCenter
+end
+
+function HUD.getResources()
+    return refs.resources
+end
+
+-- compact용 칩: 문구와 색
+local CHIP_STYLE = {
+    locked = { bg = Colors.neutral, fg = Colors.bg },
+    available = { bg = Colors.panelLight, fg = Colors.good },
+    building = { bg = Colors.energy, fg = Colors.bg },
+    active = { bg = Colors.good, fg = Colors.bg },
+}
+
+local function updateChip(row, moduleId, moduleState)
+    local status = moduleState.status
+    local suffix = STATUS_CHIP[status] or ""
+    if status == "building" then
+        suffix = string.format("%d일", moduleState.daysLeft)
+    end
+    local style = CHIP_STYLE[status] or CHIP_STYLE.locked
+    row.chipLabel.Text = moduleId .. " " .. suffix
+    row.chipLabel.TextColor3 = style.fg
+    row.chip.BackgroundColor3 = style.bg
 end
 
 local function updateModule(row, moduleState)
@@ -649,6 +745,7 @@ function HUD.update(state)
         local moduleState = state.modules[moduleId]
         if moduleState then
             updateModule(row, moduleState)
+            updateChip(row, moduleId, moduleState)
         end
     end
 

@@ -3,11 +3,14 @@
 
 local TweenService = game:GetService("TweenService")
 
+local HUD = require(script.Parent.HUD)
+local Layout = require(script.Parent.Layout)
 local UI = require(script.Parent.UI)
 
 local ToastUI = {}
 
 local MAX_TOASTS = 3
+local MAX_TOASTS_COMPACT = 2
 local SHOW_SECONDS = 3
 local FADE_SECONDS = 0.4
 
@@ -18,6 +21,8 @@ local KIND_COLORS = {
 }
 
 local container
+local toastRoot
+local compactLayout = false
 local active = {} -- 오래된 순서
 local order = 0
 
@@ -31,16 +36,33 @@ end
 
 function ToastUI.init(_ctx)
     local gui = UI.gui("Toasts", 100, false)
-    -- HUD 우상단 패널(높이 약 74) 바로 아래
+    toastRoot = Layout.root(gui)
+    compactLayout = Layout.isCompact()
+    -- PC: HUD 우측 열(패널, 로버, 배터리, 부스트) 실제 하단 + 8.
+    -- compact: 우측에 부스터와 점프 버튼이 있으므로 상단 중앙(Day 패널과 모듈 칩) 아래.
     container = UI.create("Frame", {
         Name = "Stack",
-        AnchorPoint = Vector2.new(1, 0),
-        Position = UDim2.new(1, -12, 0, 100),
-        Size = UDim2.fromOffset(300, 0),
+        AnchorPoint = if compactLayout then Vector2.new(0.5, 0) else Vector2.new(1, 0),
+        Position = if compactLayout then UDim2.new(0.5, 0, 0, 100) else UDim2.new(1, -12, 0, 100),
+        Size = UDim2.fromOffset(if compactLayout then 260 else 300, 0),
         AutomaticSize = Enum.AutomaticSize.Y,
         BackgroundTransparency = 1,
-        Parent = gui,
+        Parent = toastRoot,
     }, { UI.list(Enum.FillDirection.Vertical, 6) })
+
+    -- 기준 프레임 크기가 바뀌어도(배터리 줄, 부스트 게이지 등장) 따라가도록 주기적으로 갱신
+    task.spawn(function()
+        while true do
+            local target = if compactLayout then HUD.getTopCenter() else HUD.getRightColumn()
+            if target then
+                local y = Layout.below(toastRoot, target, 8)
+                container.Position = if compactLayout
+                    then UDim2.new(0.5, 0, 0, y)
+                    else UDim2.new(1, -12, 0, y)
+            end
+            task.wait(0.2)
+        end
+    end)
 end
 
 function ToastUI.push(text, kind)
@@ -66,7 +88,7 @@ function ToastUI.push(text, kind)
     })
 
     table.insert(active, toast)
-    while #active > MAX_TOASTS do
+    while #active > (if compactLayout then MAX_TOASTS_COMPACT else MAX_TOASTS) do
         remove(active[1])
     end
 

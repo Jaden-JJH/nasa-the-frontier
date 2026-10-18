@@ -202,6 +202,7 @@ ProximityPrompt 공통: `RequiresLineOfSight = false`, `MaxActivationDistance = 
 | OxygenBar.lua | OxygenUpdate 수신. 실외일 때 강조, 20 이하 경고 |
 | PromptUI.lua | 커스텀 ProximityPrompt 표시(키 아이콘, ObjectText, ActionText, 홀드 진행 바). 서버 프롬프트는 전부 Style Custom |
 | PadSignUI.lua | 모듈 패드 위 표지판(이름, 상태 배지, 진행 바, 비용). PadX의 ModuleId Attribute와 state.modules 사용 |
+| Layout.lua | 2026-10-18 추가. 화면 높이 기준 배율(높이/720, 0.7~1.25)과 압축 배치 판정(터치 전용 또는 높이 600 미만). HUD, 토스트, 레이더, 산소 UI, Tip이 공유 |
 | SoundFX.lua | 2026-10-18 추가. 클라이언트 2D 효과음: 호흡 루프(산소 비례), 산소 경고, UI 클릭, 토스트음, 미션 전진, 승패 스팅어, 로버 승하차와 엔진(자기 로버) |
 | DockSignUI.lua | 2026-10-18 추가. ChargePad 위 표지판: DockState와 state.rover.battery로 "도킹됨, 하차하면 충전 시작" / "충전 중 38/50" / "충전 완료" |
 | RadarUI.lua | 로컬 계산. 자신이 DriverSeat에 앉아 있을 때만 표시. Workspace.IceSites 각 파트까지 거리로 점 크기와 방향 표시, Config.RADAR_RANGE 안이면 비프(사운드 선택) |

@@ -3,6 +3,7 @@
 
 local TweenService = game:GetService("TweenService")
 
+local Layout = require(script.Parent.Layout)
 local UI = require(script.Parent.UI)
 local Colors = UI.Colors
 
@@ -38,6 +39,7 @@ end
 
 function OxygenBar.init(_ctx)
     gui = UI.gui("Oxygen", 11)
+    local oxygenRoot = Layout.root(gui)
     gui.Enabled = false
 
     fill = UI.create("Frame", {
@@ -58,7 +60,7 @@ function OxygenBar.init(_ctx)
         Position = UDim2.new(0.5, 0, 1, -18),
         Size = UDim2.fromOffset(340, 30),
         BackgroundColor3 = Colors.panel,
-        Parent = gui,
+        Parent = oxygenRoot,
     }, { UI.corner(8), fill, label })
     insideTag = UI.create("TextLabel", {
         Name = "InsideTag",
@@ -66,12 +68,12 @@ function OxygenBar.init(_ctx)
         Position = UDim2.new(0.5, 170, 1, -54),
         Size = UDim2.fromOffset(68, 22),
         BackgroundTransparency = 0,
-        BackgroundColor3 = Colors.water,
+        BackgroundColor3 = Colors.good, -- 하늘색은 물 전용이라 안전(초록)으로 구분
         TextColor3 = Colors.bg,
         Text = "에어락",
         Preset = "badge",
         Visible = false,
-        Parent = gui,
+        Parent = oxygenRoot,
     }, { UI.corner(6) })
     hintLabel = UI.create("TextLabel", {
         Name = "AirlockHint",
@@ -83,7 +85,7 @@ function OxygenBar.init(_ctx)
         Text = "가까운 에어락 문을 E로 열고 안으로 들어가세요",
         TextColor3 = Colors.oxygen,
         Visible = false,
-        Parent = gui,
+        Parent = oxygenRoot,
     })
 end
 

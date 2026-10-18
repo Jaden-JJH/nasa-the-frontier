@@ -5,19 +5,23 @@
 
 local Players = game:GetService("Players")
 
+local HUD = require(script.Parent.HUD)
+local Layout = require(script.Parent.Layout)
 local UI = require(script.Parent.UI)
 local Colors = UI.Colors
 
 local RadarUI = {}
 
-local RADAR_SIZE = 180
+local radarSize = 180 -- compact(휴대폰)에서는 init에서 140으로 줄인다
 local DOT_MARGIN = 8
 local TICK_SECONDS = 0.1
 local DOT_FAR_SIZE = 6
 local DOT_NEAR_MIN = 10
 local DOT_NEAR_MAX = 28
 local AMOUNT_RANGE = 60 -- 이 거리 안이면 매장량 숫자를 표시
-local HARD_COLOR = Color3.fromRGB(255, 150, 50)
+-- 바위밭(hard) 얼음 점은 보라. 주황은 산소 전용이라 쓰지 않는다
+local HARD_COLOR = Color3.fromRGB(190, 120, 255)
+local BOOST_TEXT_COLOR = Color3.fromRGB(255, 150, 50) -- 부스트 중 배터리 글자
 
 local player = Players.LocalPlayer
 local config
@@ -25,6 +29,9 @@ local gui
 local dotsFrame
 local distanceLabel
 local batteryLabel
+local radarFrame
+local radarRootFrame
+local compactLayout = false
 local battery = nil -- 마지막 StateUpdate의 rover.battery
 local boosting = false
 local enabled = false
@@ -59,7 +66,7 @@ local function getDot(part)
             Size = UDim2.fromOffset(32, 12),
             Text = "",
             TextColor3 = Colors.text,
-            TextSize = 11,
+            TextSize = 13,
             TextXAlignment = Enum.TextXAlignment.Left,
             Visible = false,
         }),
@@ -70,7 +77,7 @@ local function getDot(part)
             Size = UDim2.fromOffset(12, 12),
             Text = "x",
             TextColor3 = Colors.neutral,
-            TextSize = 12,
+            TextSize = 14,
             Visible = false,
         }),
     })
@@ -84,10 +91,16 @@ local function step()
     if not seat then
         return
     end
+    if compactLayout then
+        local resources = HUD.getResources()
+        if resources then
+            radarFrame.Position = UDim2.fromOffset(12, Layout.below(radarRootFrame, resources, 8))
+        end
+    end
 
     local iceFolder = workspace:FindFirstChild("IceSites")
     local range = config.RADAR_RANGE
-    local rimRadius = RADAR_SIZE / 2 - DOT_MARGIN
+    local rimRadius = radarSize / 2 - DOT_MARGIN
 
     -- 로버 앞쪽(수평)과 오른쪽 벡터
     local look = seat.CFrame.LookVector
@@ -171,7 +184,7 @@ local function step()
         local speed = roverConfig.maxSpeed or 18
         local drain = roverConfig.batteryDrainPerSecond or 0.4
         local text = string.format("배터리 %d E", math.floor(battery + 0.5))
-        local color = if boosting then HARD_COLOR else Colors.energy
+        local color = if boosting then BOOST_TEXT_COLOR else Colors.energy
         if nearest ~= math.huge then
             local need = nearest * 2 / speed * drain
             text = text .. string.format(", 왕복 약 %d E", math.ceil(need))
@@ -206,6 +219,11 @@ end
 function RadarUI.init(ctx)
     config = ctx.Config
     gui = UI.gui("Radar", 12)
+    radarRootFrame = Layout.root(gui)
+    compactLayout = Layout.isCompact()
+    if compactLayout then
+        radarSize = 140
+    end
     gui.Enabled = false
 
     dotsFrame = UI.create("Frame", {
@@ -224,31 +242,31 @@ function RadarUI.init(ctx)
 
     batteryLabel = UI.create("TextLabel", {
         Name = "Battery",
-        Position = UDim2.fromOffset(0, 26 + RADAR_SIZE + 2),
+        Position = UDim2.fromOffset(0, 26 + radarSize + 2),
         Size = UDim2.new(1, 40, 0, 18),
         Text = "",
         TextColor3 = Colors.energy,
         Preset = "caption",
-        TextSize = 13,
+        TextSize = 14,
         TextWrapped = true,
         Visible = false,
     })
 
-    UI.create("Frame", {
-        Name = "RadarRoot",
-        AnchorPoint = if UI.isTouchOnly() then Vector2.new(0, 0) else Vector2.new(0, 1),
-        -- 모바일은 좌상단 자원 패널(약 y 12~120) 아래, PC는 좌하단
-        Position = if UI.isTouchOnly() then UDim2.fromOffset(12, 128) else UDim2.new(0, 16, 1, -16),
-        Size = UDim2.fromOffset(RADAR_SIZE, RADAR_SIZE + 46),
+    radarFrame = UI.create("Frame", {
+        Name = "RadarFrame",
+        AnchorPoint = if compactLayout then Vector2.new(0, 0) else Vector2.new(0, 1),
+        -- compact는 자원 패널 실제 하단 + 8 아래(step에서 갱신), PC는 좌하단
+        Position = if compactLayout then UDim2.fromOffset(12, 160) else UDim2.new(0, 16, 1, -16),
+        Size = UDim2.fromOffset(radarSize, radarSize + 46),
         BackgroundTransparency = 1,
-        Parent = gui,
+        Parent = radarRootFrame,
     }, {
         distanceLabel,
         batteryLabel,
         UI.create("Frame", {
             Name = "Circle",
             Position = UDim2.fromOffset(0, 26),
-            Size = UDim2.fromOffset(RADAR_SIZE, RADAR_SIZE),
+            Size = UDim2.fromOffset(radarSize, radarSize),
             BackgroundColor3 = Colors.bg,
             BackgroundTransparency = 0.15,
         }, {

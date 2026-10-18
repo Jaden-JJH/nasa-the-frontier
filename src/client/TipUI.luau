@@ -9,6 +9,7 @@ local TweenService = game:GetService("TweenService")
 
 local RoverBoost = require(script.Parent.RoverBoost)
 local SoundFX = require(script.Parent.SoundFX)
+local Layout = require(script.Parent.Layout)
 local UI = require(script.Parent.UI)
 
 local TipUI = {}
@@ -20,11 +21,12 @@ local FADE_OUT = 0.5
 local MIN_GAP = 3
 local RISE = 24 -- 등장 시 아래에서 올라오는 거리(px)
 local SINK = 12 -- 퇴장 시 아래로 가라앉는 거리(px)
--- 카드 아래 끝 = 화면 하단에서 84px. 산소 바(하단 18~48), 에어락 태그(54~76) 위 8px 여유.
--- 에어락 안내 문구는 산소 바 아래(하단 0~18)라 겹치지 않는다.
-local BOTTOM_GAP = 84
--- 레이더 오른쪽 끝(PC 좌하단 x 16~236, 터치 좌상단 x 12~232, 캡션 포함) + 12px
-local LEFT_BOUND = 248
+-- 카드 아래 끝 = 화면 하단에서 (76 x 배율 + 8)px. 산소 바(하단 18~48), 에어락 태그(54~76) 위 8px 여유.
+-- 에어락 안내 문구는 산소 바 아래(하단 0~18)라 겹치지 않는다. 산소 UI가 배율만큼 커지므로 여백도 같은 배율.
+local OXYGEN_TOP_UNITS = 76
+local BOTTOM_MARGIN = 8
+-- 레이더 오른쪽 끝(캡션 포함, 레이더 크기 + 40) + 12px. 레이더도 같은 배율로 그려진다.
+local LEFT_EDGE_GAP = 12
 local RIGHT_RESERVE_PC = 12 -- PC 우하단 배속 버튼은 카드보다 아래(하단 12~56)라 가로 여유만 둔다
 local RIGHT_RESERVE_TOUCH = 120 -- 터치 점프 버튼(약 x W-95~W-25, 하단 20~90)
 local FALLBACK_VIEWPORT = Vector2.new(1280, 720)
@@ -121,20 +123,32 @@ local function waitFor(seconds, myGeneration)
 end
 
 -- 카드 폭과 가로 중심(px). 가운데에 두되 레이더와 겹치면 오른쪽으로 비키고, 그래도 좁으면 폭을 줄인다.
--- 예: 1920x1080 -> 폭 560, x 680~1240 / 1280x720 -> x 360~920 / 844x390 터치 -> 폭 476, x 248~724
+-- 예: 1920x1080 -> 폭 560, x 680~1240 / 1280x720 -> x 360~920 / 844x390 터치 -> 폭 560, x 146~706
+local function bottomGap()
+    return OXYGEN_TOP_UNITS * Layout.scale() + BOTTOM_MARGIN
+end
+
+local function leftBound()
+    local compact = Layout.isCompact()
+    local radarWidth = (if compact then 140 else 180) + 40
+    local radarLeft = if compact then 12 else 16
+    return (radarLeft + radarWidth) * Layout.scale() + LEFT_EDGE_GAP
+end
+
 local function cardLayout()
     local viewport = gui.AbsoluteSize
     if viewport.X <= 0 or viewport.Y <= 0 then
         viewport = FALLBACK_VIEWPORT
     end
     local rightReserve = if UI.isTouchOnly() then RIGHT_RESERVE_TOUCH else RIGHT_RESERVE_PC
-    local width = math.min(CARD_MAX_WIDTH, viewport.X - LEFT_BOUND - rightReserve)
-    local centerX = math.max(viewport.X / 2, LEFT_BOUND + width / 2)
+    local bound = leftBound()
+    local width = math.min(CARD_MAX_WIDTH, viewport.X - bound - rightReserve)
+    local centerX = math.max(viewport.X / 2, bound + width / 2)
     return width, centerX
 end
 
 local function cardPosition(centerX, dy)
-    return UDim2.new(0, centerX, 1, -BOTTOM_GAP + dy)
+    return UDim2.new(0, centerX, 1, -bottomGap() + dy)
 end
 
 local function showCard(text, myGeneration)
@@ -223,13 +237,13 @@ function TipUI.init(ctx)
     local badge = UI.create("TextLabel", {
         Name = "TipBadge",
         LayoutOrder = 1,
-        Size = UDim2.fromOffset(38, 16),
+        Size = UDim2.fromOffset(42, 20),
         BackgroundTransparency = 0,
         BackgroundColor3 = AMBER,
         Text = "TIP",
         TextColor3 = INK,
         Preset = "caption",
-        TextSize = 12,
+        TextSize = 14,
         Font = UI.FontBold,
     }, { UI.roundCorner() })
 
