@@ -201,6 +201,75 @@ local MODULE_LAYOUT = {
     },
 }
 
+-- 기지 레이아웃 (2026-10-18, BASE_LAYOUT): 모듈 패드 간격, 판 경계등, 착륙 유도등, 바닥 동선, 판 바깥 소품.
+-- 게임 수치(거리)와 무관한 배치와 외형 상수. 크기와 거리는 studs, 색은 COLORS
+local BASE_LAYOUT = {
+    padSpread = 1.2, -- 모듈 패드 중심들을 세 패드의 무게중심에서 이 배율만큼 벌린다 (이전 대비 서로 20% 멀리)
+    post = {
+        count = 10, -- 경사로 4곳 양옆 8개 + 앞쪽(얼음 쪽) 두 모서리 2개
+        size = Vector3.new(0.6, 2.4, 0.6),
+        cap = Vector3.new(0.5, 0.2, 0.5),
+        inset = 0.8, -- 판 가장자리에서 기둥 중심까지
+        rampGap = 1.5, -- 경사로 옆면에서 기둥 중심까지
+        lightRange = 10,
+        lightBrightness = 0.8,
+    },
+    guide = {
+        count = 12,
+        radius = 12, -- 착륙선 중심에서
+        diameter = 0.8,
+        thickness = 0.04,
+        raise = 0.02, -- 윗면 = 바닥 + 이 값 (거의 묻힘)
+        period = 1, -- 착륙 연출 동안 한 바퀴 도는 시간(초)
+        hz = 10, -- 체이스 갱신 주기
+        litFraction = 0.25, -- 한 주기 중 켜져 있는 비율
+        onTransparency = 0,
+        offTransparency = 0.75,
+        steadyTransparency = 0.4, -- 연출 뒤 은은하게 고정
+    },
+    line = {
+        width = 2,
+        thickness = 0.05,
+        raise = 0.03, -- 띠 윗면 = 바닥 + 이 값 (아래는 바닥 속)
+        margin = 1.5, -- 대상 파트 경계에서 띠 끝까지 (프롬프트 파트를 가리지 않게)
+    },
+    lane = {
+        width = 4, -- 로버 동선 (충전 패드 -> 앞쪽 경사로)
+        dash = 1.2, -- 가장자리 노란 점선 한 조각 길이
+        dashGap = 1.2,
+        dashWidth = 0.3,
+        edgeInset = 0.3, -- 띠 끝을 판 앞 가장자리(경사로 시작)에서 이만큼 안쪽에
+    },
+    props = {
+        crateSize = 3,
+        antennaHeight = 2,
+        -- 판 가장자리 바깥 배치 (side: "left" | "right" | "back", along: 그 변을 따라 0..1, out: 바깥 거리 3 ~ 10)
+        crates = {
+            { side = "left", along = 0.2, out = 5, yaw = 15 },
+            { side = "left", along = 0.8, out = 7, yaw = -10 },
+            { side = "back", along = 0.25, out = 5, yaw = 25 },
+            { side = "right", along = 0.82, out = 6, yaw = 5 },
+        },
+        antenna = { side = "back", along = 0.75, out = 6 },
+        clearance = 2, -- 바위가 소품 둘레에서 비우는 거리
+    },
+}
+
+-- 패드 간격 넓히기 (무게중심 기준)
+do
+    local sum = Vector3.zero
+    local n = 0
+    local layouts = { MODULE_LAYOUT.A, MODULE_LAYOUT.B, MODULE_LAYOUT.C }
+    for _, layout in layouts do
+        sum += layout.center
+        n += 1
+    end
+    local centroid = sum / n
+    for _, layout in layouts do
+        layout.center = centroid + (layout.center - centroid) * BASE_LAYOUT.padSpread
+    end
+end
+
 local DOOR_WIDTH, DOOR_HEIGHT = 6, 7
 local WALL = 1
 
@@ -287,6 +356,13 @@ local COLORS = {
     doorFrame = Color3.fromRGB(table.unpack(Config.AIRLOCK.frameColor)),
     interiorLight = Color3.fromRGB(table.unpack(Config.AIRLOCK.lightColor)),
     apron = Color3.fromRGB(105, 105, 108), -- 기지 콘크리트 판
+    borderPost = Color3.fromRGB(58, 60, 64), -- 판 경계등 기둥
+    borderCap = Color3.fromRGB(255, 205, 60), -- 경계등 캡과 빛
+    guideLight = Color3.fromRGB(255, 240, 190), -- 착륙 유도등 (흰색에 가까운 노랑)
+    floorLine = Color3.fromRGB(70, 72, 76), -- 바닥 동선 띠
+    laneDash = Color3.fromRGB(240, 195, 40), -- 로버 동선 가장자리 점선
+    propCrate = Color3.fromRGB(150, 120, 80), -- 그레이박스 보급 상자
+    propAntenna = Color3.fromRGB(190, 192, 198),
 }
 
 -- 하늘 (맵 종류와 관계없이 적용). Sky는 Attribute KeepSky = true가 아니면 덮어쓴다.
@@ -1489,6 +1565,25 @@ local function verifyDistances(padPositions: { Vector3 })
     end
 end
 
+-- 판 바깥 소품 원 (키트 좌표 x, z, 반지름): 바위가 그 자리를 비운다
+local function kitPropCircles(): { Footprint }
+    local circles: { Footprint } = {}
+    local kit = ServerStorage:FindFirstChild("BaseKit")
+    local layout = kit and kit:FindFirstChild("BaseLayout")
+    local props = layout and layout:FindFirstChild("Props")
+    if not kit or not kit:IsA("Model") or not props then
+        return circles
+    end
+    local frame = if kit.PrimaryPart then kit.PrimaryPart.CFrame else kit:GetPivot()
+    for _, prop in props:GetChildren() do
+        local lo, hi = KitImports.boundsIn(prop, frame)
+        local c = (lo + hi) / 2
+        local r = math.max(hi.X - lo.X, hi.Z - lo.Z) / 2 + BASE_LAYOUT.props.clearance
+        table.insert(circles, { x = c.X, z = c.Z, r = r })
+    end
+    return circles
+end
+
 -- 지면, 얼음 지점, 착륙 패드, 바위. rect = 기지 키트 판 사각형 (기지 키트를 먼저 만든 뒤 부른다)
 local function buildTerrainAndSites(rect: Rect): GroundStats
     local terrain = makeFolder("DevTerrain", workspace)
@@ -1573,7 +1668,15 @@ local function buildTerrainAndSites(rect: Rect): GroundStats
         near = 0,
         hardRing = 0,
     }
-    buildBoulders(terrain, sites, rect, plan.footprints, stats)
+    -- 판 바깥 소품 자리도 바위가 비운다 (키트 좌표 -> 착륙지마다 월드 좌표)
+    local rockFootprints = table.clone(plan.footprints)
+    for _, site in sites do
+        for _, circle in kitPropCircles() do
+            local world = site.frame:PointToWorldSpace(Vector3.new(circle.x, 0, circle.z))
+            table.insert(rockFootprints, { x = world.X, z = world.Z, r = circle.r })
+        end
+    end
+    buildBoulders(terrain, sites, rect, rockFootprints, stats)
     buildLighting()
     return stats
 end
@@ -2397,6 +2500,379 @@ local function buildApron(kit: Model)
     end
 end
 
+-- 기지 레이아웃 (BASE_LAYOUT) ------------------------------------------------
+-- 판 사각형(키트 좌표). Apron이 있으면 그 범위, 없으면 키트 범위 + APRON_MARGIN. top = 판(지면) 윗면
+type LayoutRect = { minX: number, maxX: number, minZ: number, maxZ: number, top: number }
+
+local function layoutRect(kit: Model, frame: CFrame): LayoutRect
+    local apron = kit:FindFirstChild("Apron")
+    local top = FLOOR_Y - LANDING_PAD_SIZE.Y / 2
+    if apron and apron:IsA("BasePart") then
+        local lo, hi = KitImports.boundsIn(apron, frame)
+        return { minX = lo.X, maxX = hi.X, minZ = lo.Z, maxZ = hi.Z, top = hi.Y }
+    end
+    local lo, hi = KitImports.boundsIn(kit, frame)
+    return {
+        minX = lo.X - APRON_MARGIN,
+        maxX = hi.X + APRON_MARGIN,
+        minZ = lo.Z - APRON_MARGIN,
+        maxZ = hi.Z + APRON_MARGIN,
+        top = top,
+    }
+end
+
+-- 그 자리 바닥 높이 (키트 좌표): 착륙 패드 위는 FLOOR_Y, 밖은 판 윗면
+local function surfaceY(rect: LayoutRect, x: number, z: number): number
+    local half = LANDING_PAD_SIZE.X / 2
+    if math.abs(x) <= half and math.abs(z) <= half then
+        return FLOOR_Y
+    end
+    return rect.top
+end
+
+-- 점 from에서 to로 가는 선이 상자(lo, hi를 margin만큼 키운 것)에 들어가는 점 (xz 평면). 못 들어가면 to
+local function entryPoint(
+    from: Vector3,
+    to: Vector3,
+    lo: Vector3,
+    hi: Vector3,
+    margin: number
+): Vector3
+    local d = to - from
+    local tEnter = 0
+    for _, axis in { "X", "Z" } do
+        local o = (from :: any)[axis]
+        local dir = (d :: any)[axis]
+        local a, b = (lo :: any)[axis] - margin, (hi :: any)[axis] + margin
+        if math.abs(dir) < 1e-9 then
+            if o < a or o > b then
+                return to
+            end
+        else
+            local t1, t2 = (a - o) / dir, (b - o) / dir
+            tEnter = math.max(tEnter, math.min(t1, t2))
+        end
+    end
+    return from + d * math.clamp(tEnter, 0, 1)
+end
+
+-- 바닥 띠 하나 (a -> b, 키트 좌표). 착륙 패드 경계에서 나눠 각 조각을 그 자리 바닥 높이에 놓는다
+local function floorStrip(
+    parent: Instance,
+    frame: CFrame,
+    rect: LayoutRect,
+    a: Vector3,
+    b: Vector3,
+    width: number,
+    name: string,
+    color: Color3
+)
+    local l = BASE_LAYOUT.line
+    local half = LANDING_PAD_SIZE.X / 2
+    local ts = { 0, 1 }
+    for _, v in { -half, half } do
+        if (a.X - v) * (b.X - v) < 0 then
+            table.insert(ts, (v - a.X) / (b.X - a.X))
+        end
+        if (a.Z - v) * (b.Z - v) < 0 then
+            table.insert(ts, (v - a.Z) / (b.Z - a.Z))
+        end
+    end
+    table.sort(ts)
+    for i = 1, #ts - 1 do
+        local p0 = a + (b - a) * ts[i]
+        local p1 = a + (b - a) * ts[i + 1]
+        local length = Vector3.new(p1.X - p0.X, 0, p1.Z - p0.Z).Magnitude
+        if length > 0.05 then
+            local mid = (p0 + p1) / 2
+            local y = surfaceY(rect, mid.X, mid.Z) + l.raise - l.thickness / 2
+            local center = Vector3.new(mid.X, y, mid.Z)
+            local dir = Vector3.new(p1.X - p0.X, 0, p1.Z - p0.Z).Unit
+            makePart({
+                name = name,
+                size = Vector3.new(width, l.thickness, length),
+                cframe = frame * CFrame.lookAt(center, center + dir),
+                color = color,
+                material = Enum.Material.SmoothPlastic,
+                parent = parent,
+                canCollide = false,
+            })
+        end
+    end
+end
+
+-- 로버 동선 가장자리 노란 점선 (패드 경계를 걸치는 조각은 건너뛴다)
+local function laneDashes(parent: Instance, frame: CFrame, rect: LayoutRect, a: Vector3, b: Vector3)
+    local lane = BASE_LAYOUT.lane
+    local l = BASE_LAYOUT.line
+    local flat = Vector3.new(b.X - a.X, 0, b.Z - a.Z)
+    local length = flat.Magnitude
+    if length < lane.dash then
+        return
+    end
+    local dir = flat.Unit
+    local side = Vector3.new(-dir.Z, 0, dir.X)
+    local offset = lane.width / 2 - lane.dashWidth / 2
+    local s = lane.dash / 2
+    while s <= length - lane.dash / 2 do
+        for _, sign in { -1, 1 } do
+            local c = a + dir * s + side * sign * offset
+            local p0 = c - dir * (lane.dash / 2)
+            local p1 = c + dir * (lane.dash / 2)
+            local y0, y1 = surfaceY(rect, p0.X, p0.Z), surfaceY(rect, p1.X, p1.Z)
+            if y0 == y1 then
+                local center = Vector3.new(c.X, y0 + l.raise + 0.01 - l.thickness / 2, c.Z)
+                makePart({
+                    name = "LaneDash",
+                    size = Vector3.new(lane.dashWidth, l.thickness, lane.dash),
+                    cframe = frame * CFrame.lookAt(center, center + dir),
+                    color = COLORS.laneDash,
+                    material = Enum.Material.Neon,
+                    parent = parent,
+                    canCollide = false,
+                })
+            end
+        end
+        s += lane.dash + lane.dashGap
+    end
+end
+
+local function boxOf(inst: Instance?, frame: CFrame): (Vector3?, Vector3?)
+    if not inst then
+        return nil, nil
+    end
+    local lo, hi = KitImports.boundsIn(inst, frame)
+    if lo.X > hi.X then
+        return nil, nil
+    end
+    return lo, hi
+end
+
+-- 두 상자를 잇는 바닥 띠: 각 상자 경계(+ margin)에서 끊는다
+local function linkBoxes(
+    parent: Instance,
+    frame: CFrame,
+    rect: LayoutRect,
+    loA: Vector3,
+    hiA: Vector3,
+    loB: Vector3,
+    hiB: Vector3
+)
+    local l = BASE_LAYOUT.line
+    local ca = (loA + hiA) / 2
+    local cb = (loB + hiB) / 2
+    local a = entryPoint(cb, ca, loA, hiA, l.margin)
+    local b = entryPoint(ca, cb, loB, hiB, l.margin)
+    floorStrip(parent, frame, rect, a, b, l.width, "FloorLine", COLORS.floorLine)
+end
+
+-- 판 바깥 소품 하나의 바닥 중심 (키트 좌표, 지면 높이)
+local function propPoint(
+    rect: LayoutRect,
+    spec: { side: string, along: number, out: number }
+): Vector3
+    local groundY = rect.top - (if greyboxTerrainBuilt then APRON_TERRAIN_STEP else 0)
+    if spec.side == "left" then
+        return Vector3.new(
+            rect.minX - spec.out,
+            groundY,
+            rect.minZ + (rect.maxZ - rect.minZ) * spec.along
+        )
+    elseif spec.side == "right" then
+        return Vector3.new(
+            rect.maxX + spec.out,
+            groundY,
+            rect.minZ + (rect.maxZ - rect.minZ) * spec.along
+        )
+    end
+    return Vector3.new(
+        rect.minX + (rect.maxX - rect.minX) * spec.along,
+        groundY,
+        rect.maxZ + spec.out
+    )
+end
+
+-- 경계등, 착륙 유도등, 바닥 동선, (그레이박스면) 판 바깥 소품. 키트 내부 배치는 건드리지 않는다
+local function buildBaseLayout(kit: Model, withProps: boolean)
+    local frame = if kit.PrimaryPart then kit.PrimaryPart.CFrame else kit:GetPivot()
+    local rect = layoutRect(kit, frame)
+    local layout = makeModel("BaseLayout", kit)
+    local midX, midZ = (rect.minX + rect.maxX) / 2, (rect.minZ + rect.maxZ) / 2
+
+    -- 1) 경계등: 경사로 4곳 양옆 한 쌍씩 + 앞쪽 두 모서리
+    local p = BASE_LAYOUT.post
+    local posts = makeModel("BorderPosts", layout)
+    local flank = RAMP_WIDTH / 2 + p.rampGap
+    local spots = {
+        Vector3.new(midX - flank, 0, rect.minZ + p.inset),
+        Vector3.new(midX + flank, 0, rect.minZ + p.inset),
+        Vector3.new(midX - flank, 0, rect.maxZ - p.inset),
+        Vector3.new(midX + flank, 0, rect.maxZ - p.inset),
+        Vector3.new(rect.minX + p.inset, 0, midZ - flank),
+        Vector3.new(rect.minX + p.inset, 0, midZ + flank),
+        Vector3.new(rect.maxX - p.inset, 0, midZ - flank),
+        Vector3.new(rect.maxX - p.inset, 0, midZ + flank),
+        Vector3.new(rect.minX + p.inset, 0, rect.minZ + p.inset),
+        Vector3.new(rect.maxX - p.inset, 0, rect.minZ + p.inset),
+    }
+    for index, spot in spots do
+        local base = surfaceY(rect, spot.X, spot.Z)
+        local post = makePart({
+            name = "BorderPost",
+            size = p.size,
+            cframe = frame * CFrame.new(spot.X, base + p.size.Y / 2, spot.Z),
+            color = COLORS.borderPost,
+            material = Enum.Material.Metal,
+            parent = posts,
+        })
+        post:SetAttribute("PostIndex", index)
+        local cap = makePart({
+            name = "BorderCap",
+            size = p.cap,
+            cframe = frame * CFrame.new(spot.X, base + p.size.Y + p.cap.Y / 2, spot.Z),
+            color = COLORS.borderCap,
+            material = Enum.Material.Neon,
+            parent = post,
+            canCollide = false,
+        })
+        local light = Instance.new("PointLight")
+        light.Color = COLORS.borderCap
+        light.Range = p.lightRange
+        light.Brightness = p.lightBrightness
+        light.Parent = cap
+    end
+
+    -- 2) 착륙 유도등: 착륙선 중심 둘레 바닥에 묻은 Neon 원판 (BaseLights가 착륙 연출 동안 체이스)
+    local g = BASE_LAYOUT.guide
+    local lander = kit:FindFirstChild("Lander")
+    local landerLo, landerHi = boxOf(lander, frame)
+    if landerLo and landerHi then
+        local guides = makeModel("GuideLights", layout)
+        local center = (landerLo + landerHi) / 2
+        for i = 1, g.count do
+            local angle = 2 * math.pi * (i - 1) / g.count
+            local x = center.X + math.cos(angle) * g.radius
+            local z = center.Z + math.sin(angle) * g.radius
+            local y = surfaceY(rect, x, z) + g.raise - g.thickness / 2
+            local disc = makePart({
+                name = "GuideLight",
+                size = Vector3.new(g.thickness, g.diameter, g.diameter),
+                cframe = frame * CFrame.new(x, y, z) * CFrame.Angles(0, 0, math.rad(90)),
+                color = COLORS.guideLight,
+                material = Enum.Material.Neon,
+                parent = guides,
+                canCollide = false,
+            })
+            disc.Shape = Enum.PartType.Cylinder
+            disc.Transparency = g.steadyTransparency
+            disc:SetAttribute("GuideIndex", i)
+        end
+    end
+
+    -- 3) 바닥 동선: 착륙선 문 -> 패널 밭 입구 패드, 착륙선 -> PadA -> PadB -> PadC, 충전 패드 -> 앞쪽 경사로
+    local lines = makeModel("FloorLines", layout)
+    local l = BASE_LAYOUT.line
+    local field = kit:FindFirstChild("SolarField")
+    local installLo, installHi = boxOf(field and field:FindFirstChild("InstallPad"), frame)
+    local door: Instance? = nil
+    if lander then
+        for _, d in lander:GetDescendants() do
+            if d.Name == "Door" and d:IsA("BasePart") and d.Parent and d.Parent.Name == "Entry" then
+                door = d
+                break
+            end
+        end
+    end
+    local doorLo, doorHi = boxOf(door, frame)
+    if doorLo and doorHi and installLo and installHi then
+        -- 문 앞(-Z) margin에서 시작해 설치 패드 경계(+ margin)에서 끝
+        local start = Vector3.new((doorLo.X + doorHi.X) / 2, 0, doorLo.Z - l.margin)
+        local target = (installLo + installHi) / 2
+        local finish = entryPoint(start, target, installLo, installHi, l.margin)
+        floorStrip(lines, frame, rect, start, finish, l.width, "FloorLine", COLORS.floorLine)
+    end
+    local pads = kit:FindFirstChild("ModulePads")
+    local chain: { { Vector3 } } = {}
+    if landerLo and landerHi then
+        table.insert(chain, { landerLo, landerHi })
+    end
+    for _, id in Config.MODULE_ORDER do
+        local padModel = pads and pads:FindFirstChild("Pad" .. id)
+        local lo, hi = boxOf(padModel and padModel:FindFirstChild("Pad"), frame)
+        if lo and hi then
+            table.insert(chain, { lo, hi })
+        end
+    end
+    for i = 1, #chain - 1 do
+        linkBoxes(lines, frame, rect, chain[i][1], chain[i][2], chain[i + 1][1], chain[i + 1][2])
+    end
+    local chargeLo, chargeHi = boxOf(kit:FindFirstChild("ChargePad"), frame)
+    if chargeLo and chargeHi then
+        local start = Vector3.new((chargeLo.X + chargeHi.X) / 2, 0, chargeLo.Z)
+        local finish = Vector3.new(midX, 0, rect.minZ + BASE_LAYOUT.lane.edgeInset)
+        floorStrip(
+            lines,
+            frame,
+            rect,
+            start,
+            finish,
+            BASE_LAYOUT.lane.width,
+            "RoverLane",
+            COLORS.floorLine
+        )
+        laneDashes(lines, frame, rect, start, finish)
+    end
+
+    -- 4) 판 바깥 소품 (그레이박스 지형 키트만): 보급 상자와 작은 안테나. 경사로 차선과 주행 회랑(앞쪽)을 피한 자리
+    if withProps then
+        local props = makeModel("Props", layout)
+        local pr = BASE_LAYOUT.props
+        for _, spec in pr.crates do
+            local bottom = propPoint(rect, spec)
+            local crate = KitImports.take("Crate")
+            if crate then
+                KitImports.fitInto(crate, Vector3.one * pr.crateSize, Vector3.zero)
+                KitImports.rotateAboutCenter(crate, CFrame.Angles(0, math.rad(spec.yaw), 0))
+                KitImports.placeBottom(crate, bottom)
+                KitImports.setStatic(crate, true)
+                crate.Name = "PropCrate"
+                crate.Parent = props
+            else
+                makePart({
+                    name = "PropCrate",
+                    size = Vector3.one * pr.crateSize,
+                    cframe = frame
+                        * CFrame.new(bottom + Vector3.new(0, pr.crateSize / 2, 0))
+                        * CFrame.Angles(0, math.rad(spec.yaw), 0),
+                    color = COLORS.propCrate,
+                    material = Enum.Material.WoodPlanks,
+                    parent = props,
+                })
+            end
+        end
+        local antennaBottom = propPoint(rect, pr.antenna)
+        local mast = placeDecor(
+            "Antenna",
+            Vector3.new(1.5, pr.antennaHeight, 1.5),
+            antennaBottom,
+            true,
+            props,
+            "PropAntenna"
+        )
+        if not mast then
+            makePart({
+                name = "PropAntenna",
+                size = Vector3.new(0.3, pr.antennaHeight, 0.3),
+                cframe = frame
+                    * CFrame.new(antennaBottom + Vector3.new(0, pr.antennaHeight / 2, 0)),
+                color = COLORS.propAntenna,
+                material = Enum.Material.Metal,
+                parent = props,
+            })
+        end
+    end
+end
+
 local function buildBaseKit()
     local kit = makeModel("BaseKit", nil)
     local origin = makeMarker("Origin", ORIGIN_SIZE, CFrame.identity, kit)
@@ -2411,6 +2887,7 @@ local function buildBaseKit()
     if greyboxTerrainBuilt then
         buildApron(kit)
     end
+    ServerUtil.safeCall("DevMap BaseLayout", buildBaseLayout, kit, greyboxTerrainBuilt)
     kit.Parent = ServerStorage
 end
 
@@ -2463,6 +2940,9 @@ local function buildPanelTemplate()
     template.Parent = ServerStorage
 end
 
+-- 착륙 유도등 체이스 수치 (BaseLights가 읽는다)
+DevMap.GUIDE = BASE_LAYOUT.guide
+
 -- 이번 세션에 계획한 산 (그레이박스 지형을 만들지 않았으면 nil)
 function DevMap.getMountains(): MountainPlan?
     return mountainPlan
@@ -2490,6 +2970,12 @@ function DevMap.ensure()
     end
     if not ServerStorage:FindFirstChild("BaseKit") then
         buildBaseKit()
+    else
+        -- 디자이너 BaseKit: 키트 내부 배치는 그대로 두고 경계등, 유도등, 바닥 동선만 판(키트 범위) 기준으로 더한다
+        local kit = ServerStorage:FindFirstChild("BaseKit")
+        if kit and kit:IsA("Model") and not kit:FindFirstChild("BaseLayout") then
+            ServerUtil.safeCall("DevMap BaseLayout", buildBaseLayout, kit, false)
+        end
     end
     if buildSites then
         groundStats = buildTerrainAndSites(kitFootprint())

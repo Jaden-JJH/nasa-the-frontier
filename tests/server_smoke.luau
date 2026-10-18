@@ -711,6 +711,252 @@ end
 check(hinges == 6, "로버 힌지 6개 (구동 4 + 조향 2): " .. hinges)
 check(unanchored == 0 and anchoredRover == 0, "로버만 비고정, 나머지 고정")
 
+-- 기지 레이아웃 (2026-10-18, DevMap BASE_LAYOUT) ------------------------------
+print("[기지 레이아웃]")
+do
+    local function flatOf(v)
+        return Vector3.new(v.X, 0, v.Z)
+    end
+    local function boxOf(inst)
+        local lo, hi = nil, nil
+        local list = if inst:IsA("BasePart") then { inst } else {}
+        for _, d in inst:GetDescendants() do
+            if d:IsA("BasePart") then
+                table.insert(list, d)
+            end
+        end
+        for _, part in list do
+            local cf, half = part.CFrame, part.Size / 2
+            for _, sx in { -1, 1 } do
+                for _, sy in { -1, 1 } do
+                    for _, sz in { -1, 1 } do
+                        local p =
+                            cf:PointToWorldSpace(Vector3.new(sx * half.X, sy * half.Y, sz * half.Z))
+                        lo = if lo
+                            then Vector3.new(
+                                math.min(lo.X, p.X),
+                                math.min(lo.Y, p.Y),
+                                math.min(lo.Z, p.Z)
+                            )
+                            else p
+                        hi = if hi
+                            then Vector3.new(
+                                math.max(hi.X, p.X),
+                                math.max(hi.Y, p.Y),
+                                math.max(hi.Z, p.Z)
+                            )
+                            else p
+                    end
+                end
+            end
+        end
+        return lo, hi
+    end
+    -- 1) 모듈 패드 간격: 이전 (-30, -2), (-30, 24), (2, 34) 대비 1.15배 이상
+    local old =
+        { A = Vector3.new(-30, 0, -2), B = Vector3.new(-30, 0, 24), C = Vector3.new(2, 0, 34) }
+    local function padCenter(id)
+        return flatOf(kit.ModulePads["Pad" .. id].Pad.CFrame.Position)
+    end
+    local ratios = {}
+    local spreadOk = true
+    for _, pair in { { "A", "B" }, { "B", "C" }, { "A", "C" } } do
+        local before = (old[pair[1]] - old[pair[2]]).Magnitude
+        local after = (padCenter(pair[1]) - padCenter(pair[2])).Magnitude
+        table.insert(ratios, string.format("%s-%s %.2f", pair[1], pair[2], after / before))
+        if after < before * 1.15 then
+            spreadOk = false
+        end
+    end
+    check(spreadOk, "모듈 패드 간격 1.15배 이상 (" .. table.concat(ratios, ", ") .. ")")
+    -- 2) 판이 모든 키트 파트를 포함 (경사로와 판 바깥 소품 제외)
+    local apron = kit.Apron
+    local aLo, aHi = boxOf(apron)
+    local layout = kit:FindFirstChild("BaseLayout")
+    local props = layout and layout:FindFirstChild("Props")
+    local outside = {}
+    for _, d in kit:GetDescendants() do
+        if
+            d:IsA("BasePart")
+            and d ~= apron
+            and not d:IsDescendantOf(kit.Ramps)
+            and not (props and d:IsDescendantOf(props))
+        then
+            local lo, hi = boxOf(d)
+            if
+                lo.X < aLo.X - 1e-3
+                or hi.X > aHi.X + 1e-3
+                or lo.Z < aLo.Z - 1e-3
+                or hi.Z > aHi.Z + 1e-3
+            then
+                table.insert(outside, d:GetFullName())
+            end
+        end
+    end
+    check(
+        #outside == 0,
+        string.format(
+            "판(%.0f x %.0f)이 모든 키트 파트를 포함 (밖: %s)",
+            aHi.X - aLo.X,
+            aHi.Z - aLo.Z,
+            table.concat(outside, ", ")
+        )
+    )
+    print(
+        string.format("        판 범위 x %.1f ~ %.1f, z %.1f ~ %.1f", aLo.X, aHi.X, aLo.Z, aHi.Z)
+    )
+    -- 3) 경계등 10개, 경사로마다 양옆 한 쌍, 노란 Neon 캡과 빛
+    local posts = layout.BorderPosts:GetChildren()
+    local postsOk = #posts == 10
+    for _, post in posts do
+        local cap = post:FindFirstChild("BorderCap")
+        local light = cap and cap:FindFirstChildOfClass("PointLight")
+        if
+            math.abs(post.Size.X - 0.6) > 1e-3
+            or math.abs(post.Size.Y - 2.4) > 1e-3
+            or not cap
+            or cap.Material ~= roblox.Enum.Material.Neon
+            or not light
+            or light.Range ~= 10
+        then
+            postsOk = false
+        end
+    end
+    check(postsOk, "경계등 10개: 기둥 0.6 x 2.4, 노란 Neon 캡, PointLight Range 10")
+    local rampPairs = 0
+    for _, ramp in kit.Ramps:GetChildren() do
+        local outward = flatOf(ramp.CFrame.LookVector).Unit
+        local edge = flatOf(ramp.CFrame.Position) - outward * (ramp.Size.Z / 2)
+        local side = Vector3.new(-outward.Z, 0, outward.X)
+        local left, right = false, false
+        for _, post in posts do
+            local d = flatOf(post.CFrame.Position) - edge
+            local along = d:Dot(side)
+            local depth = d:Dot(-outward)
+            if
+                depth >= 0
+                and depth <= 2
+                and math.abs(along) >= ramp.Size.X / 2
+                and math.abs(along) <= ramp.Size.X / 2 + 3
+            then
+                if along < 0 then
+                    left = true
+                else
+                    right = true
+                end
+            end
+        end
+        if left and right then
+            rampPairs += 1
+        end
+    end
+    check(
+        rampPairs == 4,
+        "경사로 4곳 모두 입구 양옆에 경계등 한 쌍 (" .. rampPairs .. "곳)"
+    )
+    -- 4) 착륙 유도등 12개, 착륙선 중심 반지름 12
+    local lLo, lHi = boxOf(kit.Lander)
+    local landerCenter = flatOf((lLo + lHi) / 2)
+    local guides = layout.GuideLights:GetChildren()
+    local guidesOk = #guides == 12
+    for _, disc in guides do
+        local r = (flatOf(disc.CFrame.Position) - landerCenter).Magnitude
+        if
+            math.abs(r - 12) > 0.5
+            or disc.Material ~= roblox.Enum.Material.Neon
+            or disc.CanCollide
+        then
+            guidesOk = false
+        end
+    end
+    check(guidesOk, "착륙 유도등 Neon 원판 12개, 착륙선 중심 반지름 12")
+    -- 5) 바닥 띠: 판 안, 프롬프트 파트와 겹치지 않음
+    local promptBoxes = {}
+    local function addBox(inst)
+        if inst then
+            local lo, hi = boxOf(inst)
+            table.insert(promptBoxes, { lo = lo, hi = hi, name = inst:GetFullName() })
+        end
+    end
+    addBox(kit.SolarField.InstallPad)
+    for _, id in { "A", "B", "C" } do
+        addBox(kit.ModulePads["Pad" .. id].Pad)
+    end
+    addBox(kit.WaterTank)
+    addBox(kit.Lander:FindFirstChild("RoverConsole"))
+    for _, d in kit.Lander:GetDescendants() do
+        if d.Name == "Door" and d.Parent and d.Parent.Name == "Entry" then
+            addBox(d)
+        end
+    end
+    local strips = layout.FloorLines:GetChildren()
+    local names = {}
+    local stripOutside, stripHits = 0, {}
+    for _, strip in strips do
+        names[strip.Name] = (names[strip.Name] or 0) + 1
+        local cf, half = strip.CFrame, strip.Size / 2
+        for _, sx in { -1, 0, 1 } do
+            for step = -10, 10 do
+                local p = cf:PointToWorldSpace(Vector3.new(sx * half.X, 0, half.Z * step / 10))
+                if p.X < aLo.X or p.X > aHi.X or p.Z < aLo.Z or p.Z > aHi.Z then
+                    stripOutside += 1
+                end
+                for _, box in promptBoxes do
+                    if p.X > box.lo.X and p.X < box.hi.X and p.Z > box.lo.Z and p.Z < box.hi.Z then
+                        stripHits[box.name] = true
+                    end
+                end
+            end
+        end
+    end
+    local hitNames = {}
+    for name in stripHits do
+        table.insert(hitNames, name)
+    end
+    check(
+        (names.FloorLine or 0) >= 4 and (names.RoverLane or 0) >= 1 and (names.LaneDash or 0) >= 4,
+        string.format(
+            "바닥 동선: FloorLine %d조각, RoverLane %d조각, 노란 점선 %d조각",
+            names.FloorLine or 0,
+            names.RoverLane or 0,
+            names.LaneDash or 0
+        )
+    )
+    check(stripOutside == 0, "바닥 띠가 모두 판 안")
+    check(
+        #hitNames == 0,
+        "바닥 띠가 프롬프트 파트를 가리지 않음 ("
+            .. table.concat(hitNames, ", ")
+            .. ")"
+    )
+    -- 6) 판 바깥 소품: 상자 4개 + 안테나 1개, 판 가장자리 바깥 3 ~ 10, 앞쪽(얼음 쪽 주행 회랑)과 경사로 차선 밖
+    local propList = props:GetChildren()
+    local crates, antennas, propsOk = 0, 0, true
+    local midX, midZ = (aLo.X + aHi.X) / 2, (aLo.Z + aHi.Z) / 2
+    for _, prop in propList do
+        if prop.Name == "PropCrate" then
+            crates += 1
+        elseif prop.Name == "PropAntenna" then
+            antennas += 1
+        end
+        local lo, hi = boxOf(prop)
+        local c = (lo + hi) / 2
+        local dx = math.max(aLo.X - c.X, 0, c.X - aHi.X)
+        local dz = math.max(aLo.Z - c.Z, 0, c.Z - aHi.Z)
+        local d = math.sqrt(dx * dx + dz * dz)
+        local inLane = math.abs(c.X - midX) < 9 + 2 or math.abs(c.Z - midZ) < 9 + 2
+        local front = c.Z < aLo.Z
+        if d < 3 or d > 10 + 3 or inLane or front then
+            propsOk = false
+        end
+    end
+    check(
+        crates == 4 and antennas == 1,
+        "판 바깥 소품: 보급 상자 " .. crates .. "개, 안테나 " .. antennas .. "개"
+    )
+    check(propsOk, "소품은 판 바깥 3 ~ 10, 경사로 차선과 앞쪽 주행 회랑 밖")
+end
+
 -- 패드별 최근접 얼음 거리
 for i = 1, 4 do
     local pad = Workspace.LandingPads["Pad" .. i]
@@ -787,7 +1033,15 @@ local function kitHeightChecks(kitModel, label)
     local ramps = kitModel:FindFirstChild("Ramps")
     local lowestName, lowest = "", math.huge
     for _, d in kitModel:GetDescendants() do
-        if d:IsA("BasePart") and d.Name ~= "Apron" and not (ramps and d:IsDescendantOf(ramps)) then
+        local layoutProps = kitModel:FindFirstChild("BaseLayout")
+        layoutProps = layoutProps and layoutProps:FindFirstChild("Props")
+        if
+            d:IsA("BasePart")
+            and d.Name ~= "Apron"
+            and not (ramps and d:IsDescendantOf(ramps))
+            -- 판 바깥 소품은 지형(판보다 3 낮음) 위에 선다
+            and not (layoutProps and d:IsDescendantOf(layoutProps))
+        then
             local bottom = partBottom(d)
             if bottom < lowest then
                 lowestName, lowest = d:GetFullName(), bottom
@@ -1743,7 +1997,41 @@ check(
     )
 )
 
-advance(Config.LANDING_SECONDS + 0.01)
+-- 착륙 유도등 체이스: 착륙 연출 동안 원판이 순서대로 밝아진다 (전체 시간은 예전과 같게 맞춘다)
+local guideDiscs = Workspace.Base.BaseLayout.GuideLights:GetChildren()
+table.sort(guideDiscs, function(a, b)
+    return a:GetAttribute("GuideIndex") < b:GetAttribute("GuideIndex")
+end)
+advance(0.3)
+local function guideSnapshot()
+    local values, lit = {}, 0
+    for i, disc in guideDiscs do
+        values[i] = disc.Transparency
+        if disc.Transparency < 0.1 then
+            lit += 1
+        end
+    end
+    return values, lit
+end
+local snapA, litA = guideSnapshot()
+advance(0.25)
+local snapB, litB = guideSnapshot()
+local moved = false
+for i = 1, #snapA do
+    if math.abs(snapA[i] - snapB[i]) > 1e-3 then
+        moved = true
+    end
+end
+check(
+    #guideDiscs == 12 and litA >= 1 and litA < 12 and litB >= 1 and moved,
+    string.format(
+        "착륙 연출 동안 유도등 체이스 (켜짐 %d -> %d개, 순서 이동)",
+        litA,
+        litB
+    )
+)
+
+advance(Config.LANDING_SECONDS + 0.01 - 0.55)
 check(state().phase == "playing" and state().day == 1, "착륙 5초 뒤 playing, day 1")
 check(
     landingInstall.Enabled == true and landingTank.Enabled == true and consolePrompt.Enabled == true,
@@ -1881,6 +2169,35 @@ check(
 
 -- 산소: 야외에 세워 두면 고갈 ---------------------------------------------
 print("[산소]")
+do
+    -- 착륙 연출 뒤 유도등은 은은하게 고정
+    local steady = true
+    for _, disc in Workspace.Base.BaseLayout.GuideLights:GetChildren() do
+        if math.abs(disc.Transparency - 0.4) > 1e-3 then
+            steady = false
+        end
+    end
+    check(steady, "착륙 연출 뒤 유도등 은은하게 고정 (투명도 0.4)")
+    -- 놓인 기지의 판 바깥 소품: 주행 회랑 밖, 소품 자리에 바위 없음
+    local corridor = corridorsOf(Workspace)[1]
+    local propsOk, rocksOnProps = true, 0
+    for _, prop in Workspace.Base.BaseLayout.Props:GetChildren() do
+        local c = if prop:IsA("BasePart") then prop.CFrame.Position else prop:GetPivot().Position
+        if segmentDistance(c, corridor.pad, corridor.ice) < 12 + 2 then
+            propsOk = false
+        end
+        for _, boulder in Workspace.DevTerrain.Boulders:GetChildren() do
+            local b = if boulder:IsA("BasePart")
+                then boulder.CFrame.Position
+                else boulder:GetPivot().Position
+            if flatDistance(b, c) < 3 then
+                rocksOnProps += 1
+            end
+        end
+    end
+    check(propsOk, "놓인 기지의 판 바깥 소품이 주행 회랑(반폭 12) 밖")
+    check(rocksOnProps == 0, "판 바깥 소품 자리에 바위 없음 (" .. rocksOnProps .. ")")
+end
 do
     -- 그레이박스 착륙선: 걸어 들어가는 오두막. 문, 보이지 않는 충돌 벽(정면 문 폭 비움), 내부 산소 구역
     local ok, why = entryOk(base.Lander, 5)
