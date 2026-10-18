@@ -55,6 +55,15 @@ function SoundFX.play(key, volumeScale)
     sound:Play()
 end
 
+-- 카탈로그 볼륨 대신 지정한 절대 볼륨(0..1)으로 재생
+function SoundFX.playVolume(key, volume)
+    local spec = SoundIds[key]
+    if not spec or spec.id == 0 then
+        return
+    end
+    SoundFX.play(key, volume / math.max(spec.volume, 0.01))
+end
+
 -- 산소 호흡 루프: 실외에서만, 산소가 낮을수록 크게
 local function applyBreath()
     local target = 0
