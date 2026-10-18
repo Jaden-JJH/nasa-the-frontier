@@ -20,6 +20,9 @@ local batteryTweens = nil
 local batteryMode = nil -- "low" | "charging" | nil
 local boostOverheated = false -- 과열 이후 쿨다운 중
 local lastRover = nil
+local boostPulse = nil -- 부스트 중 게이지 밝기 맥동 Tween
+local boostFlashUntil = 0
+local updateBoost -- 앞서 선언(쿨다운 반짝임이 다시 호출)
 local BOOST_COLOR = Color3.fromRGB(255, 150, 50)
 local BOOST_DIM = Color3.fromRGB(170, 100, 40)
 
@@ -479,27 +482,90 @@ local function updateBattery(rover)
     end
 end
 
+local function stopBoostPulse()
+    if boostPulse then
+        boostPulse:Cancel()
+        boostPulse = nil
+        refs.boostBar.fill.BackgroundTransparency = 0
+    end
+end
+
+local function startBoostPulse()
+    if boostPulse then
+        return
+    end
+    boostPulse = TweenService:Create(
+        refs.boostBar.fill,
+        TweenInfo.new(0.5, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
+        { BackgroundTransparency = 0.4 }
+    )
+    boostPulse:Play()
+end
+
+-- 과열 순간 게이지를 좌우로 2px 3회 흔든다
+local function shakeBoost()
+    local bar, label = refs.boostBar.root, refs.boostState
+    task.spawn(function()
+        for _ = 1, 3 do
+            for _, dx in ipairs({ 2, -2 }) do
+                bar.Position = UDim2.new(0, dx, 0.5, 0)
+                label.Position = UDim2.new(1, dx, 0.5, 0)
+                task.wait(0.03)
+            end
+        end
+        bar.Position = UDim2.fromScale(0, 0.5)
+        label.Position = UDim2.fromScale(1, 0.5)
+    end)
+end
+
+-- 쿨다운 완료 순간 게이지 바탕과 글자를 0.3초 초록으로 반짝인다
+local function flashBoostReady()
+    boostFlashUntil = os.clock() + 0.3
+    task.delay(0.3, function()
+        if lastRover then
+            updateBoost(lastRover)
+        end
+    end)
+end
+
 -- 부스트 게이지: boostHeat 0..1, 탑승 중이고 필드가 있을 때만 보인다
-local function updateBoost(rover)
+function updateBoost(rover)
     local heat = rover and rover.boostHeat
     local show = RoverBoost.isDriving() and type(heat) == "number"
     refs.boostRow.Visible = show
     refs.boostCaption.Visible = show
     if not show then
         boostOverheated = false
+        stopBoostPulse()
         return
     end
+    local wasOverheated = boostOverheated
     if heat >= 0.98 then
         boostOverheated = true
+        if not wasOverheated then
+            shakeBoost()
+        end
     elseif heat <= 0.02 then
         boostOverheated = false
+        if wasOverheated then
+            flashBoostReady()
+        end
     end
     refs.boostBar.setRatio(heat)
-    if heat >= 0.98 then
+    local flashing = os.clock() < boostFlashUntil
+    refs.boostBar.root.BackgroundColor3 = if flashing then Colors.good else Colors.bg
+    if flashing then
+        stopBoostPulse()
+        refs.boostBar.fill.BackgroundColor3 = Colors.good
+        refs.boostState.Text = "준비 완료"
+        refs.boostState.TextColor3 = Colors.good
+    elseif heat >= 0.98 then
+        stopBoostPulse()
         refs.boostBar.fill.BackgroundColor3 = Colors.bad
         refs.boostState.Text = "과열"
         refs.boostState.TextColor3 = Colors.bad
     elseif boostOverheated then
+        stopBoostPulse()
         refs.boostBar.fill.BackgroundColor3 = Colors.neutral
         refs.boostState.Text = "쿨다운"
         refs.boostState.TextColor3 = Colors.neutral
@@ -508,6 +574,11 @@ local function updateBoost(rover)
         refs.boostBar.fill.BackgroundColor3 = if boosting then BOOST_COLOR else BOOST_DIM
         refs.boostState.Text = if boosting then "부스트" else ""
         refs.boostState.TextColor3 = BOOST_COLOR
+        if boosting then
+            startBoostPulse()
+        else
+            stopBoostPulse()
+        end
     end
     refs.boostCaption.Text = if UI.isTouchOnly()
         then "부스터 버튼 (배터리 3배)"

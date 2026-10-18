@@ -93,22 +93,32 @@ function RoverBoost.init(_ctx)
             Name = "BoostButton",
             Position = UDim2.fromOffset(12 + 180 + 10, 128 + 26),
             Size = UDim2.fromOffset(96, 56),
-            BackgroundColor3 = Colors.oxygen,
-            TextColor3 = Colors.bg,
+            BackgroundColor3 = Colors.panelLight,
+            TextColor3 = Colors.text,
             Text = "부스터",
             Preset = "heading",
             Visible = false,
             Parent = gui,
-        }, { UI.corner(10) })
+        }, { UI.corner(10), UI.stroke(Colors.oxygen, 2) })
+        -- 누르는 동안 눌린 상태(주황)
+        local function setPressed(pressed)
+            touchButton.BackgroundColor3 = if pressed then Colors.oxygen else Colors.panelLight
+            touchButton.TextColor3 = if pressed then Colors.bg else Colors.text
+        end
         touchButton.InputBegan:Connect(function(input)
             if input.UserInputType == Enum.UserInputType.Touch then
+                setPressed(true)
                 send(true)
             end
         end)
         touchButton.InputEnded:Connect(function(input)
             if input.UserInputType == Enum.UserInputType.Touch then
+                setPressed(false)
                 send(false)
             end
+        end)
+        touchButton:GetPropertyChangedSignal("Visible"):Connect(function()
+            setPressed(false)
         end)
     end
 
