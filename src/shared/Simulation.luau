@@ -733,8 +733,14 @@ function Simulation.checkEnd(state: GameState, config: Config): (EndResult, stri
     return "none", ""
 end
 
--- 종료 상태로 전환. applyDay가 이미 다음 날로 넘겼으므로 day를 마지막으로 끝낸 날로 되돌린다
-function Simulation.finishGame(state: GameState, config: Config, result: EndResult): GameState
+-- 종료 상태로 전환. applyDay가 이미 다음 날로 넘겼으므로 day를 마지막으로 끝낸 날로 되돌린다.
+-- midDay(산소 고갈처럼 하루 도중에 끝남)면 지금 날을 그대로 둔다
+function Simulation.finishGame(
+    state: GameState,
+    config: Config,
+    result: EndResult,
+    midDay: boolean?
+): GameState
     local new = Simulation.copy(state)
     if result == "won" then
         new.phase = "won"
@@ -743,7 +749,7 @@ function Simulation.finishGame(state: GameState, config: Config, result: EndResu
     else
         return new
     end
-    new.day = math.clamp(state.day - 1, 1, config.TOTAL_DAYS)
+    new.day = math.clamp(if midDay then state.day else state.day - 1, 1, config.TOTAL_DAYS)
     Simulation.refreshDerived(new, config)
     return new
 end

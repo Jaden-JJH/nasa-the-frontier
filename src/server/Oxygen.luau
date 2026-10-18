@@ -2,7 +2,7 @@
 -- 플레이어별 우주복 산소 (CONTRACT 3절)
 -- 실내 = 로버 DriverSeat 착석, 또는 Workspace.Base 아래 OxygenZone 파트 안.
 -- ModulePads.PadX 아래의 OxygenZone은 모듈 X가 가동 중일 때만 실내로 친다 (Habitat A 산소 회복 지점).
--- 0이 되면 기지 Food, Water 페널티, 착륙선으로 이동, 산소 회복.
+-- 0이 되면 즉시 임무 실패(GameFlow, 2026-10-18). Reset Character 같은 다른 사망은 Food, Water 페널티 후 착륙선 리스폰.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -10,7 +10,6 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Config = require(ReplicatedStorage.Shared.Config)
 local Remotes = require(ReplicatedStorage.Shared.Remotes)
 local Simulation = require(ReplicatedStorage.Shared.Simulation)
-local LandingSite = require(script.Parent.LandingSite)
 local ResourceState = require(script.Parent.ResourceState)
 local ServerUtil = require(script.Parent.ServerUtil)
 local Sfx = require(script.Parent.Sfx)
@@ -103,30 +102,25 @@ local function isInside(humanoid: Humanoid, position: Vector3, state: GameState)
     return false
 end
 
+-- 산소 0: 즉시 임무 실패 (2026-10-18 사용자 결정). 게임 종료는 GameFlow가 setDepletedHandler로 맡긴 함수가 한다.
+-- 구조(착륙선 이동)와 Food, Water 페널티는 하지 않는다 (다른 사망의 페널티는 onDied에 그대로)
+local depletedHandler: ((Player) -> ())? = nil
+
+function Oxygen.setDepletedHandler(handler: (Player) -> ())
+    depletedHandler = handler
+end
+
 local function onDepleted(player: Player, record: Record, now: number)
     record.rescuing = true
-    -- 구조 효과음: 플레이어 몸에 붙여 착륙선으로 옮겨져도 따라간다
+    record.oxygen = 0
+    send(player, record, now)
     local character = player.Character
     Sfx.play("oxygen_rescue", character and character:FindFirstChild("HumanoidRootPart"))
-    local penalty = Config.OXYGEN.deathPenalty
-    ResourceState.set(Simulation.applyOxygenDeath(ResourceState.get(), Config))
-    ResourceState.notify(player, Config.TEXTS.oxygenDepleted, "warn")
-    ResourceState.notifyOthers(
-        player,
-        string.format(
-            Config.TEXTS.oxygenDepletedOther,
-            player.DisplayName,
-            penalty.food,
-            penalty.water
-        ),
-        "warn"
-    )
-    LandingSite.sendToLander(player)
-    record.oxygen = Config.OXYGEN.max
-    record.inside = true
-    send(player, record, now)
+    local handler = depletedHandler
+    if handler then
+        handler(player)
+    end
     record.rescuing = false
-    ResourceState.publish()
 end
 
 -- 캐릭터 초기화(Reset Character)나 추락사로 죽으면 산소 고갈 구조와 같은 페널티 (리뷰 I17).
@@ -200,8 +194,11 @@ local function step(dt: number, now: number)
             end
             if record.oxygen <= 0 then
                 onDepleted(player, record, now)
-                -- 페널티로 상태가 바뀌었으므로 남은 플레이어는 새 상태로 계산
+                -- 임무가 끝났으면 다른 플레이어는 더 계산하지 않는다
                 state = ResourceState.get()
+                if state.phase ~= "playing" then
+                    return
+                end
             else
                 maybeSend(player, record, now)
             end

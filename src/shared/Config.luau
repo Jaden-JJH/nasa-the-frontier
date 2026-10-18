@@ -508,11 +508,9 @@ local Config = {
         tankLostOnRecover = "복구 중 탱크의 물을 잃었습니다",
         recoverCooldown = "로버 복구는 %d초 뒤에 할 수 있습니다",
 
-        oxygenDepleted = "산소 고갈. 착륙선에서 구조되었습니다",
         airlock = "에어락",
-        lowOxygen = "산소 부족. 가까운 에어락 문을 E로 열고 안으로 들어가세요",
+        lowOxygen = "산소 부족. 0이 되면 임무가 실패합니다. 가까운 에어락 문을 E로 열고 들어가세요",
         airlockOpened = "에어락이 열렸습니다. 안으로 들어가면 산소가 회복됩니다",
-        oxygenDepletedOther = "%s 대원의 산소가 고갈되었습니다. Food -%d, Water -%d",
 
         modulesStalled = "전력 부족으로 모듈이 정지했습니다",
         stallReason = "전력 부족으로 시설이 멈췄습니다. 패널을 더 설치하세요",
@@ -527,6 +525,8 @@ local Config = {
         endWon = "Research Lab 완공",
         endShortage = "%s이 %d일 연속 바닥났습니다",
         endTimeout = "%d일 안에 완공하지 못했습니다",
+        -- 산소 0은 즉시 실패 (2026-10-18 사용자 결정, 구조 페널티 방식 폐기)
+        endOxygen = "%s 대원의 산소가 고갈되었습니다. 기지는 대원을 잃고 임무를 중단했습니다",
 
         labelLocked = "%s (잠김)",
         labelAvailable = "%s 착공 가능",

@@ -712,6 +712,7 @@ check(hinges == 6, "로버 힌지 6개 (구동 4 + 조향 2): " .. hinges)
 check(unanchored == 0 and anchoredRover == 0, "로버만 비고정, 나머지 고정")
 
 -- 기지 레이아웃 (2026-10-18, DevMap BASE_LAYOUT) ------------------------------
+local guideRingCheck = nil -- 착륙 유도등 링 검사 (KitImports 메시 착륙선에도 다시 쓴다)
 print("[기지 레이아웃]")
 do
     local function flatOf(v)
@@ -855,21 +856,87 @@ do
         "경사로 4곳 모두 입구 양옆에 경계등 한 쌍 (" .. rampPairs .. "곳)"
     )
     -- 4) 착륙 유도등 12개, 착륙선 중심 반지름 12
-    local lLo, lHi = boxOf(kit.Lander)
-    local landerCenter = flatOf((lLo + lHi) / 2)
-    local guides = layout.GuideLights:GetChildren()
-    local guidesOk = #guides == 12
-    for _, disc in guides do
-        local r = (flatOf(disc.CFrame.Position) - landerCenter).Magnitude
-        if
-            math.abs(r - 12) > 0.5
-            or disc.Material ~= roblox.Enum.Material.Neon
-            or disc.CanCollide
-        then
-            guidesOk = false
+    -- 착륙선 외형 바운딩 박스: Visual(메시) 또는 보이는 오두막 파트 (콘솔, 안테나, 레이더, 출입 구조, 표지 제외)
+    local function landerVisual(lander)
+        local visual = lander:FindFirstChild("Visual")
+        if visual then
+            return boxOf(visual)
         end
+        local skipNames = {
+            RoverConsole = true,
+            ConsolePanel = true,
+            ConsoleAntenna = true,
+            RoofAntenna = true,
+            GroundRadar = true,
+            Entry = true,
+            SpawnPoint = true,
+            OxygenZone = true,
+        }
+        local lo, hi = nil, nil
+        for _, d in lander:GetDescendants() do
+            if d:IsA("BasePart") and d.Transparency < 0.99 then
+                local skip, node = false, d
+                while node and node ~= lander do
+                    if skipNames[node.Name] then
+                        skip = true
+                    end
+                    node = node.Parent
+                end
+                if not skip then
+                    local plo, phi = boxOf(d)
+                    lo = if lo
+                        then Vector3.new(math.min(lo.X, plo.X), 0, math.min(lo.Z, plo.Z))
+                        else plo
+                    hi = if hi
+                        then Vector3.new(math.max(hi.X, phi.X), 0, math.max(hi.Z, phi.Z))
+                        else phi
+                end
+            end
+        end
+        return lo, hi
     end
-    check(guidesOk, "착륙 유도등 Neon 원판 12개, 착륙선 중심 반지름 12")
+    local function guideRingOk(kitModel)
+        local vLo, vHi = landerVisual(kitModel.Lander)
+        local visualCenter = flatOf((vLo + vHi) / 2)
+        local discs = kitModel.BaseLayout.GuideLights:GetChildren()
+        local sum = Vector3.zero
+        for _, disc in discs do
+            sum += flatOf(disc.CFrame.Position)
+        end
+        local ringCenter = sum / math.max(1, #discs)
+        local radius = (flatOf(discs[1].CFrame.Position) - ringCenter).Magnitude
+        local ok = #discs == 12
+            and (ringCenter - visualCenter).Magnitude <= 0.5
+            and radius >= 12 - 1e-3
+        for _, disc in discs do
+            local p = disc.CFrame.Position
+            local insideVisual = p.X > vLo.X and p.X < vHi.X and p.Z > vLo.Z and p.Z < vHi.Z
+            if
+                insideVisual
+                or math.abs((flatOf(p) - ringCenter).Magnitude - radius) > 1e-3
+                or disc.Material ~= roblox.Enum.Material.Neon
+                or disc.CanCollide
+            then
+                ok = false
+            end
+        end
+        return ok,
+            string.format(
+                "중심 차 %.2f, 반지름 %.1f, 외형 %.1f x %.1f",
+                (ringCenter - visualCenter).Magnitude,
+                radius,
+                vHi.X - vLo.X,
+                vHi.Z - vLo.Z
+            )
+    end
+    local ringOk, ringWhy = guideRingOk(kit)
+    check(
+        ringOk,
+        "착륙 유도등 12개: 착륙선 외형 중심과 동심, 반지름 12 이상, 모두 외형 밖 ("
+            .. ringWhy
+            .. ")"
+    )
+    guideRingCheck = guideRingOk
     -- 5) 바닥 띠: 판 안, 프롬프트 파트와 겹치지 않음
     local promptBoxes = {}
     local function addBox(inst)
@@ -914,9 +981,9 @@ do
         table.insert(hitNames, name)
     end
     check(
-        (names.FloorLine or 0) >= 4 and (names.RoverLane or 0) >= 1 and (names.LaneDash or 0) >= 4,
+        (names.FloorLine or 0) == 0 and (names.RoverLane or 0) >= 1 and (names.LaneDash or 0) >= 4,
         string.format(
-            "바닥 동선: FloorLine %d조각, RoverLane %d조각, 노란 점선 %d조각",
+            "바닥 동선: 사람 길 띠 %d조각(없어야 함), 로버 동선 %d조각, 노란 점선 %d조각",
             names.FloorLine or 0,
             names.RoverLane or 0,
             names.LaneDash or 0
@@ -2252,26 +2319,28 @@ end
 local lowBefore = lowWarnings()
 root.CFrame = CFrame.new(pad1.CFrame.Position + Vector3.new(0, 3, 200))
 local deathsBefore = state().oxygenDeaths
-advance(61)
+-- 산소 0은 즉시 실패(2026-10-18)라 여기서는 경고까지만 보고 0이 되기 전에 들어간다 (전체 시간은 예전 62초와 같게)
+advance(50)
 check(
     lowWarnings() == lowBefore + 1,
     "산소 20 이하로 떨어지면 경고 한 번 (" .. (lowWarnings() - lowBefore) .. ")"
 )
-check(state().oxygenDeaths == deathsBefore + 1, "60초 야외에서 산소 고갈 1회")
 check(
-    (root.CFrame.Position - spawnPoint.CFrame.Position).Magnitude < 6,
-    "고갈 후 착륙선으로 이동"
+    string.find(Config.TEXTS.lowOxygen, "0이 되면 임무가 실패합니다", 1, true) ~= nil,
+    "산소 부족 경고 문구에 실패 안내"
+)
+check(
+    state().phase == "playing" and state().oxygenDeaths == deathsBefore,
+    "산소가 남아 있으면 임무 계속"
 )
 local oxygenSends = countSent("OxygenUpdate")
 check(
     oxygenSends > 100 and oxygenSends <= 5 * 70,
     "OxygenUpdate 송신 수 " .. oxygenSends .. " (초당 5회 이하)"
 )
--- 페널티 (하루 소비와 섞이므로 대략 확인)
-check(state().oxygenDeaths == 1, "oxygenDeaths 1")
+root.CFrame = base.Lander.OxygenZone.CFrame
+advance(12)
 local o = lastSent("OxygenUpdate")
-advance(1)
-o = lastSent("OxygenUpdate")
 check(
     o.args[1] == Config.OXYGEN.max and o.args[3] == true,
     "착륙선 안에서 산소 최대, inside=true"
@@ -3814,8 +3883,8 @@ check(countSent("GameOver") == overBefore + 1 and over.args[1].won == true, "Gam
 check(
     over.args[1].siteName == "Shackleton Rim"
         and over.args[1].waterTrips == 2
-        and over.args[1].oxygenDeaths == 2,
-    "결과 요약 수치 (산소 고갈 1 + 초기화 1)"
+        and over.args[1].oxygenDeaths == 1,
+    "결과 요약 수치 (초기화 사망 1, 산소 고갈은 즉시 실패라 통계에 없음)"
 )
 do
     -- GameOver는 마지막 DayTick 시각에 나갔으므로 지금 기준 남은 시간은 0 초과 10 이하
@@ -3853,7 +3922,6 @@ do
             "interior_hum_loop",
             "panel_install",
             "panel_unfold",
-            "oxygen_rescue",
             "rover_board",
             "rover_engine_loop",
             "ice_collected",
@@ -4062,6 +4130,82 @@ end
 runAirlockChecks()
 
 -- 마지막 플레이어 퇴장 ---------------------------------------------------
+-- 산소 0은 즉시 실패 (2026-10-18 사용자 결정) ---------------------------------
+print("[산소 고갈 실패]")
+do
+    local function newGameAtPad1()
+        advance(Config.RESULT_MIN_SECONDS + 0.1)
+        signalFor(restartRemote, "OnServerEvent"):Fire(alice)
+        advance(0)
+        signalFor(selectRemote, "OnServerEvent"):Fire(alice, 1)
+        advance(0)
+        advance(Config.LANDING_SECONDS + 0.01)
+        return state().phase == "playing"
+    end
+    check(newGameAtPad1(), "결과 화면에서 재시작해 새 게임 playing")
+    local baseO = Workspace.Base
+    -- Bob은 착륙선 안에 있다 (다른 플레이어 산소는 영향 없음 확인용)
+    local bobModel = Instance.new("Model")
+    bobModel.Name = "BobCharacter"
+    local bobRoot = Instance.new("Part")
+    bobRoot.Name = "HumanoidRootPart"
+    bobRoot.CFrame = baseO.Lander.OxygenZone.CFrame
+    bobRoot.Parent = bobModel
+    local bobHumanoid = Instance.new("Humanoid")
+    bobHumanoid.Health = 100
+    bobHumanoid.Parent = bobModel
+    bobModel.PrimaryPart = bobRoot
+    bobModel.Parent = Workspace
+    bob.Character = bobModel
+    local aliceRoot = alice.Character.HumanoidRootPart
+    aliceRoot.CFrame = CFrame.new(baseO:GetPivot().Position + Vector3.new(0, 3, 200))
+    local before = state()
+    local overs = countSent("GameOver")
+    advance(30)
+    check(state().phase == "playing", "산소가 남아 있는 동안(30초)은 계속")
+    advance(31)
+    local oxygenOver = lastSent("GameOver")
+    check(
+        state().phase == "lost"
+            and countSent("GameOver") == overs + 1
+            and oxygenOver.args[1].won == false
+            and oxygenOver.args[1].reason == string.format(Config.TEXTS.endOxygen, "Alice"),
+        "산소 0이면 즉시 실패: '"
+            .. tostring(oxygenOver and oxygenOver.args[1].reason)
+            .. "'"
+    )
+    check(
+        state().oxygenDeaths == before.oxygenDeaths and oxygenOver.args[1].day == state().day,
+        "산소 고갈 실패는 구조 페널티와 통계 없이 그날로 끝남 (day "
+            .. tostring(oxygenOver.args[1].day)
+            .. ")"
+    )
+    local bobOxygen = nil
+    for i = #sent, 1, -1 do
+        if sent[i].name == "OxygenUpdate" and sent[i].target == bob then
+            bobOxygen = sent[i].args[1]
+            break
+        end
+    end
+    check(
+        bobOxygen == Config.OXYGEN.max,
+        "착륙선 안의 Bob 산소는 영향 없음 (" .. tostring(bobOxygen) .. ")"
+    )
+    check(playedSound("oxygen_rescue"), "산소 고갈 효과음")
+    -- 재시작하면 산소가 다시 가득 차서 정상 진행, 다시 0이 되면 또 실패 (아래 [퇴장]은 결과 화면에서 시작)
+    check(newGameAtPad1(), "산소 고갈 실패 뒤 재시작 정상")
+    aliceRoot = alice.Character.HumanoidRootPart
+    aliceRoot.CFrame = CFrame.new(Workspace.Base:GetPivot().Position + Vector3.new(0, 3, 200))
+    advance(30)
+    check(
+        state().phase == "playing",
+        "재시작 뒤 산소는 다시 가득 (30초 야외에도 계속)"
+    )
+    advance(31)
+    check(state().phase == "lost", "다시 산소 0이면 실패")
+    bob.Character = nil
+end
+
 print("[퇴장]")
 local function leave(player)
     signalFor(PlayersService, "PlayerRemoving"):Fire(player)
@@ -4334,6 +4478,11 @@ advance(0)
 local kitGrey = ServerStorage:FindFirstChild("BaseKit")
 local kitImport = ServerStorage2:FindFirstChild("BaseKit")
 check(kitImport ~= nil, "KitImports로 BaseKit 생성")
+do
+    -- 메시 착륙선(Visual)에서도 유도등 링이 외형 중심과 동심이고 모두 외형 밖
+    local ringOk, why = guideRingCheck(kitImport)
+    check(ringOk, "KitImports 메시 착륙선 유도등 링 동심, 외형 밖 (" .. why .. ")")
+end
 do
     local skies = 0
     for _, child in dm2:GetService("Lighting"):GetChildren() do

@@ -858,6 +858,23 @@ return function(t)
         end
     )
 
+    t.test(
+        "finishGame: 하루 도중 실패(산소 고갈)는 지금 날짜로 끝낸다",
+        function()
+            local s = playingState(1)
+            s.day = 12
+            t.eq(Simulation.finishGame(s, Config, "lost").day, 11, "DayTick 실패는 끝낸 날")
+            local mid = Simulation.finishGame(s, Config, "lost", true)
+            t.eq(mid.day, 12, "하루 도중이면 그날")
+            t.eq(mid.phase, "lost")
+            t.eq(
+                mid.oxygenDeaths,
+                s.oxygenDeaths,
+                "산소 고갈 실패는 통계를 바꾸지 않음"
+            )
+        end
+    )
+
     -- 현실적 플레이어 봇 (GDD 4절 밸런스 검증 메모, 2026-10-18 매장량과 전력 제약 반영) -----------
     -- 하루에 한 가지 행동만 한다. 우선순위:
     --   0) 기지에 있고 탱크에 물이 남아 있으면 하역 (행동 소모 없음, 전력이 모자라면 처리 가능한 만큼)

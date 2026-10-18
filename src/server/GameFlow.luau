@@ -78,9 +78,9 @@ local handlers: LandingSite.Handlers = {
     onPlaying = onPlaying,
 }
 
-local function endGame(result: Simulation.EndResult, reason: string)
+local function endGame(result: Simulation.EndResult, reason: string, midDay: boolean?)
     GameClock.stop()
-    local finished = Simulation.finishGame(ResourceState.get(), Config, result)
+    local finished = Simulation.finishGame(ResourceState.get(), Config, result, midDay)
     ResourceState.set(finished)
     refreshPrompts(nil)
     ResourceState.publish()
@@ -267,6 +267,12 @@ function GameFlow.start()
     RoverRecovery.init()
     RoverBattery.init()
     GameClock.onDayTick(onDayTick)
+    -- 산소 0은 즉시 실패 (하루 도중이므로 지금 날짜로 끝낸다)
+    Oxygen.setDepletedHandler(function(player: Player)
+        if ResourceState.get().phase == "playing" then
+            endGame("lost", string.format(Config.TEXTS.endOxygen, player.DisplayName), true)
+        end
+    end)
 
     Remotes.get("SetSpeed").OnServerEvent:Connect(onSetSpeed)
     Remotes.get("RequestRestart").OnServerEvent:Connect(onRequestRestart)

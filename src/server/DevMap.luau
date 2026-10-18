@@ -216,7 +216,8 @@ local BASE_LAYOUT = {
     },
     guide = {
         count = 12,
-        radius = 12, -- 착륙선 중심에서
+        radius = 12, -- 최소 반지름 (착륙선 외형 중심에서)
+        clearance = 4, -- 반지름 >= 외형 반폭 + 이 값
         diameter = 0.8,
         thickness = 0.04,
         raise = 0.02, -- 윗면 = 바닥 + 이 값 (거의 묻힘)
@@ -228,10 +229,8 @@ local BASE_LAYOUT = {
         steadyTransparency = 0.4, -- 연출 뒤 은은하게 고정
     },
     line = {
-        width = 2,
         thickness = 0.05,
         raise = 0.03, -- 띠 윗면 = 바닥 + 이 값 (아래는 바닥 속)
-        margin = 1.5, -- 대상 파트 경계에서 띠 끝까지 (프롬프트 파트를 가리지 않게)
     },
     lane = {
         width = 4, -- 로버 동선 (충전 패드 -> 앞쪽 경사로)
@@ -2530,32 +2529,6 @@ local function surfaceY(rect: LayoutRect, x: number, z: number): number
     return rect.top
 end
 
--- 점 from에서 to로 가는 선이 상자(lo, hi를 margin만큼 키운 것)에 들어가는 점 (xz 평면). 못 들어가면 to
-local function entryPoint(
-    from: Vector3,
-    to: Vector3,
-    lo: Vector3,
-    hi: Vector3,
-    margin: number
-): Vector3
-    local d = to - from
-    local tEnter = 0
-    for _, axis in { "X", "Z" } do
-        local o = (from :: any)[axis]
-        local dir = (d :: any)[axis]
-        local a, b = (lo :: any)[axis] - margin, (hi :: any)[axis] + margin
-        if math.abs(dir) < 1e-9 then
-            if o < a or o > b then
-                return to
-            end
-        else
-            local t1, t2 = (a - o) / dir, (b - o) / dir
-            tEnter = math.max(tEnter, math.min(t1, t2))
-        end
-    end
-    return from + d * math.clamp(tEnter, 0, 1)
-end
-
 -- 바닥 띠 하나 (a -> b, 키트 좌표). 착륙 패드 경계에서 나눠 각 조각을 그 자리 바닥 높이에 놓는다
 local function floorStrip(
     parent: Instance,
@@ -2648,24 +2621,6 @@ local function boxOf(inst: Instance?, frame: CFrame): (Vector3?, Vector3?)
     return lo, hi
 end
 
--- 두 상자를 잇는 바닥 띠: 각 상자 경계(+ margin)에서 끊는다
-local function linkBoxes(
-    parent: Instance,
-    frame: CFrame,
-    rect: LayoutRect,
-    loA: Vector3,
-    hiA: Vector3,
-    loB: Vector3,
-    hiB: Vector3
-)
-    local l = BASE_LAYOUT.line
-    local ca = (loA + hiA) / 2
-    local cb = (loB + hiB) / 2
-    local a = entryPoint(cb, ca, loA, hiA, l.margin)
-    local b = entryPoint(ca, cb, loB, hiB, l.margin)
-    floorStrip(parent, frame, rect, a, b, l.width, "FloorLine", COLORS.floorLine)
-end
-
 -- 판 바깥 소품 하나의 바닥 중심 (키트 좌표, 지면 높이)
 local function propPoint(
     rect: LayoutRect,
@@ -2690,6 +2645,60 @@ local function propPoint(
         groundY,
         rect.maxZ + spec.out
     )
+end
+
+-- 착륙선 외형 바운딩 박스 (키트 좌표): Visual(메시)이 있으면 그것, 없으면 보이는 파트 중
+-- 콘솔, 안테나, 레이더, 출입 구조(Entry), 판정용 표지(SpawnPoint, OxygenZone)를 뺀 것 (그레이박스 오두막)
+local LANDER_NON_VISUAL = {
+    RoverConsole = true,
+    ConsolePanel = true,
+    ConsoleAntenna = true,
+    RoofAntenna = true,
+    GroundRadar = true,
+    Entry = true,
+    SpawnPoint = true,
+    OxygenZone = true,
+}
+local function landerVisualBox(lander: Instance?, frame: CFrame): (Vector3?, Vector3?)
+    if not lander then
+        return nil, nil
+    end
+    local visual = lander:FindFirstChild("Visual")
+    if visual then
+        return boxOf(visual, frame)
+    end
+    local lo, hi = nil, nil
+    for _, d in lander:GetDescendants() do
+        if d:IsA("BasePart") and d.Transparency < 0.99 then
+            local skip = false
+            local node: Instance? = d
+            while node and node ~= lander do
+                if LANDER_NON_VISUAL[node.Name] then
+                    skip = true
+                    break
+                end
+                node = node.Parent
+            end
+            if not skip then
+                local plo, phi = KitImports.boundsIn(d, frame)
+                lo = if lo
+                    then Vector3.new(
+                        math.min(lo.X, plo.X),
+                        math.min(lo.Y, plo.Y),
+                        math.min(lo.Z, plo.Z)
+                    )
+                    else plo
+                hi = if hi
+                    then Vector3.new(
+                        math.max(hi.X, phi.X),
+                        math.max(hi.Y, phi.Y),
+                        math.max(hi.Z, phi.Z)
+                    )
+                    else phi
+            end
+        end
+    end
+    return lo, hi
 end
 
 -- 경계등, 착륙 유도등, 바닥 동선, (그레이박스면) 판 바깥 소품. 키트 내부 배치는 건드리지 않는다
@@ -2745,14 +2754,21 @@ local function buildBaseLayout(kit: Model, withProps: boolean)
     -- 2) 착륙 유도등: 착륙선 중심 둘레 바닥에 묻은 Neon 원판 (BaseLights가 착륙 연출 동안 체이스)
     local g = BASE_LAYOUT.guide
     local lander = kit:FindFirstChild("Lander")
-    local landerLo, landerHi = boxOf(lander, frame)
+    local landerLo, landerHi = landerVisualBox(lander, frame)
     if landerLo and landerHi then
         local guides = makeModel("GuideLights", layout)
+        -- 링 중심 = 착륙선 외형 바운딩 박스 중심 (x, z). 반지름 = max(기본, 외형 반폭 + 여유, 반대각선 + 1)
         local center = (landerLo + landerHi) / 2
+        local halfX, halfZ = (landerHi.X - landerLo.X) / 2, (landerHi.Z - landerLo.Z) / 2
+        local radius = math.max(
+            g.radius,
+            math.max(halfX, halfZ) + g.clearance,
+            math.sqrt(halfX * halfX + halfZ * halfZ) + 1
+        )
         for i = 1, g.count do
             local angle = 2 * math.pi * (i - 1) / g.count
-            local x = center.X + math.cos(angle) * g.radius
-            local z = center.Z + math.sin(angle) * g.radius
+            local x = center.X + math.cos(angle) * radius
+            local z = center.Z + math.sin(angle) * radius
             local y = surfaceY(rect, x, z) + g.raise - g.thickness / 2
             local disc = makePart({
                 name = "GuideLight",
@@ -2769,43 +2785,8 @@ local function buildBaseLayout(kit: Model, withProps: boolean)
         end
     end
 
-    -- 3) 바닥 동선: 착륙선 문 -> 패널 밭 입구 패드, 착륙선 -> PadA -> PadB -> PadC, 충전 패드 -> 앞쪽 경사로
+    -- 3) 바닥 동선: 로버 동선(충전 패드 -> 앞쪽 경사로)만. 사람 길 띠는 2026-10-18 사용자 피드백으로 뺐다
     local lines = makeModel("FloorLines", layout)
-    local l = BASE_LAYOUT.line
-    local field = kit:FindFirstChild("SolarField")
-    local installLo, installHi = boxOf(field and field:FindFirstChild("InstallPad"), frame)
-    local door: Instance? = nil
-    if lander then
-        for _, d in lander:GetDescendants() do
-            if d.Name == "Door" and d:IsA("BasePart") and d.Parent and d.Parent.Name == "Entry" then
-                door = d
-                break
-            end
-        end
-    end
-    local doorLo, doorHi = boxOf(door, frame)
-    if doorLo and doorHi and installLo and installHi then
-        -- 문 앞(-Z) margin에서 시작해 설치 패드 경계(+ margin)에서 끝
-        local start = Vector3.new((doorLo.X + doorHi.X) / 2, 0, doorLo.Z - l.margin)
-        local target = (installLo + installHi) / 2
-        local finish = entryPoint(start, target, installLo, installHi, l.margin)
-        floorStrip(lines, frame, rect, start, finish, l.width, "FloorLine", COLORS.floorLine)
-    end
-    local pads = kit:FindFirstChild("ModulePads")
-    local chain: { { Vector3 } } = {}
-    if landerLo and landerHi then
-        table.insert(chain, { landerLo, landerHi })
-    end
-    for _, id in Config.MODULE_ORDER do
-        local padModel = pads and pads:FindFirstChild("Pad" .. id)
-        local lo, hi = boxOf(padModel and padModel:FindFirstChild("Pad"), frame)
-        if lo and hi then
-            table.insert(chain, { lo, hi })
-        end
-    end
-    for i = 1, #chain - 1 do
-        linkBoxes(lines, frame, rect, chain[i][1], chain[i][2], chain[i + 1][1], chain[i + 1][2])
-    end
     local chargeLo, chargeHi = boxOf(kit:FindFirstChild("ChargePad"), frame)
     if chargeLo and chargeHi then
         local start = Vector3.new((chargeLo.X + chargeHi.X) / 2, 0, chargeLo.Z)
