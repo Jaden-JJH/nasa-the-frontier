@@ -1,7 +1,7 @@
 --!strict
 -- 승리 기록 랭킹 순수 로직 (2026-10-19 16차). Roblox API를 쓰지 않는다 (Lune 단위 테스트 대상)
 -- 정렬: 소요 일수 오름차순, 같으면 먼저 세운 기록(at 오름차순)이 앞.
--- 서버 Records(DataStore 병합과 메모리 대체), 클라이언트 ResultUI와 TitleUI, 기지 기록판이 같이 쓴다.
+-- 서버 Records(DataStore 병합과 메모리 대체)와 클라이언트 ResultUI가 같이 쓴다 (17차부터 결과 화면에만 표시).
 
 -- 아래 typeof(require(...))는 타입 검사 전용이며 실행 시에는 평가되지 않는다.
 type Config = typeof(require("./Config"))

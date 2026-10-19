@@ -683,23 +683,6 @@ function rec.lastRecords(target)
     end
     return nil
 end
--- 기지 기록판 글자: 줄 목록, 상태 문구, 판 파트
-function rec.board(baseModel)
-    local board = baseModel and baseModel:FindFirstChild("RecordBoard")
-    local gui = board and board:FindFirstChild("RecordGui")
-    local frame = gui and gui:FindFirstChild("Root")
-    if not frame then
-        return nil, nil, board
-    end
-    local lines = {}
-    for i = 1, Config.RECORDS.showTop do
-        local label = frame:FindFirstChild("Line" .. i)
-        lines[i] = if label then label.Text else nil
-    end
-    local status = frame:FindFirstChild("Status")
-    return lines, status and status.Text, board
-end
-
 check(Workspace:FindFirstChild("LandingPads") ~= nil, "DevMap: LandingPads 생성")
 check(#Workspace.LandingPads:GetChildren() == 4, "DevMap: 패드 4개")
 check(
@@ -1266,8 +1249,8 @@ local function runTerrainChecks()
     )
     check(
         terrainInstance:GetMaterialColor(roblox.Enum.Material.Sand)
-            == roblox.Color3.fromRGB(110, 108, 104),
-        "Sand 재질 색 = 달 표토 회색 (110, 108, 104)"
+            == roblox.Color3.fromRGB(150, 148, 144),
+        "Sand 재질 색 = 달 표토 회색 (150, 148, 144)"
     )
     check(
         Workspace.DevTerrain:FindFirstChild("MoonGround") == nil,
@@ -1804,8 +1787,8 @@ local function runTerrainChecks()
         string.format("2배 크기 바위 %d개 (%.0f%%)", big, big / #boulders * 100)
     )
     check(
-        boulders[1].Color == roblox.Color3.fromRGB(90, 88, 86),
-        "그레이박스 바위 회색 (90, 88, 86)"
+        boulders[1].Color == roblox.Color3.fromRGB(118, 116, 114),
+        "그레이박스 바위 회색 (118, 116, 114)"
     )
     -- 얼음 지점 (그레이박스)
     local ice1 = Workspace.IceSites.Ice1
@@ -1842,13 +1825,15 @@ local function runTerrainChecks()
         "ClockTime 0, 위도 70 (광원 고도 20도)"
     )
     check(
-        lighting.Brightness == 6
+        lighting.Brightness == 7
             and lighting.ShadowSoftness == 0
             and lighting.GlobalShadows == true
             and lighting.EnvironmentDiffuseScale == 0
             and lighting.FogEnd >= 1e5
-            and lighting.Ambient == roblox.Color3.fromRGB(40, 40, 48),
-        "달 조명: 밝기 6, 그림자 부드러움 0, 낮은 주변광, 안개 1e5"
+            and lighting.Ambient == roblox.Color3.fromRGB(75, 76, 86)
+            and lighting.OutdoorAmbient == roblox.Color3.fromRGB(120, 122, 138)
+            and math.abs(lighting.ExposureCompensation - 0.6) < 1e-6,
+        "달 조명: 밝기 7, 그림자 부드러움 0, 주변광 (75,76,86), 노출 0.6, 안개 1e5"
     )
     local planet = Workspace:FindFirstChild("Decor") and Workspace.Decor:FindFirstChild("Planet")
     local sphere = planet and planet:FindFirstChild("Sphere")
@@ -2114,7 +2099,7 @@ check(
     ).Magnitude < 0.01,
     "Origin이 Pad1 윗면에 놓임"
 )
--- 기여도와 기록 (16차): 입장 때 Records(Lune에는 DataStore가 없어 offline), 기지 기록판 생성과 자리
+-- 기여도와 기록 (16차): 입장 때 Records(Lune에는 DataStore가 없어 offline)
 do
     local toBob = rec.lastRecords(bob)
     check(
@@ -2124,75 +2109,6 @@ do
             and toBob.submitted == false
             and toBob.rank == nil,
         "입장 때 Records: 저장소 없음이면 offline, 빈 목록"
-    )
-    local lines, statusText, board = rec.board(base)
-    local spec = Config.RECORDS
-    check(
-        board ~= nil
-            and board:IsA("Part")
-            and board.Anchored
-            and math.abs(board.Size.X - 10) < 1e-6
-            and math.abs(board.Size.Y - 6) < 1e-6,
-        "기지 기록판 RecordBoard (Anchored, 10 x 6)"
-    )
-    check(
-        lines ~= nil
-            and lines[1] == Config.TEXTS.recordsEmpty
-            and lines[2] == ""
-            and #lines == spec.showTop
-            and statusText == Config.TEXTS.recordsOffline,
-        "기록판: 빈 목록 문구와 '저장소 연결 안 됨'"
-    )
-    -- 자리: 판 안, 정면 경사로 차선(x -5..5) 밖, 충전 패드, 물탱크, 패널 설치대, 착륙선과 겹치지 않음, 문을 바라봄
-    local placeOk, why = true, "ok"
-    local avoid = {
-        base.ChargePad,
-        base.WaterTank,
-        base.SolarField.InstallPad,
-        base.Lander.Floor,
-        base.Rover.Chassis,
-    }
-    local function toLocal(point)
-        return origin.CFrame:PointToObjectSpace(point)
-    end
-    local apron = base:FindFirstChild("Apron")
-    for _, sx in { -1, 1 } do
-        for _, sz in { -1, 1 } do
-            local corner = board.CFrame * Vector3.new(sx * (board.Size.X / 2 + 0.3), 0, sz * 0.4)
-            local p = toLocal(corner)
-            if math.abs(p.X) < 5 + 2 then
-                placeOk, why = false, string.format("경사로 차선과 가까움 x %.1f", p.X)
-            end
-            if
-                apron
-                and not insidePart(apron, Vector3.new(corner.X, apron.CFrame.Position.Y, corner.Z))
-            then
-                placeOk, why = false, string.format("판 밖 (%.1f, %.1f)", p.X, p.Z)
-            end
-            for _, part in avoid do
-                local flat = Vector3.new(corner.X, part.CFrame.Position.Y, corner.Z)
-                if insidePart(part, flat) then
-                    placeOk, why = false, "겹침 " .. part.Name
-                end
-            end
-        end
-    end
-    local door = base.Lander.Entry.Door.CFrame.Position
-    local toDoor =
-        Vector3.new(door.X - board.CFrame.Position.X, 0, door.Z - board.CFrame.Position.Z).Unit
-    local look = board.CFrame.LookVector
-    if Vector3.new(look.X, 0, look.Z).Unit:Dot(toDoor) < 0.99 then
-        placeOk, why = false, "문을 바라보지 않음"
-    end
-    local bottom = toLocal(board.CFrame.Position).Y - board.Size.Y / 2
-    check(
-        placeOk and bottom > -1,
-        string.format(
-            "기록판 자리: 판 앞쪽 오른편, 동선과 시설을 피하고 문을 바라봄 (%s, 중심 %.1f, %.1f)",
-            why,
-            toLocal(board.CFrame.Position).X,
-            toLocal(board.CFrame.Position).Z
-        )
     )
 end
 check(
@@ -4432,19 +4348,6 @@ do
         "승리 뒤 Records: submitted, 역대 1위, offline, 일수, 착륙지, 승무원 기여 순"
     )
     check(info.rank == nil, "GameOver에는 rank를 넣지 않음")
-    local lines, statusText = rec.board(Workspace.Base)
-    check(
-        lines ~= nil
-            and string.find(
-                lines[1],
-                string.format("1위  %d일  Shackleton Rim", info.day),
-                1,
-                true
-            ) == 1
-            and lines[2] == ""
-            and statusText == Config.TEXTS.recordsOffline,
-        "기지 기록판 갱신: '" .. tostring(lines and lines[1]) .. "'"
-    )
 end
 local dayAtWin = state().day
 advance(Config.DAY_SECONDS * 3)
@@ -4594,12 +4497,6 @@ do
     check(
         rec.field("Alice", "repairs") == 0,
         "기여도: 거절된 수리(멀쩡한 로버)는 세지 않음"
-    )
-    -- 재시작 뒤 새 기지에도 기록판, 지난 승리 기록 1줄
-    local lines = rec.board(base2)
-    check(
-        lines ~= nil and string.find(lines[1], "1위", 1, true) == 1 and lines[2] == "",
-        "새 기지 기록판에 지난 승리 기록"
     )
     rec.recordsSent = countSent("Records")
 end
@@ -5454,7 +5351,7 @@ check(
 )
 check(
     allParts(importRocks[1], function(p)
-        return p.Color == roblox.Color3.fromRGB(90, 88, 86)
+        return p.Color == roblox.Color3.fromRGB(118, 116, 114)
             and p.Material == roblox.Enum.Material.Basalt
     end),
     "바위 메시도 회색 Basalt로 통일"

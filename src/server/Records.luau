@@ -11,7 +11,6 @@ local Config = require(ReplicatedStorage.Shared.Config)
 local Ranking = require(ReplicatedStorage.Shared.Ranking)
 local Remotes = require(ReplicatedStorage.Shared.Remotes)
 local Types = require(ReplicatedStorage.Shared.Types)
-local ServerUtil = require(script.Parent.ServerUtil)
 
 local Records = {}
 
@@ -22,7 +21,6 @@ local status: Types.RecordsStatus = "loading"
 local loaded = false
 local initialized = false
 local store: any = nil -- GlobalDataStore. nil이면 메모리 목록만 쓴다
-local listeners: { () -> () } = {}
 
 -- 서비스와 저장소 얻기. 실패는 조용히 nil (Lune 에뮬레이터와 게시 안 한 플레이스)
 local function getStore(): any
@@ -79,7 +77,7 @@ function Records.payload(rank: number?, submitted: boolean?): Types.RecordsPaylo
     }
 end
 
--- 현재 목록과 상태 (기지 기록판용)
+-- 현재 목록과 상태
 function Records.get(): ({ Ranking.Entry }, Types.RecordsStatus)
     return entries, status
 end
@@ -88,16 +86,8 @@ function Records.isLoaded(): boolean
     return loaded
 end
 
--- 목록이 바뀌면 부를 함수 (RecordBoard.refresh)
-function Records.onChanged(fn: () -> ())
-    table.insert(listeners, fn)
-end
-
 local function changed(rank: number?, submitted: boolean)
     Remotes.get("Records"):FireAllClients(Records.payload(rank, submitted))
-    for _, fn in listeners do
-        ServerUtil.safeCall("Records 갱신", fn)
-    end
 end
 
 -- 입장한 플레이어에게 현재 목록. 아직 불러오는 중이면 로드가 끝날 때 전원에게 보낸다

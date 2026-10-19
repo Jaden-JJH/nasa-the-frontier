@@ -26,6 +26,7 @@ local RoverBoost = require(script.Parent.RoverBoost)
 local BoostFX = require(script.Parent.BoostFX)
 local TipUI = require(script.Parent.TipUI)
 local FactUI = require(script.Parent.FactUI)
+local SettingsUI = require(script.Parent.SettingsUI)
 
 -- 기본 체력바는 산소 바와 혼동되므로 끈다 (실패해도 무시)
 pcall(function()
@@ -76,6 +77,7 @@ local function applyScreens()
     HUD.setVisible(playing or phase == "won" or phase == "lost")
     OxygenBar.setVisible(playing)
     RadarUI.setEnabled(playing)
+    SettingsUI.setVisible(playing)
 
     if phase ~= "landing" then
         LandingCamera.stop()
@@ -111,6 +113,7 @@ RoverBoost.init(ctx)
 BoostFX.init(ctx)
 TipUI.init(ctx)
 FactUI.init(ctx)
+SettingsUI.init(ctx)
 DockSignUI.init(ctx)
 
 remotes.StateUpdate.OnClientEvent:Connect(function(state)
@@ -154,8 +157,7 @@ remotes.GameOver.OnClientEvent:Connect(function(result)
     SoundFX.onGameOver(result)
 end)
 
--- 승리 기록 상위 목록과 이번 순위 (16차): 타이틀 명예의 전당, 결과 화면 배지와 목록
+-- 승리 기록 상위 목록과 이번 순위 (16차): 결과 화면 배지와 목록에만 쓴다 (17차)
 remotes.Records.OnClientEvent:Connect(function(payload)
-    TitleUI.setRecords(payload)
     ResultUI.setRecords(payload)
 end)

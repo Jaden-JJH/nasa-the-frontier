@@ -50,6 +50,7 @@ local shown = {} -- { [key] = true } 큐에 넣은 사실
 local queue = {} -- 사실 key 목록
 local seen = {} -- 실제로 표시한 사실 제목(표시 순서)
 local suppressed = true
+local enabled = true -- 체크 패널 설정(SettingsUI). 꺼도 큐와 본 기록은 유지
 local generation = 0 -- reset이나 억제 때 현재 카드와 예약된 push를 끊기 위한 값
 local closeRequested = false
 local lastEnd = -math.huge
@@ -115,6 +116,17 @@ function FactUI.setSuppressed(value)
     suppressed = value
     if value then
         clearQueue()
+    end
+end
+
+-- 교육 사실 카드 표시 켜고 끄기. 끄면 지금 카드를 접고(닫기 버튼과 같은 경로) 큐는 둔 채 표시하지 않는다. 켜면 큐부터 재개
+function FactUI.setEnabled(value)
+    if value == enabled then
+        return
+    end
+    enabled = value
+    if not value and group and group.Visible then
+        closeRequested = true
     end
 end
 
@@ -189,7 +201,7 @@ end
 local function worker()
     while true do
         task.wait(0.25)
-        if not suppressed and #queue > 0 and os.clock() - lastEnd >= MIN_GAP then
+        if not suppressed and enabled and #queue > 0 and os.clock() - lastEnd >= MIN_GAP then
             local key = table.remove(queue, 1)
             local fact = Facts.byKey[key]
             if fact then

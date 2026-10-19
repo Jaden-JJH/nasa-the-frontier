@@ -1,8 +1,8 @@
 --!nonstrict
 -- 상황별 일회성 Tip 카드. 토스트(우상단, 사건 알림)와 미션 문구(상단 중앙, 목표)와 달리
 -- 우측 하단에 뜬다(14차, 사용자 지시). 아래에서 올라오며 나타나고 여러 줄은 위로 자란다.
--- PC: 오른쪽 16, 아래 16, 폭 360(가상 좌표, Layout 배율로 함께 커진다. 1080p는 1.25배).
--- 터치/낮은 화면(compact): 오른쪽 12px, 아래 190px(부스터와 점프 버튼 위, 실제 px 기준).
+-- PC: 오른쪽 16, 아래 56(17차: 아래 12에 SettingsUI 체크 패널 높이 32가 있어 그 바로 위), 폭 360(가상 좌표, Layout 배율로 함께 커진다. 1080p는 1.25배).
+-- 터치/낮은 화면(compact): 오른쪽 12px, 아래 230px(체크 패널은 아래 190px이라 그 바로 위, 부스터와 점프 버튼 위, 실제 px 기준).
 -- 한 번에 하나, 대기열 순차 표시, 표시 사이 최소 3초 간격, 세션당 각 Tip 1회(재시작하면 초기화).
 -- 문구는 Config.TIPS. 트리거는 전부 클라이언트 측(StateUpdate, OxygenUpdate, 탑승 이벤트).
 -- 15차: 첫 폭풍 예고(state.event.kind == "solarStorm")에 storm, 첫 모듈 손상(modules.X.damaged)에 moduleDamage.
@@ -25,9 +25,10 @@ local FADE_OUT = 0.5
 local MIN_GAP = 3
 local RISE = 24 -- 등장 시 아래에서 올라오는 거리(px)
 local SINK = 12 -- 퇴장 시 아래로 가라앉는 거리(px)
-local PC_MARGIN = 16 -- PC: 오른쪽, 아래 여백
+local PC_MARGIN = 16 -- PC: 오른쪽 여백(폭 계산에도 쓴다)
+local PC_BOTTOM = 56 -- PC: 아래 여백 = 체크 패널 아래 12 + 높이 32 + 간격 12
 local COMPACT_RIGHT = 12 -- 실제 px (부스터 버튼은 배율을 안 쓰므로 px로 맞춘다)
-local COMPACT_BOTTOM = 190 -- 실제 px. 부스터 버튼(하단 110~174) 위 + 여유. 점프 버튼도 이 아래에 있다
+local COMPACT_BOTTOM = 230 -- 실제 px. 체크 패널(아래 190, 높이 32) 바로 위. 부스터 버튼(하단 110~174)과 점프 버튼도 그 아래에 있다
 local COMPACT_SIDE_PAD = 24 -- 실제 px. compact 폭 = min(360, 뷰포트 폭 - 24)
 local FALLBACK_VIEWPORT = Vector2.new(1280, 720)
 local TIP_SOUND_VOLUME = 0.3
@@ -47,6 +48,7 @@ local card
 local shown = {} -- { [key] = true } 큐에 넣은 Tip
 local queue = {}
 local suppressed = true
+local enabled = true -- 체크 패널 설정(SettingsUI). 꺼도 큐와 본 기록은 유지
 local generation = 0 -- reset이나 억제 때 현재 카드를 끊기 위한 값
 local lastEnd = -math.huge
 
@@ -114,6 +116,17 @@ function TipUI.setSuppressed(value)
     end
 end
 
+-- Tip 표시 켜고 끄기. 끄면 지금 카드를 즉시 접고(세대 끊기) 큐는 둔 채 표시하지 않는다. 켜면 큐부터 재개
+function TipUI.setEnabled(value)
+    if value == enabled then
+        return
+    end
+    enabled = value
+    if not value then
+        generation += 1
+    end
+end
+
 -- 대기 단계 포함 취소 가능한 대기
 local function waitFor(seconds, myGeneration)
     local deadline = os.clock() + seconds
@@ -140,7 +153,7 @@ local function cardLayout()
             COMPACT_RIGHT / scale,
             COMPACT_BOTTOM / scale
     end
-    return math.min(CARD_WIDTH, virtualWidth - PC_MARGIN * 2), PC_MARGIN, PC_MARGIN
+    return math.min(CARD_WIDTH, virtualWidth - PC_MARGIN * 2), PC_MARGIN, PC_BOTTOM
 end
 
 local function cardPosition(right, bottom, dy)
@@ -173,7 +186,7 @@ end
 local function worker()
     while true do
         task.wait(0.25)
-        if not suppressed and #queue > 0 and os.clock() - lastEnd >= MIN_GAP then
+        if not suppressed and enabled and #queue > 0 and os.clock() - lastEnd >= MIN_GAP then
             local text = table.remove(queue, 1)
             local myGeneration = generation
             SoundFX.playVolume("mission_advance", TIP_SOUND_VOLUME)
@@ -281,7 +294,7 @@ function TipUI.init(ctx)
         Name = "Group",
         -- 아래 끝 기준: 문구가 여러 줄이 되어도 위로만 자란다
         AnchorPoint = Vector2.new(1, 1),
-        Position = cardPosition(PC_MARGIN, PC_MARGIN, 0),
+        Position = cardPosition(PC_MARGIN, PC_BOTTOM, 0),
         Size = UDim2.fromOffset(CARD_WIDTH, 0),
         AutomaticSize = Enum.AutomaticSize.Y,
         BackgroundTransparency = 1,

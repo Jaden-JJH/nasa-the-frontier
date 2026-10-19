@@ -461,7 +461,7 @@ local Config = {
         datastoreName = "FrontierRecords",
         key = "top",
         maxEntries = 10, -- 저장하는 상위 기록 수
-        showTop = 5, -- 결과 화면, 타이틀, 기지 기록판에 보이는 줄 수
+        showTop = 5, -- 결과 화면 명예의 전당에 보이는 줄 수 (17차: 결과 화면에만 표시)
         crewNameLimit = 4, -- 기록 한 줄에 저장하는 승무원 이름 수
         crewShowNames = 2, -- 목록 한 줄에 보이는 이름 수 (나머지는 "외 n명")
         crewRows = 4, -- 결과 화면 "함께 한 일" 표의 최대 행 (GameOverInfo.crew 길이)
@@ -603,7 +603,7 @@ local Config = {
         moduleRepaired = "%s 외벽 수리 완료. 다시 정상 가동합니다",
         moduleRepairNotNeeded = "손상된 곳이 없습니다",
 
-        -- 기여도와 기록 (2026-10-19 16차). 결과 화면, 타이틀, 기지 기록판
+        -- 기여도와 기록 (2026-10-19 16차). 17차부터 결과 화면에만 표시
         recordsTitle = "명예의 전당",
         recordsEmpty = "아직 기록이 없습니다. 첫 기록을 세워 보세요",
         recordsLoading = "기록을 불러오는 중",
