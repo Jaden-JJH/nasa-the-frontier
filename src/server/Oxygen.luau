@@ -12,6 +12,7 @@ local Remotes = require(ReplicatedStorage.Shared.Remotes)
 local Contributions = require(script.Parent.Contributions)
 local Simulation = require(ReplicatedStorage.Shared.Simulation)
 local ResourceState = require(script.Parent.ResourceState)
+local RunLog = require(script.Parent.RunLog)
 local ServerUtil = require(script.Parent.ServerUtil)
 local Sfx = require(script.Parent.Sfx)
 
@@ -120,6 +121,7 @@ local function onDepleted(player: Player, record: Record, now: number)
     -- 기여도 표의 산소 고갈 (게임 종료가 표를 만들기 전에 센다)
     if ResourceState.get().phase == "playing" then
         Contributions.add(player, "deaths", 1)
+        RunLog.event("산소 고갈 (임무 실패)")
     end
     local handler = depletedHandler
     if handler then
@@ -143,6 +145,7 @@ local function onDied(player: Player)
     ResourceState.set(Simulation.applyOxygenDeath(state, Config))
     -- 결과 요약의 "산소 고갈 횟수"(oxygenDeaths)와 같은 사건이므로 기여도 표에도 센다
     Contributions.add(player, "deaths", 1)
+    RunLog.event("대원 초기화 사망 (식량, 물 감소)")
     ResourceState.notify(
         player,
         string.format(Config.TEXTS.resetPenalty, penalty.food, penalty.water),

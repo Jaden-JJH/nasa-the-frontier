@@ -13,6 +13,7 @@ local Simulation = require(ReplicatedStorage.Shared.Simulation)
 local Contributions = require(script.Parent.Contributions)
 local KitImports = require(script.Parent.KitImports)
 local ResourceState = require(script.Parent.ResourceState)
+local RunLog = require(script.Parent.RunLog)
 local ServerUtil = require(script.Parent.ServerUtil)
 local Sfx = require(script.Parent.Sfx)
 
@@ -235,6 +236,7 @@ local function onTriggered(player: Player, id: string)
     end
     ResourceState.set(newState)
     Contributions.add(player, "builds", 1)
+    RunLog.event(id .. " 착공")
     local entry = entries[id]
     Sfx.play("build_start", entry and entry.pad)
     Construction.sync(prev, newState)

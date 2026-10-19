@@ -11,6 +11,7 @@ local Config = require(ReplicatedStorage.Shared.Config)
 local Simulation = require(ReplicatedStorage.Shared.Simulation)
 local Contributions = require(script.Parent.Contributions)
 local ResourceState = require(script.Parent.ResourceState)
+local RunLog = require(script.Parent.RunLog)
 local ServerUtil = require(script.Parent.ServerUtil)
 local Sfx = require(script.Parent.Sfx)
 
@@ -182,11 +183,22 @@ local function onIceTriggered(player: Player, entry: IceEntry)
     if not roverNear(seat, entry.part) then
         return
     end
+    local before = ResourceState.get()
     local ok, newState, remaining, message, kind =
-        Simulation.fillFromDeposit(ResourceState.get(), Config, depositOf(entry))
+        Simulation.fillFromDeposit(before, Config, depositOf(entry))
     if not ok then
         ResourceState.notify(player, message, ResourceState.kind(kind))
         return
+    end
+    -- 빈 탱크에서 처음 채운 날이 원정 출발 (이어서 채우는 것은 같은 원정)
+    if before.rover.tank <= 0 and newState.rover.tank > 0 then
+        RunLog.event(
+            string.format(
+                "원정 출발 %s 얼음 %d W",
+                entry.part.Name,
+                math.floor(newState.rover.tank + 0.5)
+            )
+        )
     end
     entry.part:SetAttribute("Deposit", remaining)
     applyDepositVisual(entry)
@@ -226,6 +238,13 @@ local function onTankTriggered(player: Player)
     ResourceState.set(newState)
     -- 하역량 = 탱크에서 빠진 양 (전력이 모자라 일부만 처리하면 처리한 만큼)
     Contributions.add(player, "water", state.rover.tank - newState.rover.tank)
+    RunLog.event(
+        string.format(
+            "하역 %d W (원정 %d회째)",
+            math.floor(state.rover.tank - newState.rover.tank + 0.5),
+            newState.waterTrips
+        )
+    )
     Sfx.play("water_unload", tankPart)
     Sfx.play("water_processing", tankPart)
     WaterLoop.mirrorTank()

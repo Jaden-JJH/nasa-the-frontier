@@ -20,6 +20,7 @@ local ModulePanels = require(script.Parent.ModulePanels)
 local Oxygen = require(script.Parent.Oxygen)
 local Records = require(script.Parent.Records)
 local ResourceState = require(script.Parent.ResourceState)
+local RunLog = require(script.Parent.RunLog)
 local RoverBattery = require(script.Parent.RoverBattery)
 local RoverBoost = require(script.Parent.RoverBoost)
 local RoverDamage = require(script.Parent.RoverDamage)
@@ -97,6 +98,8 @@ local function endGame(result: Simulation.EndResult, reason: string, midDay: boo
     ResourceState.set(finished)
     refreshPrompts(nil)
     ResourceState.publish()
+    RunLog.finish(finished, result == "won", reason)
+    RunLog.printSummary()
     local chooser = LandingSite.getChooser()
     for _, player in Players:GetPlayers() do
         Contributions.ensure(player)
@@ -135,6 +138,7 @@ local function onDayTick()
     local new = Simulation.applyDay(prev, Config)
     ResourceState.set(new)
     refreshPrompts(prev)
+    RunLog.snapshot(prev, new) -- 종료 판정 전에 남겨 마지막 날도 표에 들어간다
 
     local t = Config.TEXTS
     if new.modulesStalled and not prev.modulesStalled then
@@ -175,6 +179,7 @@ local function beginNewGame(leaving: Player?)
     lastGameOver = nil
     lastWasteNoticeDay = nil
     Contributions.reset()
+    RunLog.reset()
     ResourceState.reset()
     WaterLoop.resetDeposits()
     Oxygen.resetAll()

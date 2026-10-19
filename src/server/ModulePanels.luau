@@ -20,6 +20,7 @@ local Construction = require(script.Parent.Construction)
 local KitImports = require(script.Parent.KitImports)
 local ModuleRepair = require(script.Parent.ModuleRepair)
 local ResourceState = require(script.Parent.ResourceState)
+local RunLog = require(script.Parent.RunLog)
 local ServerUtil = require(script.Parent.ServerUtil)
 local Sfx = require(script.Parent.Sfx)
 
@@ -256,6 +257,7 @@ local function onPauseTriggered(player: Player, id: string)
         return
     end
     ResourceState.set(newState)
+    RunLog.event(id .. (if newState.modules[id].paused then " 가동 중지" else " 가동 재개"))
     local panel = panels[id]
     Sfx.play(CP.toggleSound, panel and panel.part)
     ModulePanels.refresh()

@@ -11,6 +11,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Config = require(ReplicatedStorage.Shared.Config)
 local Simulation = require(ReplicatedStorage.Shared.Simulation)
 local ResourceState = require(script.Parent.ResourceState)
+local RunLog = require(script.Parent.RunLog)
 local ServerUtil = require(script.Parent.ServerUtil)
 local Sfx = require(script.Parent.Sfx)
 
@@ -67,6 +68,9 @@ local function onOccupantChanged(seat: VehicleSeat)
             string.format(Config.TEXTS.firstBoard, Config.ROVER.boostDrainMultiplier),
             "info"
         )
+    end
+    if player then
+        RunLog.once("board", "로버 첫 탑승")
     end
     -- 튜토리얼: 탑승하면 find_ice 단계로 (이미 지났으면 그대로)
     local state = ResourceState.get()

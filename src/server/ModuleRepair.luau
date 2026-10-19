@@ -10,6 +10,7 @@ local Config = require(ReplicatedStorage.Shared.Config)
 local Simulation = require(ReplicatedStorage.Shared.Simulation)
 local Contributions = require(script.Parent.Contributions)
 local ResourceState = require(script.Parent.ResourceState)
+local RunLog = require(script.Parent.RunLog)
 local Sfx = require(script.Parent.Sfx)
 
 local ModuleRepair = {}
@@ -41,6 +42,7 @@ function ModuleRepair.repair(player: Player, id: string, at: Instance?): boolean
     end
     ResourceState.set(new)
     Contributions.add(player, "repairs", 1)
+    RunLog.event(id .. " 외벽 수리")
     Sfx.play("rover_repair", at)
     ResourceState.notifyAll(message, ResourceState.kind(kind))
     return true

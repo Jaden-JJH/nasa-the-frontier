@@ -195,6 +195,7 @@ export type RecordsPayload = {
 | DevMap.lua | Workspace.LandingPads가 없으면 그레이박스 맵과 ServerStorage.BaseKit을 Part로 생성 |
 | Contributions.lua | 2026-10-19 16차 추가. 플레이어별 기여도(서버 메모리, UserId 키, 나간 플레이어도 유지). 각 시스템 성공 지점에서 add(player, field, amount). reset()은 beginNewGame. crew(limit)은 GameOverInfo.crew, names(limit)은 승리 기록 승무원 |
 | Records.lua | 2026-10-19 16차 추가. DataStore(RECORDS.datastoreName "FrontierRecords", 키 "top")에 상위 10개. 서버 시작 때 1회 GetAsync, 승리 때 submit -> UpdateAsync 병합 후 순위 계산. 모든 호출은 task.spawn 안에서 pcall + 1회 재시도(RECORDS.retryDelay 1초). 서비스가 없거나 실패하면 서버 메모리 목록으로 전환(status offline). 프롬프트 처리 함수 안에서 yield하지 않는다 |
+| RunLog.lua | 2026-10-19 20차 보조 추가. 밸런스 조정용 플레이 기록(서버 메모리, 게임마다 reset). snapshot(prev, new)는 GameFlow.onDayTick이 DayTick 직후(종료 판정 전)에 부르며 하루 한 줄(E, W, F, 패널, A/B/C 한 글자 L/V/B/A/P/D, 탱크, 원정, 부족일, 이벤트 -/W/A/M)을 쌓고 완공, 폭풍, 운석은 prev/new 비교로 사건에 넣는다. event(text), once(key, text)는 각 서버 모듈 성공 지점에서 부른다(첫 패널, 착공, 첫 탑승, 원정 출발, 하역, 가동 중지/재개, 외벽 수리, 산소 고갈). 10일마다 `[RunLog] D10 ...` 한 줄 print, endGame에서 finish + printSummary로 머리말, 사건, 10일 간격 표(60줄 이내)를 한 번에 print. summaryText()는 같은 문자열을 돌려준다(테스트용). 간격과 상한은 RunLog.lua 상단 상수 |
 
 `src/shared/Simulation.lua`는 Roblox API를 전혀 쓰지 않는 순수 함수 모음이다 (Lune 테스트 대상):
 - `Simulation.dailyProduction(state, config) -> energy, water, food` (패널, Farm)

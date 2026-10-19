@@ -4537,6 +4537,32 @@ check(
     "결과 10초 안 재시작 거부 (" .. lastSent("Notify").args[1] .. ")"
 )
 print("        GameOver: day " .. over.args[1].day .. ", reason " .. over.args[1].reason)
+-- 플레이 기록 RunLog (20차): 스냅샷 수, 사건, 요약 문자열
+do
+    local RunLog = loadModule(Server:FindFirstChild("RunLog"))
+    check(
+        RunLog.snapshotCount() == state().day,
+        "RunLog: 스냅샷 수 = 지난 날 수 (" .. RunLog.snapshotCount() .. ")"
+    )
+    local joined = table.concat(RunLog.eventLines(), "\n")
+    check(
+        string.find(joined, "첫 패널 설치", 1, true) ~= nil
+            and string.find(joined, "A 착공", 1, true) ~= nil
+            and string.find(joined, "C 완공", 1, true) ~= nil
+            and string.find(joined, "원정 출발", 1, true) ~= nil
+            and string.find(joined, "하역", 1, true) ~= nil,
+        "RunLog: 패널, 착공, 완공, 원정, 하역 사건 기록"
+    )
+    local text = RunLog.summaryText()
+    local _, lineCount = string.gsub(text, "\n", "")
+    check(
+        string.find(text, "Shackleton Rim", 1, true) ~= nil
+            and string.find(text, "승리", 1, true) ~= nil
+            and lineCount + 1 <= 60,
+        "RunLog: 요약에 착륙지와 결과, 60줄 이내 (" .. (lineCount + 1) .. "줄)"
+    )
+    print(text)
+end
 -- 기여도 표와 승리 기록 (16차)
 do
     local info = over.args[1]
@@ -4652,6 +4678,13 @@ check(
     state().phase == "selecting" and state().day == 0 and state().energy == Config.START.energy,
     "재시작: selecting, 상태 초기화"
 )
+do
+    local RunLog = loadModule(Server:FindFirstChild("RunLog"))
+    check(
+        RunLog.snapshotCount() == 0 and #RunLog.eventLines() == 0,
+        "RunLog: 재시작 뒤 비워짐"
+    )
+end
 do
     local ice1r = Workspace.IceSites.Ice1
     local ice2r = Workspace.IceSites.Ice2

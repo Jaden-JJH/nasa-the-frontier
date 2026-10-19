@@ -11,6 +11,7 @@ local Config = require(ReplicatedStorage.Shared.Config)
 local Simulation = require(ReplicatedStorage.Shared.Simulation)
 local Contributions = require(script.Parent.Contributions)
 local ResourceState = require(script.Parent.ResourceState)
+local RunLog = require(script.Parent.RunLog)
 local ServerUtil = require(script.Parent.ServerUtil)
 local Sfx = require(script.Parent.Sfx)
 
@@ -199,6 +200,11 @@ local function onTriggered(player: Player)
     end
     ResourceState.set(newState)
     Contributions.add(player, "panels", 1)
+    if newState.panelsInstalled == 1 then
+        RunLog.event("첫 패널 설치")
+    elseif newState.panelsInstalled == Config.PANELS_TOTAL then
+        RunLog.event("패널 전부 설치 " .. newState.panelsInstalled .. "장")
+    end
     Sfx.play("panel_install", prompt and prompt.Parent)
     spawnPanel(newState.panelsInstalled, true)
     ResourceState.notify(player, message, "good")
