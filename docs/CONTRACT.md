@@ -226,7 +226,7 @@ Workspace
     Pad1 .. Pad4 (Part, Anchored)   Attributes: SiteName(string), Sunlight(number 0..1),
                                      IceDistanceLabel(string), HazardLabel(string), Description(string)
   IceSites (Folder)
-    Ice1 .. Ice8 (Part, Anchored)   얼음 지점(2026-10-18: 3곳에서 8곳으로, 위치와 매장량은 Config.ICE_SITES). 매장량 easy 30, 30 / mid 40, 50, 40 / hard 70, 70, 65 (합계 395). Attributes: Deposit(number, 남은 매장량 W), DepositMax(number), Difficulty(string: "easy" | "mid" | "hard"). hard 지점은 바위 고리(입구 60도)로 둘러싸임.
+    Ice1 .. Ice8 (Part, Anchored)   얼음 지점(2026-10-18: 3곳에서 8곳으로, 위치와 매장량은 Config.ICE_SITES). 매장량 easy 45, 45 / mid 55, 60, 55 / hard 110, 110, 110 (합계 590, 2026-10-19 20차 S3). Attributes: Deposit(number, 남은 매장량 W), DepositMax(number), Difficulty(string: "easy" | "mid" | "hard"). hard 지점은 바위 고리(입구 60도)로 둘러싸임.
                                      채취하면 Deposit이 줄고 0이면 결정이 사라지며 프롬프트가 꺼진다(Part는 남음). 클라이언트 레이더는 Deposit > 0인 지점만 표시하고 60 studs 안에서 매장량 숫자를 보여 준다
   Base (Model)                      LandingSite가 BaseKit을 복제해 선택 패드 위에 놓은 결과. 시작 시 없음
 
@@ -299,7 +299,8 @@ MODULES = {
 MODULE_ORDER = {"A", "B", "C"},
 ROVER = { tankMax = 60, fillHold = 3 }  -- 2026-10-18: 40 -> 60 (매장량 차등과 함께), ICE_PROMPT_DISTANCE = 20, RADAR_RANGE = 150,
 OXYGEN = { max = 100, drainPerSecond = 100 / 60, refillPerSecond = 10, deathPenalty = { food = 1, water = 2 } },
-SHORTAGE_DAYS_TO_LOSE = 3,
+SHORTAGE_DAYS_TO_LOSE = 4,  -- 2026-10-19 20차 S3: 3 -> 4
+WATER_PROCESS_ENERGY_PER_W = 0.35,  -- 하역 물 1 W당 처리 전력. 2026-10-19 20차 S3: 0.5 -> 0.35
 SITES = {
   { id = 1, name = "Shackleton Rim", sunlight = 1.00, iceDistanceLabel = "멀다", hazardLabel = "낮음", description = "전력은 넉넉하지만 얼음까지 길이 멀다" },
   { id = 2, name = "de Gerlache Ridge", sunlight = 0.85, iceDistanceLabel = "중간", hazardLabel = "중간", description = "모든 면에서 균형 잡힌 후보지" },
@@ -318,6 +319,8 @@ EVENTS = {  -- 2026-10-18 15차 랜덤 이벤트
 --   meteorModule, meteorPanel, meteorMiss, meteorBannerModule, meteorBannerPanel, meteorBannerMiss, meteorEdu,
 --   moduleDamagedStatus, upkeepDamaged, moduleRepaired, moduleRepairNotNeeded
 -- PROMPT_TEXTS.repairModule = "외벽 수리", TIPS.storm(첫 폭풍 예고), TIPS.moduleDamage(첫 모듈 손상, TipUI 트리거)
+-- 20차: TIPS.waterTripNow(%d = WATER_TRIP_TIP_DAYS), WATER_TRIP_TIP_DAYS = 15. TipUI가 아직 하역 전(waterTrips 0)인데
+--   state.daysLeft.water가 처음 15 이하이면 1회. MISSION_TEXTS.boardRover에 "물이 15일분 아래면 바로 원정" 힌트
 CONTROL_PANEL = {  -- 2026-10-19 19차 모듈 외벽 제어반 (ModulePanels). PROMPT.pauseDistance는 제거
   size = { 3, 1.9, 0.3 }, wallGap = 0.2, sideOffset = 3, doorMargin = 0.5, snapDepth = 3, height = 3.2,
   lightHeight = 0.18, lightRange = 8, lightBrightness = 1.5, promptDistance = 8, pauseKey = "E", toggleHold = 1.0,

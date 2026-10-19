@@ -280,31 +280,35 @@ return function(t)
         t.eq(r4, Config.TEXTS.unknownModule)
     end)
 
-    t.test("부족 3일 연속이면 실패, 중간에 회복하면 초기화", function()
-        local s = playingState(1)
-        s.water = 0
-        for day = 1, 2 do
-            s = Simulation.applyDay(s, Config)
-            t.eq(s.shortageDays, day)
-            local result = Simulation.checkEnd(s, Config)
-            t.eq(result, "none")
-        end
-        local recovered = Simulation.copy(s)
-        recovered.water = 10
-        recovered = Simulation.applyDay(recovered, Config)
-        t.eq(recovered.shortageDays, 0)
+    t.test(
+        "부족 SHORTAGE_DAYS_TO_LOSE일 연속이면 실패, 중간에 회복하면 초기화",
+        function()
+            local lose = Config.SHORTAGE_DAYS_TO_LOSE
+            local s = playingState(1)
+            s.water = 0
+            for day = 1, lose - 1 do
+                s = Simulation.applyDay(s, Config)
+                t.eq(s.shortageDays, day)
+                local result = Simulation.checkEnd(s, Config)
+                t.eq(result, "none")
+            end
+            local recovered = Simulation.copy(s)
+            recovered.water = 10
+            recovered = Simulation.applyDay(recovered, Config)
+            t.eq(recovered.shortageDays, 0)
 
-        s = Simulation.applyDay(s, Config)
-        t.eq(s.shortageDays, Config.SHORTAGE_DAYS_TO_LOSE)
-        local result, reason = Simulation.checkEnd(s, Config)
-        t.eq(result, "lost")
-        t.eq(reason, "물이 3일 연속 바닥났습니다")
-    end)
+            s = Simulation.applyDay(s, Config)
+            t.eq(s.shortageDays, Config.SHORTAGE_DAYS_TO_LOSE)
+            local result, reason = Simulation.checkEnd(s, Config)
+            t.eq(result, "lost")
+            t.eq(reason, string.format("물이 %d일 연속 바닥났습니다", lose))
+        end
+    )
 
     t.test("식량 부족 실패 사유", function()
         local s = playingState(1)
         s.food = 0
-        s.shortageDays = 2
+        s.shortageDays = Config.SHORTAGE_DAYS_TO_LOSE - 1
         s = Simulation.applyDay(s, Config)
         local result, reason = Simulation.checkEnd(s, Config)
         t.eq(result, "lost")
@@ -597,33 +601,37 @@ return function(t)
         t.eq(filled.missionStage, "unload")
     end)
 
-    t.test("하역: 물 1 W당 전력 0.5, 모자라면 처리 가능한 만큼만", function()
-        local s = playingState(1)
-        s.rover.tank = 30
-        s.energy = 50
-        local ok, full, message, kind, warning = Simulation.unloadWater(s, Config)
-        t.truthy(ok)
-        t.eq(full.water, s.water + 30)
-        t.near(full.energy, 50 - 30 * Config.WATER_PROCESS_ENERGY_PER_W)
-        t.eq(full.rover.tank, 0)
-        t.eq(full.waterTrips, 1)
-        t.eq(message, string.format(Config.TEXTS.waterUnloaded, 30))
-        t.eq(kind, "good")
-        t.eq(warning, nil, "전부 처리하면 경고 없음")
-        s.energy = 7.9 -- floor(7.9 / 0.5) = 15
-        local okP, partial, _, _, warningP = Simulation.unloadWater(s, Config)
-        t.truthy(okP)
-        t.eq(partial.water, s.water + 15)
-        t.eq(partial.rover.tank, 15, "나머지는 탱크에 남는다")
-        t.near(partial.energy, 0.4)
-        t.eq(warningP, string.format(Config.TEXTS.waterPartial, 15))
-        s.energy = 0.4
-        local okZ, zero, messageZ, kindZ = Simulation.unloadWater(s, Config)
-        t.falsy(okZ, "0.5 미만이면 1 W도 처리 못 함")
-        t.eq(zero.rover.tank, 30)
-        t.eq(kindZ, "warn")
-        t.contains(messageZ, "전력이 부족해")
-    end)
+    t.test(
+        "하역: 물 1 W당 전력 WATER_PROCESS_ENERGY_PER_W, 모자라면 처리 가능한 만큼만",
+        function()
+            local per = Config.WATER_PROCESS_ENERGY_PER_W
+            local s = playingState(1)
+            s.rover.tank = 30
+            s.energy = 50
+            local ok, full, message, kind, warning = Simulation.unloadWater(s, Config)
+            t.truthy(ok)
+            t.eq(full.water, s.water + 30)
+            t.near(full.energy, 50 - 30 * per)
+            t.eq(full.rover.tank, 0)
+            t.eq(full.waterTrips, 1)
+            t.eq(message, string.format(Config.TEXTS.waterUnloaded, 30))
+            t.eq(kind, "good")
+            t.eq(warning, nil, "전부 처리하면 경고 없음")
+            s.energy = per * 15.8 -- floor(15.8) = 15 W만 처리
+            local okP, partial, _, _, warningP = Simulation.unloadWater(s, Config)
+            t.truthy(okP)
+            t.eq(partial.water, s.water + 15)
+            t.eq(partial.rover.tank, 15, "나머지는 탱크에 남는다")
+            t.near(partial.energy, math.floor(per * 0.8 * 100 + 0.5) / 100)
+            t.eq(warningP, string.format(Config.TEXTS.waterPartial, 15))
+            s.energy = per * 0.8
+            local okZ, zero, messageZ, kindZ = Simulation.unloadWater(s, Config)
+            t.falsy(okZ, "1 W 처리 전력보다 적으면 처리 못 함")
+            t.eq(zero.rover.tank, 30)
+            t.eq(kindZ, "warn")
+            t.contains(messageZ, "전력이 부족해")
+        end
+    )
 
     t.test(
         "에너지 저장 상한: 150 + 가동 모듈 x 100, 넘친 발전은 버린다",
@@ -705,7 +713,8 @@ return function(t)
         end
     )
 
-    t.test("얼음 매장지 8곳: easy 2, mid 3, hard 3, 합계 510 ~ 520", function()
+    -- 2026-10-19 20차 S3: easy 45, mid 55/60/55로 합계 590
+    t.test("얼음 매장지 8곳: easy 2, mid 3, hard 3, 합계 585 ~ 595", function()
         local counts = { easy = 0, mid = 0, hard = 0 }
         local total = 0
         for _, site in Config.ICE_SITES do
@@ -716,7 +725,7 @@ return function(t)
         t.eq(counts.easy, 2)
         t.eq(counts.mid, 3)
         t.eq(counts.hard, 3)
-        t.truthy(total >= 510 and total <= 520, "합계 " .. total)
+        t.truthy(total >= 585 and total <= 595, "합계 " .. total)
     end)
 
     t.test(
@@ -1210,8 +1219,10 @@ return function(t)
         table.insert(results, simulatePlayer(index))
     end
 
+    -- 2026-10-19 20차 S3(사용자 승인): 가까운 매장량을 올려 perfect 봇(최적 동선)은 36 ~ 52일. 기준은 아래
+    -- semi 봇(한 번 해 본 사람)이고, perfect는 너무 빨라지지 않았는지(최적 30일 이상)와 60일 안인지만 본다
     t.test(
-        "현실적 봇: 4곳 모두 승리, 최적 착륙지 55 ~ 75일, 나머지 85일 이하",
+        "perfect 봇: 4곳 모두 승리, 최적 착륙지 30일 이상, 모두 60일 이하",
         function()
             print(
                 "        거리별 원정 일수와 매장량 기준:\n        " .. summary(results)
@@ -1221,15 +1232,11 @@ return function(t)
                 t.eq(r.result, "won", Config.SITES[index].name)
                 best = math.min(best, r.day)
             end
-            t.truthy(
-                best >= 55 and best <= 75,
-                "최적 착륙지 승리 일수 " .. best .. " (55 ~ 75)"
-            )
-            -- 2026-10-18 사용자 피드백(너무 쉽다) 반영 목표: 나머지 85일 이하, 최악도 90일 안
+            t.truthy(best >= 30, "최적 착륙지 승리 일수 " .. best .. " (30 이상)")
             for index, r in results do
                 t.truthy(
-                    r.day <= 85,
-                    Config.SITES[index].name .. " 승리 일수 " .. r.day .. " (85 이하)"
+                    r.day <= 60,
+                    Config.SITES[index].name .. " 승리 일수 " .. r.day .. " (60 이하)"
                 )
             end
         end
@@ -1282,7 +1289,7 @@ return function(t)
             )
         )
         t.truthy(total >= need * 1.3, string.format("합계 %d < %d x 1.3", total, need))
-        t.truthy(total >= 510 and total <= 520, "매장량 합계 510 ~ 520: " .. total)
+        t.truthy(total >= 585 and total <= 595, "매장량 합계 585 ~ 595: " .. total)
     end)
 
     t.test(
@@ -1374,7 +1381,8 @@ return function(t)
                     stormEntry(EV.solarStorm.startDayMax),
                 })
                 t.eq(twice.result, "won", site.name .. " 운석 두 번 Farm")
-                t.eq(twice.repairs, 2, site.name .. " 수리 두 번")
+                -- 20차 S3: 두 번째 운석(Farm 완공 11일 뒤) 전에 이기는 곳이 있어 수리는 한 번 이상만 본다
+                t.truthy(twice.repairs >= 1, site.name .. " 수리 " .. twice.repairs .. "번")
                 -- 생성기 범위(15일~)보다 이른 10일 운석: 모듈이 없어 패널 1장 파괴, 다시 깔아야 한다
                 local panel = farmFirst(index, { meteorEntry(10, 0.5) })
                 t.eq(panel.result, "won", site.name .. " 패널 파괴")
@@ -1479,6 +1487,72 @@ return function(t)
             t.falsy(only.modules.B.damaged, "직전 대상이라 B 제외")
             t.eq(only.panelsInstalled, panels - 1, "후보가 없으면 패널 파괴")
             t.eq(only.eventSchedule[2].target, "panel")
+        end
+    )
+
+    -- 2026-10-19 20차: 처음 하는 사람 봇(tests/bot.luau HUMAN). 밸런스 판정은 보고서 측정으로 하고,
+    -- 여기서는 재현성과 "사람은 perfect보다 느리다"만 본다
+    t.test(
+        "human 봇: 같은 시드면 같은 결과, 첫 원정은 perfect보다 늦다",
+        function()
+            for index, site in Config.SITES do
+                local scenario = {
+                    schedule = Simulation.makeEventSchedule(Config, 7919 + 13),
+                    profile = "human",
+                    seed = 104729 + 7,
+                }
+                local a = simulatePlayer(index, false, scenario)
+                local b = simulatePlayer(index, false, scenario)
+                t.eq(a.result, b.result, site.name .. " 결과 재현")
+                t.eq(a.day, b.day, site.name .. " 날짜 재현")
+                t.eq(a.tripLog, b.tripLog, site.name .. " 원정 재현")
+                local perfect = simulatePlayer(index)
+                t.truthy(
+                    a.firstTripDay > perfect.firstTripDay,
+                    string.format(
+                        "%s 첫 원정 human %d일 > perfect %d일",
+                        site.name,
+                        a.firstTripDay,
+                        perfect.firstTripDay
+                    )
+                )
+            end
+        end
+    )
+
+    -- 2026-10-19 20차 S3: 한 번 해 본 사람 봇(tests/bot.luau SEMI)으로 시드 50개씩. 전체 검증은 시드 300(GDD)이고
+    -- 여기서는 Shackleton, de Gerlache, Malapert 승률 80% 이상만 본다 (Nobile은 숙련 추천, 별도 표)
+    t.test(
+        "semi 봇: 시드 50개씩, Shackleton, de Gerlache, Malapert 승률 80% 이상",
+        function()
+            local lines = {}
+            for index, site in Config.SITES do
+                local wins, total = 0, 0
+                for seed = 1, 50 do
+                    local r = simulatePlayer(index, false, {
+                        schedule = Simulation.makeEventSchedule(Config, seed * 7919 + 13),
+                        profile = "semi",
+                        seed = seed * 104729 + 7,
+                    })
+                    if r.result == "won" then
+                        wins += 1
+                        total += r.day
+                    end
+                end
+                if index <= 3 then
+                    t.truthy(wins >= 40, string.format("%s 승률 %d/50", site.name, wins))
+                end
+                table.insert(
+                    lines,
+                    string.format(
+                        "%s %d/50 승리, 평균 %.1f일",
+                        site.name,
+                        wins,
+                        total / math.max(1, wins)
+                    )
+                )
+            end
+            print("        " .. table.concat(lines, "\n        "))
         end
     )
 end

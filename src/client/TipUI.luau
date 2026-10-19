@@ -77,6 +77,8 @@ local function tipText(key)
     elseif key == "moduleDamage" then
         local meteor = config.EVENTS and config.EVENTS.micrometeoroid or {}
         return string.format(template, meteor.repairKey or "R")
+    elseif key == "waterTripNow" then
+        return string.format(template, config.WATER_TRIP_TIP_DAYS or 15)
     end
     return template
 end
@@ -346,6 +348,20 @@ function TipUI.onState(state)
 
     local moduleB = state.modules and state.modules.B
     local waterDays = state.daysLeft and state.daysLeft.water
+    if type(waterDays) ~= "number" and type(state.water) == "number" then
+        -- daysLeft가 없으면 물 / 하루 순소비 (순소비가 없으면 줄지 않는 것으로 본다)
+        local use = -(state.netWater or 0)
+        waterDays = if use > 0 then math.floor(state.water / use) else 999
+    end
+
+    -- 20차: 아직 물을 한 번도 하역하지 않았는데 물이 WATER_TRIP_TIP_DAYS일분 이하로 내려오면 첫 원정 안내 (1회)
+    if
+        type(waterDays) == "number"
+        and waterDays <= (config.WATER_TRIP_TIP_DAYS or 15)
+        and (state.waterTrips or 0) == 0
+    then
+        TipUI.push("waterTripNow")
+    end
     if
         moduleB
         and moduleB.status == "active"

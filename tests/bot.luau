@@ -53,6 +53,66 @@ local FOOD_URGENT_MARGIN = 8 -- 식량이 Farm 건설 기간 + 이 일수 이하
 local WIN_WAIT_MAX_DAYS = 5
 local TERRAIN_FACTOR = { easy = 1, mid = 0.85, hard = 0.7 }
 
+-- 사람 프로필 (2026-10-19 20차): 처음 하는 사람의 15분 플레이를 가정한 값. 관찰 가정이라 Config가 아니라 여기 둔다.
+-- human은 perfect와 같은 원정 판단(물이 원정 동안 버틸 만큼만 남으면 떠남)을 하되, 착공은 물 예비분을 따지지 않고
+-- 자원이 모이면 하루 뒤에 하며, 아래 만큼 느리고 덜 안다.
+-- 로버 충전은 패드에 세우면 자동이라 Lab을 위해 충전을 미루는 요령(perfect의 waitForWin)은 쓰지 않는다
+local HUMAN = {
+    idleStartDays = 2, -- 시작 2일은 Tip과 화면을 익히느라 아무것도 안 한다
+    earlyPanelDays = 10, -- 이 날까지는 하루 earlyPanelsPerDay장만 설치
+    earlyPanelsPerDay = 2,
+    panelSkipChance = 0.2, -- 설치할 날 중 이 확률로 하루 건너뛴다
+    tripTimeFactor = 1.6, -- 원정 시간과 배터리 x1.6 (길 찾기, 바위, 뒤집힘)
+    firstTripWaterDays = 10, -- 물 남은 일수가 이 이하가 되어야 첫 원정을 떠난다 (위기 전엔 안 움직임)
+    tripDelayChance = 0.2, -- 원정마다 이 확률로 하루 더 걸린다
+    buildDelayDays = 1, -- 착공할 자원이 모인 뒤 이만큼 늦게 착공 (토스트를 보고 패드까지 간다)
+    pauseKnowChance = 0.5, -- Farm 가동 중지를 아는 사람의 비율 (게임마다 한 번 정한다)
+    pauseWaterDays = 3, -- 물 남은 일수가 이 이하이면 Farm을 끈다 (아는 사람만)
+    resumeWaterDays = 6, -- Farm을 켜도 물이 이 일수 이상 버티면 다시 켠다
+    repairDelayDays = 2, -- 손상 알림 뒤 이만큼 지나서 수리
+    targetRule = "nearest", -- 원정 대상: 가장 가까운 곳 (hard는 다른 곳이 다 고갈된 뒤)
+    buildRule = "naive", -- 착공: 자원이 모이면 (물 예비분을 따지지 않음)
+    tripMemoryMarginDays = nil :: number?, -- nil이면 두 번째 원정부터 perfect의 원정 판단
+}
+
+-- semi 프로필 (2026-10-19 20차 3단계, 리드 지정): 게임을 한 번 해 본 사람. 사용자 체감("딱딱 맞게 해도 부족")에 가장
+-- 가깝다고 보는 모델. 리드가 정하지 않은 항목(폭풍 중 정지, 수리 2일 뒤)은 human과 같고, 착공은 아래 buildRule
+local SEMI = {
+    idleStartDays = 1,
+    earlyPanelDays = 5,
+    earlyPanelsPerDay = 2,
+    panelSkipChance = 0,
+    tripTimeFactor = 1.3,
+    firstTripWaterDays = 14,
+    tripDelayChance = 0.1,
+    buildDelayDays = 0,
+    pauseKnowChance = 0.8,
+    pauseWaterDays = 3,
+    resumeWaterDays = 6,
+    repairDelayDays = 2,
+    targetRule = "nearTwoLargest", -- 가까운 두 곳 중 남은 매장량이 큰 쪽
+    -- 착공은 perfect처럼 원정 동안 버틸 물을 남길 때만 (한 번 해 본 사람은 A를 짓고 물 1로 원정을 떠나지 않는다.
+    -- naive면 5일에 A를 짓고 물 1이 남아 첫 원정 중에 진다)
+    buildRule = "reserve",
+    tripMemoryMarginDays = 3 :: number?, -- 두 번째 원정부터 "지난 원정 일수 + 3일분" (착공 물이 모자랄 때도 떠난다)
+}
+
+-- 결정적 난수 (시드별 재현). 0..1 미만
+local function makeRng(seed: number): () -> number
+    local value = math.floor(math.abs(seed)) % 2147483647
+    if value == 0 then
+        value = 1
+    end
+    local function nextValue(): number
+        value = (value * 48271) % 2147483647
+        return value / 2147483647
+    end
+    for _ = 1, 3 do
+        nextValue()
+    end
+    return nextValue
+end
+
 -- 착륙 패드 위치 (DevMap과 같은 식: 기준 얼음 + 방향 x 최근접 거리)
 local function padPosition(siteIndex: number): (number, number)
     local layout = Config.DEV_MAP.padLayout[siteIndex]
@@ -71,14 +131,17 @@ local function driveSecondsTo(siteIndex: number, iceIndex: number): number
     return 2 * distance / (Config.ROVER.maxSpeed * factor)
 end
 
-local function tripDaysTo(siteIndex: number, iceIndex: number): number
-    local seconds = driveSecondsTo(siteIndex, iceIndex) + TRIP_OVERHEAD
+-- timeFactor: 사람 프로필의 주행 시간 배율 (perfect는 1)
+local function tripDaysTo(siteIndex: number, iceIndex: number, timeFactor: number?): number
+    local seconds = driveSecondsTo(siteIndex, iceIndex) * (timeFactor or 1) + TRIP_OVERHEAD
     return math.max(1, math.ceil(seconds / Config.DAY_SECONDS))
 end
 
 -- 원정 한 번의 로버 배터리 소모 = 주행 초 x batteryDrainPerSecond (2026-10-18)
-local function tripBatteryTo(siteIndex: number, iceIndex: number): number
-    return driveSecondsTo(siteIndex, iceIndex) * Config.ROVER.batteryDrainPerSecond
+local function tripBatteryTo(siteIndex: number, iceIndex: number, timeFactor: number?): number
+    return driveSecondsTo(siteIndex, iceIndex)
+        * (timeFactor or 1)
+        * Config.ROVER.batteryDrainPerSecond
 end
 
 export type BotResult = {
@@ -102,6 +165,10 @@ export type BotResult = {
     panelsLost: number, -- 미세운석으로 부서진 패널 수
     stormIdleDays: number, -- 폭풍 때문에 기지 안에서 아무 일도 못 한 날
     aborts: number, -- Farm 손상 알림으로 원정을 되돌린 횟수
+    minWater: number, -- Farm 가동 전 최저 물 (20차)
+    firstTripDay: number, -- 첫 원정 출발일 (못 떠났으면 0)
+    lossReason: string, -- 실패 사유 "water" | "food" | "both" | "timeout" (승리면 "")
+    pauses: number, -- Farm 가동 중지 횟수 (human)
 }
 
 -- 이벤트 시나리오 (2026-10-18 15차). schedule이 없으면 이벤트 없음 (기존 기록과 같은 조건)
@@ -110,6 +177,8 @@ export type Scenario = {
     trace: ((day: number, state: Simulation.GameState, action: string) -> ())?, -- 디버그용 하루 기록
     stormStayHome: boolean?, -- 엄격 모델(비교용): 폭풍 중 원정 출발과 수리도 하지 않고 기지 안에만 있는다
     abortOnFarmDamage: boolean?, -- 원정 중 Farm 손상 알림을 받으면 되돌아온다 (기본 꺼짐, 비교용)
+    profile: string?, -- "perfect"(기본) | "human" | "semi" (20차)
+    seed: number?, -- human 프로필 난수 시드
 }
 
 local function nextModule(s): string?
@@ -133,6 +202,24 @@ local function simulatePlayer(siteIndex: number, noTrips: boolean?, scenario: Sc
         Simulation.refreshDerived(s, Config)
     end
     local farmDay, repairs, damagedDays, panelsLost, stormIdleDays = 0, 0, 0, 0, 0
+    -- 사람 프로필 (20차)
+    local profileName = if scenario then scenario.profile else nil
+    local P = if profileName == "human" then HUMAN elseif profileName == "semi" then SEMI else nil
+    local human = P ~= nil -- 사람 계열 프로필 (human, semi)
+    local HP = P or HUMAN -- 사람 계열 값 (perfect에서는 읽지 않는다)
+    local lastTripDays = 0
+    local timeFactor = if human then HP.tripTimeFactor else 1
+    local rng = makeRng(if scenario and scenario.seed then scenario.seed else 1)
+    local knowsPause = human and rng() < HP.pauseKnowChance
+    local damageSeen: { [string]: number } = {}
+    local readySince: number? = nil
+    local minWater, firstTripDay, pauses = math.huge, 0, 0
+    local function daysTo(iceIndex: number): number
+        return tripDaysTo(siteIndex, iceIndex, timeFactor)
+    end
+    local function batteryTo(iceIndex: number): number
+        return tripBatteryTo(siteIndex, iceIndex, timeFactor)
+    end
     -- 로버 배터리: 원정을 떠날 때 왕복 소모를 빼고, 기지에 있는 날마다 기지 에너지에서 충전한다
     local battery = Config.ROVER.batteryMax
     local chargeDays = 0 -- 기지에서 충전한 날 수
@@ -159,7 +246,7 @@ local function simulatePlayer(siteIndex: number, noTrips: boolean?, scenario: Sc
         local best, anyBest = math.huge, math.huge
         for index, amount in deposits do
             if amount > 0 then
-                local days = tripDaysTo(siteIndex, index)
+                local days = daysTo(index)
                 anyBest = math.min(anyBest, days)
                 if amount >= USEFUL_TRIP_W then
                     best = math.min(best, days)
@@ -176,7 +263,7 @@ local function simulatePlayer(siteIndex: number, noTrips: boolean?, scenario: Sc
         local list = {}
         for index, amount in deposits do
             if amount >= USEFUL_TRIP_W then
-                table.insert(list, { days = tripDaysTo(siteIndex, index), amount = amount })
+                table.insert(list, { days = daysTo(index), amount = amount })
             end
         end
         table.sort(list, function(a, b)
@@ -203,13 +290,47 @@ local function simulatePlayer(siteIndex: number, noTrips: boolean?, scenario: Sc
     -- 다음 원정 대상: 다녀오는 동안 물이 버티는 매장지 중 하루당 얻는 물(min(탱크 빈 공간, 매장량) / 왕복 일수)이
     -- 가장 많은 곳. 버틸 수 있는 곳이 없으면 가장 가까운 곳
     local function nextTarget(): (number?, number)
+        if human and HP.targetRule == "nearTwoLargest" then
+            -- semi: 가까운 두 곳 중 남은 매장량이 큰 쪽
+            local list = {}
+            for index, amount in deposits do
+                if amount > 0 and batteryTo(index) <= battery then
+                    table.insert(list, { index = index, days = daysTo(index), amount = amount })
+                end
+            end
+            table.sort(list, function(a, b)
+                return a.days < b.days
+            end)
+            local pick = list[1]
+            if list[2] and list[2].amount > pick.amount then
+                pick = list[2]
+            end
+            if pick then
+                return pick.index, pick.days
+            end
+            return nil, 0
+        end
+        if human then
+            -- 사람: 레이더에서 가장 가까운 매장지만 (바위밭 hard는 다른 곳이 다 고갈된 뒤에야 간다)
+            local pick, pickDays, pickHard = nil, math.huge, true
+            for index, amount in deposits do
+                if amount > 0 and batteryTo(index) <= battery then
+                    local hard = Config.ICE_SITES[index].difficulty == "hard"
+                    local days = daysTo(index)
+                    if (pickHard and not hard) or (hard == pickHard and days < pickDays) then
+                        pick, pickDays, pickHard = index, days, hard
+                    end
+                end
+            end
+            return pick, if pick then pickDays else 0
+        end
         local best, bestDays, bestRate = nil, 0, -1
         local nearest, nearestDays = nil, math.huge
         local space = s.rover.tankMax - s.rover.tank
         for index, amount in deposits do
             -- 지금 배터리로 왕복할 수 없는 매장지는 고르지 않는다
-            if amount > 0 and tripBatteryTo(siteIndex, index) <= battery then
-                local days = tripDaysTo(siteIndex, index)
+            if amount > 0 and batteryTo(index) <= battery then
+                local days = daysTo(index)
                 if days < nearestDays then
                     nearest, nearestDays = index, days
                 end
@@ -311,6 +432,7 @@ local function simulatePlayer(siteIndex: number, noTrips: boolean?, scenario: Sc
             local waitForWin = false
             if
                 not noTrips
+                and not human
                 and id == Config.WIN_MODULE
                 and s.modules[id].status == "available"
                 and not Simulation.stormActive(s, Config)
@@ -357,14 +479,42 @@ local function simulatePlayer(siteIndex: number, noTrips: boolean?, scenario: Sc
             -- (Scenario.stormStayHome이면 원정 출발과 수리도 막는 엄격 모델.) 손상 모듈은 다음 기회에 먼저 수리한다
             -- (전력 repairEnergy, 행동을 쓰지 않는 4초 작업으로 본다)
             local storming = Simulation.stormActive(s, Config)
-            local stayHome = storming and scenario ~= nil and scenario.stormStayHome == true
+            -- 사람(20차): 처음 idleStartDays일은 Tip과 화면을 익히느라, 폭풍 중에는 무서워서 아무것도 하지 않는다
+            local learning = human and s.day <= HP.idleStartDays
+            local stayHome = learning
+                or (storming and (human or (scenario ~= nil and scenario.stormStayHome == true)))
             if not stayHome then
                 for _, moduleId in Config.MODULE_ORDER do
-                    if s.modules[moduleId].damaged then
+                    local seen = damageSeen[moduleId]
+                    local noticed = not human
+                        or (seen ~= nil and s.day >= seen + HP.repairDelayDays)
+                    if s.modules[moduleId].damaged and noticed then
                         local repaired, after = Simulation.repairModule(s, Config, moduleId)
                         if repaired then
                             s = after
                             repairs += 1
+                            damageSeen[moduleId] = nil
+                        end
+                    end
+                end
+                -- 사람: Farm 가동 중지는 아는 사람(게임마다 50%)만, 물이 pauseWaterDays일분 이하일 때
+                local farm = s.modules.B
+                if human and knowsPause and farm.status == "active" then
+                    if not farm.paused and s.daysLeft.water <= HP.pauseWaterDays then
+                        local paused, after = Simulation.setPaused(s, Config, "B", true)
+                        if paused then
+                            s = after
+                            pauses += 1
+                        end
+                    elseif farm.paused then
+                        local probe = Simulation.copy(s)
+                        probe.modules.B.paused = false
+                        Simulation.refreshDerived(probe, Config)
+                        if probe.daysLeft.water >= HP.resumeWaterDays then
+                            local resumed, after = Simulation.setPaused(s, Config, "B", false)
+                            if resumed then
+                                s = after
+                            end
                         end
                     end
                 end
@@ -413,7 +563,23 @@ local function simulatePlayer(siteIndex: number, noTrips: boolean?, scenario: Sc
                     canStart = true
                 end
             end
-            if afterBuild and canStart and not storming then
+            -- 사람: 물 예비분을 따지지 않고 자원이 모이면(canBuild) buildDelayDays일 뒤 착공한다
+            -- (리드 지정: "자원이 모였다는 토스트 뒤 1일 지연". 토스트를 보고 패드까지 간다)
+            if human then
+                if HP.buildRule == "naive" then
+                    canStart = afterBuild ~= nil
+                end
+                if afterBuild and canStart then
+                    readySince = readySince or s.day
+                    if s.day < (readySince :: number) + HP.buildDelayDays then
+                        canStart = false
+                    end
+                else
+                    readySince = nil
+                end
+            end
+            if afterBuild and canStart and not storming and not stayHome then
+                readySince = nil
                 local built = afterBuild
                 waterNeed += waterCost
                 s = built
@@ -426,24 +592,47 @@ local function simulatePlayer(siteIndex: number, noTrips: boolean?, scenario: Sc
                 and target ~= nil
                 and s.rover.tank < s.rover.tankMax
                 and (
-                    (not tripped and s.day >= FIRST_TRIP_DAY)
-                    or s.water <= reserve
-                    or (waterShort and (energyReady or not canInstall))
+                    if human and not tripped
+                        -- 사람의 첫 원정은 물이 firstTripWaterDays일분 이하가 되어서야 (위기 전엔 안 움직임)
+                        then s.daysLeft.water <= HP.firstTripWaterDays
+                        elseif
+                            human
+                            and HP.tripMemoryMarginDays ~= nil -- semi: 지난 원정 일수 + 여유일분 이하이거나, 착공할 물이 모자랄 때
+
+                        then s.daysLeft.water
+                                <= lastTripDays + (HP.tripMemoryMarginDays :: number)
+                            or (waterShort and (energyReady or not canInstall))
+                        else (not tripped and s.day >= FIRST_TRIP_DAY)
+                            or s.water <= reserve
+                            or (waterShort and (energyReady or not canInstall))
                 )
             then
+                if human and rng() < HP.tripDelayChance then
+                    days += 1
+                end
+                if firstTripDay == 0 then
+                    firstTripDay = s.day
+                end
+                lastTripDays = days
                 tripped = true
                 busy, onTrip = true, true
                 tripTarget = target :: number
-                battery = math.max(0, battery - tripBatteryTo(siteIndex, tripTarget))
+                battery = math.max(0, battery - batteryTo(tripTarget))
                 table.insert(log, tostring(tripTarget))
                 tripLeft = days - 1
                 tripTotal = days
                 if tripLeft == 0 then
                     arrive()
                 end
-            elseif canInstall and not storming then
-                s = installMany(s, Config.PANELS_PER_DAY)
-                busy = true
+            elseif canInstall and not storming and not stayHome then
+                -- 사람: 처음 earlyPanelDays일은 하루 earlyPanelsPerDay장, 설치할 날의 panelSkipChance는 건너뜀
+                if not human or rng() >= HP.panelSkipChance then
+                    local perDay = if human and s.day <= HP.earlyPanelDays
+                        then HP.earlyPanelsPerDay
+                        else Config.PANELS_PER_DAY
+                    s = installMany(s, perDay)
+                    busy = true
+                end
             elseif storming then
                 stormIdleDays += 1
             end
@@ -470,6 +659,7 @@ local function simulatePlayer(siteIndex: number, noTrips: boolean?, scenario: Sc
         end
         if s.modules.B.status ~= "active" then
             minFood = math.min(minFood, s.food)
+            minWater = math.min(minWater, s.water)
         end
         local _, useWater = Simulation.dailyConsumption(s, Config)
         waterNeed += useWater
@@ -496,6 +686,13 @@ local function simulatePlayer(siteIndex: number, noTrips: boolean?, scenario: Sc
         end
         if s.modules.B.status ~= "active" then
             minFood = math.min(minFood, s.food)
+            minWater = math.min(minWater, s.water)
+        end
+        -- 사람이 손상 알림을 받은 날 (수리는 HP.repairDelayDays 뒤)
+        for _, moduleId in Config.MODULE_ORDER do
+            if s.modules[moduleId].damaged and damageSeen[moduleId] == nil then
+                damageSeen[moduleId] = s.day
+            end
         end
         local result = Simulation.checkEnd(s, Config)
         if result ~= "none" then
@@ -520,6 +717,15 @@ local function simulatePlayer(siteIndex: number, noTrips: boolean?, scenario: Sc
                 panelsLost = panelsLost,
                 stormIdleDays = stormIdleDays,
                 aborts = aborts,
+                minWater = minWater,
+                firstTripDay = firstTripDay,
+                lossReason = if result == "won"
+                    then ""
+                    elseif s.day > Config.TOTAL_DAYS then "timeout"
+                    elseif s.water <= 0 and s.food <= 0 then "both"
+                    elseif s.water <= 0 then "water"
+                    else "food",
+                pauses = pauses,
             }
         end
     end
@@ -544,6 +750,10 @@ local function simulatePlayer(siteIndex: number, noTrips: boolean?, scenario: Sc
         panelsLost = panelsLost,
         stormIdleDays = stormIdleDays,
         aborts = aborts,
+        minWater = minWater,
+        firstTripDay = firstTripDay,
+        lossReason = "timeout",
+        pauses = pauses,
     }
 end
 
@@ -576,6 +786,8 @@ end
 
 return {
     simulatePlayer = simulatePlayer,
+    human = HUMAN, -- 사람 프로필 가정 (민감도 실험이 바꿔 보고 되돌린다)
+    semi = SEMI,
     summary = summary,
     tripDaysTo = tripDaysTo,
 }

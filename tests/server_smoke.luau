@@ -709,7 +709,7 @@ do
         attrsOk,
         "Ice1..Ice8 위치와 Attribute Deposit, DepositMax, Difficulty = Config.ICE_SITES"
     )
-    check(total >= 510 and total <= 520, "매장량 합계 " .. total .. " W (510 ~ 520)")
+    check(total >= 585 and total <= 595, "매장량 합계 " .. total .. " W (585 ~ 595, 20차 S3)")
     -- mid는 어느 착륙 패드에서도 350 이상, hard는 500 이상 (패드 최근접 얼음은 예외: 첫 원정 설계)
     local distOk = true
     for index, def in Config.ICE_SITES do
@@ -2573,10 +2573,10 @@ check(
     "하역 거부 안내"
 )
 seat.CFrame = base.WaterTank.CFrame * CFrame.new(6, 0, 0)
--- 처리 전력 부족: 에너지 5면 1 W당 0.5라 10 W만 처리하고 나머지는 탱크에 남긴다
+-- 처리 전력 부족: 에너지가 물 10 W 처리분뿐이면 10 W만 처리하고 나머지는 탱크에 남긴다
 local energyBeforeUnload = state().energy
 ResourceState.patch(function(st)
-    st.energy = 5
+    st.energy = 10 * Config.WATER_PROCESS_ENERGY_PER_W
 end)
 rec.mark = rec.field("Bob", "water")
 signalFor(tankPrompt, "Triggered"):Fire(bob)
@@ -2591,7 +2591,7 @@ check(
         and state().energy == 0
         and state().waterTrips == 1,
     string.format(
-        "전력 5로 물 10 W만 처리, 탱크 %d 남음, 에너지 0",
+        "물 10 W 처리분 전력으로 10 W만 처리, 탱크 %d 남음, 에너지 0",
         state().rover.tank
     )
 )
@@ -2646,8 +2646,14 @@ do
     check(
         a.unlocked == true
             and sentState.modules.B.unlocked == false
-            and a.shortfall.energy == math.max(0, Config.MODULES.A.cost.energy - sentState.energy)
-            and a.shortfall.water == math.max(0, Config.MODULES.A.cost.water - sentState.water),
+            -- 처리 전력 0.35(20차)로 에너지에 소수가 생겨 반올림 오차만 허용
+            and math.abs(
+                a.shortfall.energy - math.max(0, Config.MODULES.A.cost.energy - sentState.energy)
+            ) < 0.01
+            and math.abs(
+                    a.shortfall.water - math.max(0, Config.MODULES.A.cost.water - sentState.water)
+                )
+                < 0.01,
         string.format(
             "StateUpdate 모듈 unlocked와 shortfall (A 부족 E %s, W %s)",
             tostring(a.shortfall.energy),
@@ -4789,11 +4795,16 @@ root.CFrame = base2.Lander.OxygenZone.CFrame
 ResourceState.patch(function(s)
     s.water = 0
 end)
-advance(Config.DAY_SECONDS * 3)
-check(state().phase == "lost", "물 0 상태 3일이면 실패")
+advance(Config.DAY_SECONDS * Config.SHORTAGE_DAYS_TO_LOSE)
+check(
+    state().phase == "lost",
+    "물 0 상태 " .. Config.SHORTAGE_DAYS_TO_LOSE .. "일이면 실패"
+)
 over = lastSent("GameOver")
 check(
-    over.args[1].won == false and over.args[1].reason == "물이 3일 연속 바닥났습니다",
+    over.args[1].won == false
+        and over.args[1].reason
+            == string.format("물이 %d일 연속 바닥났습니다", Config.SHORTAGE_DAYS_TO_LOSE),
     "실패 사유: " .. over.args[1].reason
 )
 check(

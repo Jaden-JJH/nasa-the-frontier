@@ -74,7 +74,9 @@ local Config = {
     ENERGY_CAP_PER_MODULE = 100,
     ENERGY_WASTE_NOTIFY_DAYS = 5, -- 계속 버려지면 이 일수마다 다시 알린다 (매일 토스트는 시끄럽다)
     -- 물 처리 전력: 하역한 물 1 W당 에너지. 모자라면 처리 가능한 만큼만 하역하고 나머지는 탱크에 남긴다
-    WATER_PROCESS_ENERGY_PER_W = 0.5,
+    -- 0.5 -> 0.35 (2026-10-19 20차 S3, 사용자 승인. 사람 봇 기준 재조정): 원정 한 번(60 W)의 처리 전력 30 -> 21 E.
+    -- 매장량 상향 위에서 semi(한 번 해 본 사람) 봇 Malapert 승률 +14%p (단독으로는 효과 없음)
+    WATER_PROCESS_ENERGY_PER_W = 0.35,
 
     -- 모듈 (건설 순서 A -> B -> C)
     MODULES = {
@@ -118,7 +120,7 @@ local Config = {
     -- 건설 연출: building 동안 완성 모델이 지면 아래에서 진행률만큼 올라온다. DayTick마다 이 시간 동안 부드럽게
     BUILD_RISE_SECONDS = 1,
 
-    -- 얼음 매장지 8곳 (2026-10-18: 3곳 고정 무한에서 매장량과 고갈로). 합계 520 W.
+    -- 얼음 매장지 8곳 (2026-10-18: 3곳 고정 무한에서 매장량과 고갈로). 합계 520 W (20차 S3에 590 W, 아래).
     -- Ice1 ~ Ice3은 착륙 패드별 최근접 얼음(DEV_MAP.iceDistanceBySite, 첫 원정 거리)이라 위치를 바꾸지 않는다.
     -- Ice1은 Pad1에서 450이라 어느 패드에서도 350 이상 떨어져 mid로 둔다. easy는 Ice2(Pad2, Pad4 공용), Ice3(Pad3)
     -- mid는 모든 패드에서 350 이상, hard는 500 이상이며 바위 고리와 크레이터 사이에 있다.
@@ -127,12 +129,15 @@ local Config = {
     -- 네 곳 모두 41 ~ 50일 승리. Ice3(Malapert 첫 원정)은 30으로 올려 Farm 전 식량 여유 5 이상을 지킨다.
     -- 2차 (사용자: 너무 쉽다): Lab 건설 물 50과 로버 배터리를 넣고 hard 매장량을 110으로 올려 60 ~ 71일 승리
     -- (tests/simulation.spec.luau 현실적 봇)
+    -- 2026-10-19 20차 S3, 사용자 승인. 사람 봇 기준 재조정: easy 30 -> 45, mid 40/50/40 -> 55/60/55 (hard 110 유지,
+    -- 합계 590). 가까운 얼음 한 번에 탱크 60의 3/4 이상이 차게. semi 봇 승률을 0%에서 올린 유일한 손잡이
+    -- (단독 Shackleton 71, de Gerlache 91, Malapert 57%. tests/bot.luau semi, 시드 300)
     ICE_SITES = {
-        { x = -75, z = 50, deposit = 40, difficulty = "mid" }, -- Ice1: Pad1 450, Pad2 500, Pad3 481
-        { x = 425, z = 350, deposit = 30, difficulty = "easy" }, -- Ice2: Pad2 300, Pad4 100
-        { x = -525, z = 400, deposit = 30, difficulty = "easy" }, -- Ice3: Pad3 180
-        { x = 80, z = 160, deposit = 50, difficulty = "mid" }, -- Ice4: Pad2 362, Pad4 484, Pad1 581, Pad3 608
-        { x = -560, z = -200, deposit = 40, difficulty = "mid" }, -- Ice5: Pad3 421, Pad1 525
+        { x = -75, z = 50, deposit = 55, difficulty = "mid" }, -- Ice1: Pad1 450, Pad2 500, Pad3 481
+        { x = 425, z = 350, deposit = 45, difficulty = "easy" }, -- Ice2: Pad2 300, Pad4 100
+        { x = -525, z = 400, deposit = 45, difficulty = "easy" }, -- Ice3: Pad3 180
+        { x = 80, z = 160, deposit = 60, difficulty = "mid" }, -- Ice4: Pad2 362, Pad4 484, Pad1 581, Pad3 608
+        { x = -560, z = -200, deposit = 55, difficulty = "mid" }, -- Ice5: Pad3 421, Pad1 525
         { x = -20, z = 290, deposit = 110, difficulty = "hard" }, -- Ice6: Pad2 506, Pad3 510, Pad4 548
         { x = 380, z = -650, deposit = 110, difficulty = "hard" }, -- Ice7: Pad1 519, Pad2 701
         { x = 950, z = 650, deposit = 110, difficulty = "hard" }, -- Ice8: Pad4 520, Pad2 797
@@ -291,7 +296,9 @@ local Config = {
     },
 
     -- 실패와 승리
-    SHORTAGE_DAYS_TO_LOSE = 3,
+    -- 3 -> 4 (2026-10-19 20차 S3, 사용자 승인. 사람 봇 기준 재조정): 물이나 식량이 바닥나도 하루 더 버텨 원정 하나를
+    -- 마칠 여유. 매장량과 처리 전력 위에서 semi 봇 Shackleton +22, Malapert +21%p (단독으로는 효과 없음)
+    SHORTAGE_DAYS_TO_LOSE = 4,
     RESULT_MIN_SECONDS = 10, -- 결과 화면이 뜬 뒤 재시작을 받기까지 최소 시간(초). 재시작은 선택 권한자만
 
     -- 자원 값 반올림 자릿수 (일조율 곱셈의 부동소수 오차 제거용)
@@ -523,7 +530,8 @@ local Config = {
         landing = "착륙 중입니다. 잠시 기다리세요",
         installPanels = "솔라 필드에서 패널 %d장을 설치하세요",
         -- 튜토리얼 단계(missionStage)는 날짜가 아니라 행동 완료로 넘어간다
-        boardRover = "로버에 다가가 E로 탑승하세요",
+        -- 20차: 처음 하는 사람이 물이 바닥나기 직전까지 원정을 미루지 않게 (일수는 WATER_TRIP_TIP_DAYS와 같게)
+        boardRover = "로버에 다가가 E로 탑승하세요. 물이 15일분 아래면 바로 원정을 떠나세요",
         findIce = "레이더의 점을 따라 얼음 지점으로 가서 E를 길게 눌러 물을 채우세요",
         unloadWater = "기지로 돌아와 물탱크 옆에 로버를 세우고 E로 물을 하역하세요",
         -- 모듈별 착공 안내 (Habitat A, Farm B, Research Lab C)
@@ -796,7 +804,11 @@ local Config = {
         -- 랜덤 이벤트 (2026-10-18 15차): 첫 폭풍 예고, 첫 모듈 손상
         storm = "폭풍 중에는 실내에 머물고, 폭풍 전에 물과 패널 작업을 끝내 두세요.",
         moduleDamage = "손상된 모듈은 생산이 멈춥니다. 건물 벽의 빨간 불이 깜빡이는 제어반에서 %s 키를 길게 눌러 수리하세요.",
+        -- 20차: 물이 WATER_TRIP_TIP_DAYS일분 이하로 처음 내려왔는데 아직 하역(waterTrips)이 0이면 1회. %d = 그 일수
+        waterTripNow = "물이 %d일분 아래로 내려왔어요. 지금 로버로 가까운 얼음에 다녀오세요. 레이더가 위치를 알려 줍니다.",
     },
+    -- 첫 원정 Tip 기준 (2026-10-19 20차): 처음 하는 사람 봇은 물 10일분에야 떠나 원정 중 바닥났다
+    WATER_TRIP_TIP_DAYS = 15,
 }
 
 return Config
