@@ -258,8 +258,8 @@ ProximityPrompt 공통: `RequiresLineOfSight = false`, `MaxActivationDistance = 
 | 모듈 | 책임 |
 |---|---|
 | Main.client.lua | Remotes 연결, 각 UI 모듈 init, phase에 따라 어느 화면을 보일지 결정 |
-| TitleUI.lua | 타이틀 화면. 시작 버튼을 누르면 로컬에서만 숨김 (서버 phase는 이미 selecting). 2026-10-19 17차: 명예의 전당 패널 제거(결과 화면에서만 표시), 제목 묶음만 가운데. compact(Layout.isCompact)면 글자와 버튼을 줄임 |
-| SiteSelectUI.lua | SiteSelectionOpen 수신. 카드 4장. 권한자만 버튼 활성. 남은 시간 표시. SelectSite 송신 |
+| TitleUI.lua | 타이틀 화면. 시작 버튼을 누르면 로컬에서만 숨김 (서버 phase는 이미 selecting). 2026-10-19 17차: 명예의 전당 패널 제거(결과 화면에서만 표시). 2026-10-19 18차 C안 "루나 소프트": 보라-남색 그라데이션, 오른쪽 위 달(회색 그라데이션 원 + 크레이터 3개 + 빛 번짐 원, 좁아서 글자와 겹치면 숨김), 아래 지평선(큰 원의 윗부분), 왼쪽 묶음(배지 "달 남극 기지 건설 프로젝트", "The Frontier" Nunito Heavy 100 두 줄, 부제 24, 민트 "시작하기" 300x72 둥근 버튼 + 화살표, hover 투명도), 아래 칩 3개(색 점 + 에너지/물/식량 문구)와 오른쪽 아래 인원 문구. 보일 때 왼쪽 묶음 0.4초 페이드 인과 16px 올라옴(CanvasGroup). compact는 왼쪽 묶음을 실제 px 공간으로 옮겨 제목 48, 부제 16, 버튼 200x52, 칩과 문구 숨김. 문구는 TEXTS title* |
+| SiteSelectUI.lua | SiteSelectionOpen 수신. SelectSite 송신. 2026-10-19 18차 C안 지도형: 머리(제목, 부제, 고르는 사람 아바타와 이름, 자동 선택 카운트다운 막대와 초), 왼쪽 660px 지도(위도 링 85/87/89 S 실선, 크레이터 음영 5개, 남극점 S, 번호 핀 4개 Config.SITE_MAP 비율 좌표, 선택 핀은 민트 큰 원 + 흰 테두리 + 빛 원, 범례, 지구 방향), 오른쪽 상세 패널("02 / 04", 이름 Nunito 30, 기본 후보지면 민트 체크 "처음이라면 추천", 설명, 일조율 막대와 %, 얼음까지 거리 iceDistanceLabel + DEV_MAP.iceDistanceBySite studs와 로버 왕복 시간 = 거리 x 2 / ROVER.maxSpeed, 지형 위험과 한 줄 설명 TEXTS.siteHazardDetail, "여기에 착륙" 54 버튼)과 4행 전환 목록(선택 행은 왼쪽 민트 막대 + 밝은 배경). 2단계 선택: 핀, 핀 이름, 목록 행을 누르면 미리보기(누구나, 로컬만), "여기에 착륙"이 확정(선택 권한자만, 한 번). 권한자가 아니면 버튼은 "대기 중"으로 잠기고, 확정 뒤에는 "착륙 준비 중...". 열릴 때 기본 후보지(defaultSiteId)를 미리보기. Roblox 상단 바(GetGuiInset)에 밀리면 아래 패딩을 20까지 줄임. compact나 가상 폭 1200 미만은 지도를 숨기고 머리, 상세, 목록을 세로로 쌓아 스크롤(compact는 실제 px). 문구는 TEXTS site* |
 | LandingCamera.lua | LandingSequence 수신. Config.LANDING_SECONDS 동안 카메라 Scriptable로 하강 연출 후 Custom 복귀 |
 | HUD.lua | (15차) 상단 중앙 Day 패널 아래 랜덤 이벤트 배너: state.event.text 한 줄(예고는 중립 회색, 진행 중은 빨강) + eduText 14pt, event가 nil이면 숨김. topCenter AutomaticSize 안에서 자라 compact 토스트를 밀어 낸다. 모듈 행과 칩에 damaged면 "손상, R로 수리"(빨강). StateUpdate 수신. Energy/Water/Food/Day, 순증감(+3/일 형식, 음수는 빨강), 패널 n/30 (오늘 k/3), 모듈 A/B/C 상태와 진행바, 로버 탱크, 미션 텍스트, 2배속 토글(SetSpeed) |
 | OxygenBar.lua | OxygenUpdate 수신. 실외일 때 강조, 20 이하 경고 |
@@ -270,7 +270,7 @@ ProximityPrompt 공통: `RequiresLineOfSight = false`, `MaxActivationDistance = 
 | DockSignUI.lua | 2026-10-18 추가. ChargePad 위 표지판: DockState와 state.rover.battery로 "도킹됨, 하차하면 충전 시작" / "충전 중 38/50" / "충전 완료" |
 | RadarUI.lua | 로컬 계산. 자신이 DriverSeat에 앉아 있을 때만 표시. Workspace.IceSites 각 파트까지 거리로 점 크기와 방향 표시, Config.RADAR_RANGE 안이면 비프(사운드 선택). 2026-10-18 14차: PC는 좌하단 지름 180, compact(터치 전용 또는 낮은 화면)는 자원 패널 아래 140, 뷰포트가 바뀌면 다시 배치. 거리 문구는 왼쪽 정렬 한 줄(넘치면 말줄임), 배터리 문구는 2줄 |
 | ToastUI.lua | Notify 수신. 3초 표시 후 사라짐. 최대 3개 스택 |
-| ResultUI.lua | 2026-10-19 16차: 요약 아래 "함께 한 일" 표(이름, 패널, 물, 착공, 수리, 산소 고갈은 0이 아닐 때만, 14pt, 4명까지), 승리면 "역대 N위" 배지(Records submitted로 갱신, 저장 전 "기록 저장 중", 상위 밖이면 "상위 10위 밖, 1위 X일"), 명예의 전당 상위 5개(offline이면 상태 문구). 카드는 세로 ScrollingFrame으로 화면 높이 - 24를 넘으면 스크롤. GameOver 수신. 승리/실패 공용. 요약 수치. 재도전 버튼(RequestRestart). 2026-10-18 15차: 맨 아래 "오늘 배운 것"에 FactUI.seenTitles(3) 제목 목록, 없으면 FactUI.resultText(won) 한 문장 |
+| ResultUI.lua | GameOver 수신. 승리/실패 공용. 재도전 버튼(RequestRestart). 2026-10-19 18차: 전체 C안 "루나 소프트"(보라-남색 그라데이션 배경), 왼쪽 7/12 열은 A안 "관제실" 구조를 C 색으로(상태 MISSION COMPLETE 민트/FAILED 빨강 모노 14, 제목 56, 사유 18, 요약 타일 2x2 소요 일수/물 원정/산소 고갈/착륙지는 흰색 반투명 둥근 18 패널과 RobotoMono Bold 숫자, CREW LOG 표, 민트 둥근 재도전 버튼 240x60 + 권한 안내), 오른쪽 5/12 열은 C(금색 둥근 명예의 전당: 머리 오른쪽 알약 "역대 N위!" 또는 저장 중/상위 밖 문구, 상위 5줄 순위와 일수는 Nunito, 내 기록 줄은 금색 바탕 강조, offline 문구. 오늘 배운 것: 색 점 불릿 + FactUI.seenTitles(3), 없으면 FactUI.resultText(won) 한 문장). 640 높이 내용 상자를 가운데 두고 Roblox 상단 바에 밀리면 아래 패딩을 24까지 줄임. compact나 가상 폭 1200 미만은 두 열을 세로로 쌓고(compact는 실제 px, 명예의 전당 3줄), 전체 ScrollingFrame으로 넘침을 스크롤. 열릴 때 0.35초 페이드 인(연출 동안만 CanvasGroup). 16차 데이터 규칙 유지: "함께 한 일" 표(패널, 물 W, 착공, 수리, 산소 고갈은 0이 아닐 때만, 4명까지), 배지는 Records submitted로 갱신, 실패와 대체 표시는 배지 없음. 문구는 TEXTS result*, crew*, record*, restart*, lessonsTitle |
 | FactUI.lua | 2026-10-18 15차 추가. 교육 사실 카드("알고 있나요?"). 화면 오른쪽 세로 중앙(Layout 배율), 한 번에 하나, 세션당 각 1회, 최소 4초 간격, 선택/착륙/결과 화면에서 억제. StateUpdate(phase, panelsInstalled, waterTrips, modules.status), OxygenUpdate(50 미만), RoverBoost.drivingChanged(첫 탑승 20초 뒤)로 트리거. 상태 트리거는 Tip과 겹치지 않게 4초 지연. seenTitles(n)/resultText(won)를 ResultUI에 제공. 2026-10-19 17차: setEnabled(bool) 추가(끄면 지금 카드를 접고 큐는 유지, 켜면 큐부터 재개) |
 | TipUI.lua | Tip 카드(우측 하단 크림색, 한 번에 하나, 세션당 각 1회). 2026-10-19 17차: 아래 여백을 체크 패널 위로 올림(PC 56, compact 230px). setEnabled(bool) 추가(끄면 지금 카드를 즉시 페이드 아웃하고 큐와 본 기록은 유지, 켜면 큐부터 재개) |
 | SettingsUI.lua | 2026-10-19 17차 추가. 우측 하단 체크박스 패널("Tip 표시", "알고 있나요? 표시", 높이 32, Layout 루트 안). PC 오른쪽 16/아래 12, compact 오른쪽 12px/아래 190px. 누르면 TipUI.setEnabled, FactUI.setEnabled. 값은 클라이언트 세션 메모리만(재접속하면 켜짐). 플레이 중에만 보임(Main.client가 setVisible, TipUI/FactUI 억제와 같은 시점). 클릭음은 SoundFX 공용 ui_click |
@@ -322,4 +322,10 @@ RECORDS = {  -- 2026-10-19 16차 기여도와 승리 기록
 },
 -- TEXTS 추가 키(16차): recordsTitle, recordsEmpty, recordsLoading, recordsOffline, recordSaving, recordRank, recordOutside,
 --   recordLine, recordCrewMore, recordDate, crewTitle, crewName, crewPanels, crewWater, crewBuilds, crewRepairs, crewDeaths
+SITE_MAP = {  -- 2026-10-19 18차 착륙지 선택 지도. 지도 그림 660x564 안 비율 좌표, SITES 순서
+  center = { x = 0.5, y = 0.479 },
+  pins = { { x = 0.530, y = 0.564 }, { x = 0.568, y = 0.340 }, { x = 0.276, y = 0.741 }, { x = 0.826, y = 0.706 } },
+},
+-- TEXTS 추가 키(18차 메뉴 리디자인): title*, site*(siteHazardDetail은 hazardLabel 키 표), result*, unitDay, unitCount,
+--   crewLogTitle, crewCol*, crewWaterValue, recordRankPill, recordDays, recordSiteCrew, lessonsTitle, restart*
 ```

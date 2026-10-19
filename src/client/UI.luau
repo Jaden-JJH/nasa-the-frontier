@@ -180,4 +180,128 @@ function UI.progressBar(color, height)
     return bar
 end
 
+-- 메뉴 화면 C안 "루나 소프트" 팔레트와 헬퍼 (2026-10-19 18차, 타이틀, 착륙지 선택, 결과 화면).
+-- 목업 1280x720 기준 수치를 그대로 쓴다. 한글은 어떤 폰트든 시스템 폰트로 대체되므로 영문과 숫자에만 폰트가 보인다.
+-- 역할 분리: 제목과 큰 숫자는 둥근 Nunito, 표 데이터는 RobotoMono, 한글은 기존 Gotham.
+UI.Luna = {
+    bgTop = Color3.fromRGB(20, 33, 92), -- #14215c
+    bgMid = Color3.fromRGB(42, 42, 120), -- #2a2a78
+    bgBottom = Color3.fromRGB(75, 47, 134), -- #4b2f86
+    mint = Color3.fromRGB(126, 224, 184), -- 주 버튼, 선택, 성공 (#7ee0b8)
+    gold = Color3.fromRGB(255, 209, 102), -- 에너지, 명예의 전당 (#ffd166)
+    sky = Color3.fromRGB(143, 211, 255), -- 물, 정보 (#8fd3ff)
+    orange = Color3.fromRGB(255, 179, 107), -- 산소 (#ffb36b)
+    red = Color3.fromRGB(255, 157, 157), -- 실패, 험한 지형 (#ff9d9d)
+    soft = Color3.fromRGB(223, 230, 255), -- 부제, 설명 (#dfe6ff)
+    body = Color3.fromRGB(228, 235, 255), -- 패널 본문 (#e4ebff)
+    label = Color3.fromRGB(207, 216, 247), -- 라벨, 보조 (#cfd8f7)
+    dim = Color3.fromRGB(170, 182, 220), -- 흐린 글자 (#aab6dc)
+    faint = Color3.fromRGB(127, 143, 189), -- 지도 라벨, 비선택 번호 (#7f8fbd)
+    ink = Color3.fromRGB(15, 42, 58), -- 민트, 금색 위 글자 (#0f2a3a)
+    inkDeep = Color3.fromRGB(11, 18, 48), -- 착륙 버튼, 아바타 글자 (#0b1230)
+    pin = Color3.fromRGB(43, 47, 120), -- 비선택 핀 (#2b2f78)
+    crater = Color3.fromRGB(60, 70, 120), -- 지도 크레이터 음영
+    white = Color3.new(1, 1, 1),
+}
+UI.LUNA_PANEL_TRANSPARENCY = 0.9 -- rgba(255,255,255,0.10)
+UI.LUNA_STROKE_TRANSPARENCY = 0.86 -- rgba(255,255,255,0.14)
+
+UI.Mono = Enum.Font.RobotoMono
+UI.MonoBold = Font.new("rbxasset://fonts/families/RobotoMono.json", Enum.FontWeight.Bold)
+UI.RoundHeavy = Font.new("rbxasset://fonts/families/Nunito.json", Enum.FontWeight.Heavy)
+UI.RoundBold = Font.new("rbxasset://fonts/families/Nunito.json", Enum.FontWeight.ExtraBold)
+
+-- 루나 배경 그라데이션 (CSS linear-gradient 160deg = Roblox Rotation 70)
+function UI.lunaGradient()
+    local l = UI.Luna
+    return UI.create("UIGradient", {
+        Rotation = 70,
+        Color = ColorSequence.new({
+            ColorSequenceKeypoint.new(0, l.bgTop),
+            ColorSequenceKeypoint.new(0.55, l.bgMid),
+            ColorSequenceKeypoint.new(1, l.bgBottom),
+        }),
+    })
+end
+
+-- 흰색 반투명 둥근 패널. radius 기본 18, 테두리는 stroke=false로 끈다
+function UI.lunaPanel(props, children, radius, withStroke)
+    local merged = table.clone(props or {})
+    merged.BackgroundColor3 = merged.BackgroundColor3 or UI.Luna.white
+    if merged.BackgroundTransparency == nil then
+        merged.BackgroundTransparency = UI.LUNA_PANEL_TRANSPARENCY
+    end
+    local panel = UI.create("Frame", merged, children)
+    UI.corner(radius or 18).Parent = panel
+    if withStroke ~= false then
+        UI.stroke(UI.Luna.white, 1, UI.LUNA_STROKE_TRANSPARENCY).Parent = panel
+    end
+    return panel
+end
+
+-- 원 (아이콘 대신 색 점). ring이면 속이 빈 테두리 원
+function UI.dot(size, color, props, ring)
+    local merged = table.clone(props or {})
+    merged.Size = UDim2.fromOffset(size, size)
+    merged.BackgroundColor3 = color
+    merged.BackgroundTransparency = if ring then 1 else (merged.BackgroundTransparency or 0)
+    local dot = UI.create("Frame", merged, { UI.roundCorner() })
+    if ring then
+        UI.stroke(color, 2.5, 0).Parent = dot
+    end
+    return dot
+end
+
+-- 체크 표시 (두 막대를 기울여 그린다, 16x16)
+function UI.checkMark(color, props)
+    local merged = table.clone(props or {})
+    merged.Size = UDim2.fromOffset(16, 16)
+    merged.BackgroundTransparency = 1
+    return UI.create("Frame", merged, {
+        UI.create("Frame", {
+            Name = "Short",
+            AnchorPoint = Vector2.new(0.5, 0.5),
+            Position = UDim2.fromOffset(5, 10),
+            Size = UDim2.fromOffset(7, 3),
+            Rotation = 45,
+            BackgroundColor3 = color,
+        }, { UI.roundCorner() }),
+        UI.create("Frame", {
+            Name = "Long",
+            AnchorPoint = Vector2.new(0.5, 0.5),
+            Position = UDim2.fromOffset(10, 8),
+            Size = UDim2.fromOffset(13, 3),
+            Rotation = -50,
+            BackgroundColor3 = color,
+        }, { UI.roundCorner() }),
+    })
+end
+
+-- 모노 라벨 (기본 RobotoMono 14). 굵게는 FontFace = UI.MonoBold
+function UI.monoLabel(props, children)
+    local merged = table.clone(props or {})
+    if merged.Font == nil and merged.FontFace == nil then
+        merged.Font = UI.Mono
+    end
+    merged.TextSize = merged.TextSize or 14
+    merged.TextColor3 = merged.TextColor3 or UI.Luna.label
+    return UI.create("TextLabel", merged, children)
+end
+
+-- 버튼 hover: 마우스가 올라오면 배경 투명도만 바꾼다
+function UI.hoverTransparency(button, normal, hovered)
+    button.MouseEnter:Connect(function()
+        button.BackgroundTransparency = hovered
+    end)
+    button.MouseLeave:Connect(function()
+        button.BackgroundTransparency = normal
+    end)
+end
+
+-- Roblox 상단 바(메뉴, 채팅 버튼) 높이를 가상 좌표로. 위쪽 문구가 상단 바에 가리지 않게 쓴다
+function UI.topInset(unit)
+    local inset = game:GetService("GuiService"):GetGuiInset()
+    return inset.Y / (unit or 1)
+end
+
 return UI

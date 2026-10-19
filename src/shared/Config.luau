@@ -427,6 +427,18 @@ local Config = {
         },
     } :: { SiteDef },
 
+    -- 착륙지 선택 화면 지도 (2026-10-19 18차). 지도 그림 660x564 안의 비율 좌표, SITES 순서.
+    -- 위도 링 반지름은 85 S 250, 87 S 170, 89 S 90 (px). 실제 지형이 아니라 단순화한 배치
+    SITE_MAP = {
+        center = { x = 0.5, y = 0.479 }, -- 남극점 S
+        pins = {
+            { x = 0.530, y = 0.564 }, -- Shackleton Rim: 남극점 바로 옆
+            { x = 0.568, y = 0.340 }, -- de Gerlache Ridge: 89 S 링 위
+            { x = 0.276, y = 0.741 }, -- Malapert Massif: 86 S 근처
+            { x = 0.826, y = 0.706 }, -- Nobile Crater: 85 S 링 근처
+        },
+    },
+
     -- 그레이박스 맵(DevMap) 게임 영향 수치. 레이아웃 좌표는 DevMap.luau 상단 상수에 있다
     DEV_MAP = {
         iceDistanceBySite = { 450, 300, 180, 100 }, -- 패드 중심에서 가장 가까운 얼음 지점까지 studs
@@ -621,6 +633,78 @@ local Config = {
         crewBuilds = "착공",
         crewRepairs = "수리",
         crewDeaths = "산소 고갈",
+
+        -- 메뉴 화면 리디자인 (2026-10-19 18차, C 루나 소프트 + 결과 왼쪽 열 A 관제실)
+        titleBadge = "달 남극 기지 건설 프로젝트",
+        titleName = "The\nFrontier",
+        titleSubtitle = "3개월 안에 거주, 식량, 연구 시설을 완성해\n달 기지를 세우세요",
+        titleStart = "시작하기",
+        titleChipEnergy = "에너지를 모으고",
+        titleChipWater = "물을 캐고",
+        titleChipFood = "식량을 기르세요",
+        titleCrew = "2~4명이 함께하는 협력 생존 게임",
+
+        siteTitle = "어디에 착륙할까요?",
+        siteSubtitle = "달 남극 후보지 4곳. 실제 아르테미스 후보지 이름을 썼고 위치는 단순화했어요.",
+        siteChooserOther = "%s님이 고르는 중", -- 이름은 굵게 (RichText)
+        siteChooserMe = "내가 고를 차례예요",
+        siteAutoPick = "자동 선택까지",
+        siteSecondsUnit = "초",
+        siteMapTitle = "달 남극 (위에서 본 모습)",
+        siteEarth = "지구 방향",
+        siteLatitude = "%d S",
+        siteLegendCrater = "크레이터",
+        siteLegendLatitude = "위도",
+        siteLegendSelected = "선택한 곳",
+        siteIndex = "%02d / %02d",
+        siteRecommended = "처음이라면 추천",
+        siteSunLabel = "일조율",
+        siteIceLabel = "얼음까지",
+        siteHazardLabel = "지형 위험",
+        sitePercent = "%d%%",
+        siteStuds = "%d studs",
+        siteRoundTrip = "로버 왕복 약 %s", -- ROVER.maxSpeed 기준 왕복 시간
+        siteMinutes = "%d분",
+        siteSeconds = "%d초",
+        -- 지형 위험 한 줄 설명 (SITES.hazardLabel 키)
+        siteHazardDetail = {
+            ["낮음"] = "길이 비교적 평탄해요",
+            ["중간"] = "바위와 크레이터가 길에 조금 있어요",
+            ["높음"] = "바위가 많아 로버가 부딪히기 쉬워요",
+        } :: { [string]: string },
+        siteListIce = "얼음 %s",
+        siteListRough = "지형 험함", -- hazardLabel이 "높음"이면 목록 오른쪽 칸에 대신 표시
+        siteLand = "여기에 착륙",
+        siteWaiting = "대기 중",
+        siteChosen = "착륙 준비 중...",
+
+        resultWonTag = "MISSION COMPLETE",
+        resultLostTag = "MISSION FAILED",
+        resultWon = "임무 성공",
+        resultLost = "임무 실패",
+        resultDays = "소요 일수",
+        resultTrips = "물 원정",
+        resultDeaths = "산소 고갈",
+        resultSite = "착륙지",
+        unitDay = "일",
+        unitCount = "회",
+        crewLogTitle = "CREW LOG / 함께 한 일",
+        crewColPanels = "PANEL",
+        crewColWater = "WATER",
+        crewColBuilds = "BUILD",
+        crewColRepairs = "REPAIR",
+        crewColDeaths = "O2 OUT",
+        crewWaterValue = "%d W",
+        recordRankPill = "역대 %d위!", -- 결과 화면 금색 알약 배지
+        recordDays = "%d일",
+        recordSiteCrew = "%s, %s", -- 착륙지, 승무원
+        lessonsTitle = "오늘 배운 것",
+        restartLabel = "재도전",
+        restartCountdown = "재도전 %d초 후",
+        restartPending = "다시 준비 중...",
+        restartChooserHint = "착륙지를 고른 대원만 재도전을 시작할 수 있어요",
+        restartWaitChooser = "선택 권한자(%s)가 재도전을 결정합니다",
+        restartWaitChooserUnknown = "선택 권한자가 재도전을 결정합니다",
 
         labelLocked = "%s (잠김)",
         labelAvailable = "%s 착공 가능",
