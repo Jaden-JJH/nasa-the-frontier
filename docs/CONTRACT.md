@@ -182,13 +182,14 @@ export type RecordsPayload = {
 | ResourceState.lua | GameState 단일 테이블 보유. 변경 함수와 `publish()`(StateUpdate 송신). 순수 계산은 Shared.Simulation 호출 |
 | LandingSite.lua | 선택 단계, 권한자, 타임아웃, BaseKit 복제와 배치 |
 | SolarPanels.lua | InstallPad 프롬프트, 하루 설치 제한, 슬롯에 패널 복제. syncCount(15차): 월드 패널 수를 state.panelsInstalled에 맞춘다(운석 파괴면 번호가 큰 Panel{n}부터 지우고 충돌음, 다음 설치가 같은 슬롯을 채운다) |
-| Construction.lua | PadA/B/C 프롬프트, 비용 검증, 건설 타이머, 고스트/완성 모델 전환, 선행 조건 |
+| Construction.lua | PadA/B/C 건설 프롬프트, 비용 검증, 건설 타이머, 고스트/완성 모델 전환, 선행 조건. 2026-10-19 19차: 가동 중지 프롬프트(PausePrompt)를 제거하고 ModulePanels로 옮김. placedBuilt(id)로 완공 위치의 Built와 Pad 파트를 알려 준다 |
+| ModulePanels.lua | 2026-10-19 19차 추가. 완공된 모듈 외벽 제어반(ControlPanel). 기지 Origin 축 기준 Built 경계 상자 네 면 중 Origin 쪽 면 바깥 CONTROL_PANEL.wallGap, 면 중앙에서 오른쪽 sideOffset(문이 있으면 피함), 패드 윗면 + height. 실제 외벽이 경계 상자보다 안쪽이면 광선으로 snapDepth 안에서 붙인다. SurfaceGui 네 줄(이름 "Farm 제어반", 상태 가동 중/대기 중/외벽 손상, 효과, 조작 안내)과 Neon 상태 표시등(초록, 노랑, 빨강 깜빡임). PausePrompt(canPause 모듈, E 홀드 toggleHold 1초, 거리 promptDistance 8, 토글 때 toggleSound)와 RepairPrompt(R 홀드 repairHold 4초, 거리 8, 손상이고 플레이 중일 때만)를 소유한다. 모듈이 active가 된 뒤 refresh에서 만들고 detach(재시작)에서 지운다. GameFlow가 Construction.attach 다음에 attach, refreshPrompts에서 Construction.sync 다음에 refresh |
 | WaterLoop.lua | 로버 탱크(Attribute "Tank"), 얼음 지점 프롬프트(매장량만큼 채움, 고갈 처리), 물탱크 프롬프트(하역, 로버가 TANK_UNLOAD_DISTANCE 안에 있을 때만, 하역 1 W당 WATER_PROCESS_ENERGY_PER_W 에너지 소모, 에너지가 모자라면 처리 가능한 만큼만), 로버 복구(수동 프롬프트 + 자동) |
 | Sfx.lua | 2026-10-18 추가. 서버 3D 효과음 재생 헬퍼. Shared.SoundIds의 키로 Sound를 만들어 파트에 붙여 재생(id 0이면 무음). 루프 사운드는 핸들을 돌려줘 멈출 수 있음 |
 | RoverBattery.lua | 2026-10-18 추가. 로버 배터리 소모(주행 중, 속도 > 1일 때만), 0이면 RoverDrive 속도 배율 0. 충전 패드 판정과 충전(기지 에너지 차감). 25% 이하 경고 Notify 1회(충전되면 리셋) |
 | RoverDamage.lua | 2026-10-18 추가. 바위(Attribute BoulderLayer)와 12 studs/s 이상 충돌 시 파손 +1(1초 중복 방지), 파손당 최고 속도 10% 감소(파손 1: 16.2, 파손 2: 14.4), 3이면 정지. 로버 섀시의 "수리" 프롬프트(키 R, 홀드 4초, 에너지 10, 좌석 비어 있을 때)로 복구. 탑승 프롬프트(E)와 같은 섀시라 키를 나눔. Config.ROVER_DAMAGE.enabled로 끌 수 있음 |
 | Events.lua | 2026-10-18 15차 추가. DayTick 앞뒤 상태를 Simulation.eventNotices로 비교해 랜덤 이벤트 토스트(폭풍 예고, 시작, 끝, 운석 충돌)를 보내고 운석이 모듈을 때리면 그 Pad에서 rover_hit 효과음. 규칙은 전부 Simulation |
-| ModuleRepair.lua | 2026-10-18 15차 추가. PadA/B/C의 Pad 파트마다 "외벽 수리" 프롬프트(이름 RepairPrompt, 키 EVENTS.micrometeoroid.repairKey R, 홀드 repairHold 4초, 거리 promptDistance 12). 그 모듈이 damaged이고 플레이 중일 때만 켜짐. Simulation.repairModule(전력 repairEnergy 10, 모자라면 거절 토스트). 홀드 동안 rover_repair 루프. 건설 프롬프트가 Pad의 첫 프롬프트로 남도록 Construction 다음에 붙인다 |
+| ModuleRepair.lua | 2026-10-18 15차 추가, 19차 축소. 외벽 수리 규칙과 소리만 맡는다(프롬프트는 ModulePanels가 제어반에 붙인다). repair(player, id, at): Simulation.repairModule(전력 repairEnergy 10, 모자라면 거절 토스트), 기여도 수리 +1, 성공음과 알림. beginHold(at)/endHold(): 홀드 동안 rover_repair 루프 |
 | Oxygen.lua | 플레이어별 산소. 실외 소모에 Simulation.outdoorOxygenMultiplier(폭풍 중 1.5)를 곱한다(15차). 실내 판정(OxygenZone 파트 안 또는 VehicleSeat 착석). 0이면 즉시 GameFlow.lose(2026-10-18 12차). 그 외 사망(리셋)에는 Food -1, Water -2 |
 | GameFlow.lua | phase 전이, 승리/실패 판정, 재시작 |
 | DevMap.lua | Workspace.LandingPads가 없으면 그레이박스 맵과 ServerStorage.BaseKit을 Part로 생성 |
@@ -242,7 +243,8 @@ ServerStorage
         Slot1 .. Slot25 (Part)      패널이 놓일 자리(2026-10-18: 30 -> 25, 5 x 5). 설치되면 PanelTemplate 복제본이 위에 생김
     ModulePads (Folder)
       PadA, PadB, PadC (Model)    Attribute ModuleId(string, A/B/C). 클라이언트 표지판이 이걸로 찾는다
-        Pad (Part)                  ProximityPrompt 부착 대상. ActionText "건설 시작". PadB는 완공 후 두 번째 프롬프트 "가동 중지" / "가동 재개"(2026-10-18 추가, 서버 Construction이 관리). 세 패드 모두 "외벽 수리" 프롬프트 RepairPrompt(키 R, 15차, 서버 ModuleRepair, 손상일 때만 켜짐)
+        Pad (Part)                  ProximityPrompt 부착 대상. ActionText "건설 시작". 19차부터 Pad에는 건설 프롬프트만 있다(가동 중지와 외벽 수리는 ControlPanel)
+        ControlPanel (Part)         2026-10-19 19차 추가. 서버 ModulePanels가 완공 뒤 만든다(완공 전에는 없음, 재시작이면 지움). 모듈 외벽의 Origin 쪽 면에 붙은 제어반. 자식: Screen(SurfaceGui, Front, Content 아래 TextLabel Title, Status, Effect, Hint), StatusLight(Neon Part, PointLight), PausePrompt(PadB만, "가동 중지" / "가동 재개", E 홀드 1초, 거리 8), RepairPrompt("외벽 수리", R 홀드 4초, 거리 8, 손상일 때만 켜짐). 두 프롬프트 ObjectText "<모듈 이름> 제어반"
         Ghost (Model)               반투명 미리보기. 착공 가능할 때 표시, 착공하면 숨김(2026-10-18 변경). 건설 중에는 Built가 진행률만큼 땅에서 솟아오름
         Built (Model)               완공 모델. active 전에는 Parent를 ServerStorage로 빼두거나 투명
         OxygenZone (Part)           PadA에만 있음
@@ -251,7 +253,7 @@ ServerStorage
   PanelTemplate (Model)             태양광 패널 1장
 ```
 
-ProximityPrompt 공통: `RequiresLineOfSight = false`, `MaxActivationDistance = 12`, `Style = Custom`(2026-10-17 변경). 서버는 ObjectText(대상 이름)와 ActionText(동작)만 채우고, 화면 표시는 클라이언트 PromptUI가 ProximityPromptService 이벤트로 그린다. 로버 탑승은 로버 섀시의 프롬프트(ObjectText "로버", ActionText "탑승")로 하며 Triggered 시 서버가 seat:Sit를 호출한다. 에어락 문 프롬프트(ObjectText "에어락", ActionText "열기", 거리 8)는 서버 Airlock 모듈이 관리하고 열림 상태를 문 Part의 Transparency와 CanCollide로 표현한다. 로버 복구 콘솔 프롬프트 거리는 8. 모듈 패드 표지판은 서버가 만들지 않고 클라이언트 PadSignUI가 PadX 모델의 Attribute `ModuleId`(A/B/C)와 state.modules로 그린다. 로버 얼음 프롬프트는 각 Ice 파트에 서버가 부착하고, 로버 DriverSeat에 플레이어가 앉아 있고 Ice와 로버 거리가 Config.ICE_PROMPT_DISTANCE 이내일 때만 Enabled.
+ProximityPrompt 공통: `RequiresLineOfSight = false`, `MaxActivationDistance = 12`, `Style = Custom`(2026-10-17 변경). 서버는 ObjectText(대상 이름)와 ActionText(동작)만 채우고, 화면 표시는 클라이언트 PromptUI가 ProximityPromptService 이벤트로 그린다. 로버 탑승은 로버 섀시의 프롬프트(ObjectText "로버", ActionText "탑승")로 하며 Triggered 시 서버가 seat:Sit를 호출한다. 에어락 문 프롬프트(ObjectText "에어락", ActionText "열기", 거리 8)는 서버 Airlock 모듈이 관리하고 열림 상태를 문 Part의 Transparency와 CanCollide로 표현한다. 로버 복구 콘솔 프롬프트 거리는 8. 모듈 제어반 프롬프트(19차, 가동 중지 E 홀드 1초, 외벽 수리 R 홀드 4초)는 ControlPanel 파트에 붙고 거리 8. 모듈 패드 표지판은 서버가 만들지 않고 클라이언트 PadSignUI가 PadX 모델의 Attribute `ModuleId`(A/B/C)와 state.modules로 그린다. 로버 얼음 프롬프트는 각 Ice 파트에 서버가 부착하고, 로버 DriverSeat에 플레이어가 앉아 있고 Ice와 로버 거리가 Config.ICE_PROMPT_DISTANCE 이내일 때만 Enabled.
 
 ## 5. 클라이언트 모듈 경계 (src/client)
 
@@ -264,7 +266,7 @@ ProximityPrompt 공통: `RequiresLineOfSight = false`, `MaxActivationDistance = 
 | HUD.lua | (15차) 상단 중앙 Day 패널 아래 랜덤 이벤트 배너: state.event.text 한 줄(예고는 중립 회색, 진행 중은 빨강) + eduText 14pt, event가 nil이면 숨김. topCenter AutomaticSize 안에서 자라 compact 토스트를 밀어 낸다. 모듈 행과 칩에 damaged면 "손상, R로 수리"(빨강). StateUpdate 수신. Energy/Water/Food/Day, 순증감(+3/일 형식, 음수는 빨강), 패널 n/30 (오늘 k/3), 모듈 A/B/C 상태와 진행바, 로버 탱크, 미션 텍스트, 2배속 토글(SetSpeed) |
 | OxygenBar.lua | OxygenUpdate 수신. 실외일 때 강조, 20 이하 경고 |
 | PromptUI.lua | 커스텀 ProximityPrompt 표시(키 아이콘, ObjectText, ActionText, 홀드 진행 바). 서버 프롬프트는 전부 Style Custom |
-| PadSignUI.lua | 모듈 패드 위 표지판(이름, 상태 배지, 진행 바, 비용). PadX의 ModuleId Attribute와 state.modules 사용 |
+| PadSignUI.lua | 모듈 패드 위 표지판(이름, 상태 배지, 진행 바, 비용). PadX의 ModuleId Attribute와 state.modules 사용. 19차: 완공 뒤에는 이름과 상태 배지(가동 중, 대기 중, 외벽 손상)만. 효과와 조작 안내는 외벽 제어반 |
 | Layout.lua | 2026-10-18 추가. 화면 높이 기준 배율(높이/720, 0.7~1.25)과 압축 배치 판정(터치 전용 또는 높이 600 미만). HUD, 토스트, 레이더, 산소 UI, Tip, 사실 카드가 공유 |
 | SoundFX.lua | 2026-10-18 추가. 클라이언트 2D 효과음: 호흡 루프(산소 비례), 산소 경고, UI 클릭, 토스트음, 미션 전진, 승패 스팅어, 로버 승하차와 엔진(자기 로버) |
 | DockSignUI.lua | 2026-10-18 추가. ChargePad 위 표지판: DockState와 state.rover.battery로 "도킹됨, 하차하면 충전 시작" / "충전 중 38/50" / "충전 완료" |
@@ -308,13 +310,21 @@ EVENTS = {  -- 2026-10-18 15차 랜덤 이벤트
   enabled = true,
   solarStorm = { startDayMin = 30, startDayMax = 50, warningDays = 2, durationDays = 2, panelMultiplier = 0.5, outdoorOxygenMultiplier = 1.5 },
   micrometeoroid = { countMin = 1, countMax = 2, dayMin = 15, dayMax = 80, minGapDays = 10, bannerDays = 2,
-                     repairEnergy = 10, repairHold = 4, repairKey = "R", promptDistance = 12,
+                     repairEnergy = 10, repairHold = 4, repairKey = "R",  -- 19차: promptDistance 제거(CONTROL_PANEL.promptDistance)
                      graceDaysAfterActivation = 5, noRepeatTarget = true },
 },
 -- TEXTS 추가 키(15차): stormWarning, stormStart, stormEnd, stormBannerWarning, stormBannerActive, stormEdu,
 --   meteorModule, meteorPanel, meteorMiss, meteorBannerModule, meteorBannerPanel, meteorBannerMiss, meteorEdu,
 --   moduleDamagedStatus, upkeepDamaged, moduleRepaired, moduleRepairNotNeeded
 -- PROMPT_TEXTS.repairModule = "외벽 수리", TIPS.storm(첫 폭풍 예고), TIPS.moduleDamage(첫 모듈 손상, TipUI 트리거)
+CONTROL_PANEL = {  -- 2026-10-19 19차 모듈 외벽 제어반 (ModulePanels). PROMPT.pauseDistance는 제거
+  size = { 3, 1.9, 0.3 }, wallGap = 0.2, sideOffset = 3, doorMargin = 0.5, snapDepth = 3, height = 3.2,
+  lightHeight = 0.18, lightRange = 8, lightBrightness = 1.5, promptDistance = 8, pauseKey = "E", toggleHold = 1.0,
+  blinkSeconds = 0.8, pixelsPerStud = 70, textSizes = { title = 16, status = 26, body = 14 }, guiMaxDistance = 100,
+  toggleSound = "ui_click", colors = { body, bezel, text, textDim, running, paused, damaged, off },  -- RGB
+},
+-- TEXTS 추가 키(19차): panelRunning, panelPaused, panelDamaged, panelPausedEffect, panelDamagedEffect,
+--   panelPauseHint, panelResumeHint, panelRepairHint. PROMPT_TEXTS.panelObject = "%s 제어반"
 RECORDS = {  -- 2026-10-19 16차 기여도와 승리 기록
   enabled = true, datastoreName = "FrontierRecords", key = "top", maxEntries = 10, showTop = 5,
   crewNameLimit = 4, crewShowNames = 2, crewRows = 4, crewWaterWeight = 0.1, nameMaxLength = 20,

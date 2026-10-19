@@ -3734,6 +3734,64 @@ for _, s in sent do
     end
 end
 check(padAPrompt.Enabled == false, "건설 중 프롬프트 비활성")
+-- 모듈 제어반 (2026-10-19 19차): 완공된 모듈 외벽, Origin 쪽 면에 붙는 패널. 가동 중지와 외벽 수리 프롬프트가 여기에
+local ModulePanels = loadModule(Server:FindFirstChild("ModulePanels"))
+local KitImportsCP = loadModule(Server:FindFirstChild("KitImports"))
+local CP = Config.CONTROL_PANEL
+local function panelText(panel, name)
+    local label = panel and panel:FindFirstChild(name, true)
+    return if label then label.Text else nil
+end
+-- 위치 검사: Built 경계 상자(기지 축) 밖, Origin 쪽 면 바깥 wallGap, 면 중앙에서 오른쪽 sideOffset,
+-- 패드 윗면 + height, 앞면이 바깥(Origin 쪽), 패드 중심보다 Origin에 가깝다. 반환: 통과 여부, 설명
+local function panelPlacement(padModel)
+    local panel = padModel:FindFirstChild("ControlPanel")
+    local built = padModel:FindFirstChild("Built")
+    if not panel or not built then
+        return false, "제어반 또는 Built 없음"
+    end
+    local frame = ModulePanels.baseFrame(base)
+    local lo, hi = KitImportsCP.boundsIn(built, frame)
+    local _, padHi = KitImportsCP.boundsIn(padModel.Pad, frame)
+    local p = frame:PointToObjectSpace(panel.CFrame.Position)
+    local normal = frame:VectorToObjectSpace(panel.CFrame.LookVector)
+    local axis = math.abs(math.abs(normal.X) + math.abs(normal.Z) - 1) < 1e-3
+        and math.abs(normal.Y) < 1e-3
+    local cx, cz = (lo.X + hi.X) / 2, (lo.Z + hi.Z) / 2
+    local half = (hi - lo) / 2
+    local halfN = math.abs(normal.X) * half.X + math.abs(normal.Z) * half.Z
+    local rel = Vector3.new(p.X - cx, 0, p.Z - cz)
+    local outside = rel:Dot(normal) - halfN
+    local right = (-normal):Cross(Vector3.yAxis)
+    local lateral = rel:Dot(right)
+    local padLocal = frame:PointToObjectSpace(padModel.Pad.CFrame.Position)
+    local panelR = Vector3.new(p.X, 0, p.Z).Magnitude
+    local padR = Vector3.new(padLocal.X, 0, padLocal.Z).Magnitude
+    local towardOrigin = normal:Dot(-Vector3.new(cx, 0, cz).Unit)
+    local ok = axis
+        and math.abs(outside - (CP.wallGap + CP.size[3] / 2)) < 1e-3
+        and math.abs(lateral - CP.sideOffset) < 1e-3
+        and math.abs(p.Y - (padHi.Y + CP.height)) < 1e-3
+        and towardOrigin > 0.5
+        and panelR < padR
+    return ok,
+        string.format(
+            "기지 기준 (%.1f, %.1f, %.1f), 법선 (%.0f, %.0f), 면 밖 %.2f, 오른쪽 %.2f, Origin 거리 %.1f < 패드 중심 %.1f",
+            p.X,
+            p.Y,
+            p.Z,
+            normal.X,
+            normal.Z,
+            outside,
+            lateral,
+            panelR,
+            padR
+        )
+end
+check(
+    base.ModulePads.PadA:FindFirstChild("ControlPanel") == nil and ModulePanels.count() == 0,
+    "건설 중에는 제어반 없음"
+)
 -- 건설 연출 (2026-10-18): 착공하면 Ghost를 숨기고 Built가 완전히 묻힌 자리(바닥 = 지면 - 높이)에서 진행률만큼 올라온다
 local Construction = loadModule(Server:FindFirstChild("Construction"))
 local risingBuiltA = base.ModulePads.PadA:FindFirstChild("Built")
@@ -3795,6 +3853,65 @@ advance(
 check(state().day == dayStart + 5 and state().modules.A.status == "active", "5일 뒤 A 가동")
 check(Construction.builtOffset("A") == 0, "완공하면 Built 최종 위치")
 do
+    local panelA = base.ModulePads.PadA:FindFirstChild("ControlPanel")
+    local ok, detail = panelPlacement(base.ModulePads.PadA)
+    check(ok, "Habitat A 완공: 외벽 제어반 " .. detail)
+    print("        PadA 제어반 월드 " .. tostring(panelA and panelA.CFrame.Position))
+    local screen = panelA and panelA:FindFirstChild("Screen")
+    local light = panelA and panelA:FindFirstChild("StatusLight")
+    check(
+        panelA ~= nil
+            and panelA:IsA("BasePart")
+            and panelA.Anchored
+            and not panelA.CanCollide
+            and math.abs(panelA.Size.X - CP.size[1]) < 1e-3
+            and math.abs(panelA.Size.Y - CP.size[2]) < 1e-3
+            and screen ~= nil
+            and screen:IsA("SurfaceGui")
+            and screen.Face == roblox.Enum.NormalId.Front
+            and screen.PixelsPerStud == CP.pixelsPerStud
+            and light ~= nil
+            and light.Material == roblox.Enum.Material.Neon
+            and light.Color == roblox.Color3.fromRGB(table.unpack(CP.colors.running))
+            and light:FindFirstChildOfClass("PointLight") ~= nil,
+        "제어반 파트(고정, 충돌 없음), 앞면 SurfaceGui, Neon 표시등 초록"
+    )
+    check(
+        panelText(panelA, "Title") == "Habitat 제어반"
+            and panelText(panelA, "Status") == Config.TEXTS.panelRunning
+            and panelText(panelA, "Effect") == string.format(
+                "물 -%d/일, 전력 -%d/일",
+                Config.MODULES.A.upkeep.water,
+                Config.MODULES.A.upkeep.energy
+            )
+            and panelA:FindFirstChild("Hint", true).Visible == false,
+        "Habitat 제어반 표면: 이름, '가동 중', 유지비 ("
+            .. tostring(panelText(panelA, "Effect"))
+            .. ")"
+    )
+    local minText = math.huge
+    for _, d in panelA:GetDescendants() do
+        if d:IsA("TextLabel") then
+            minText = math.min(minText, d.TextSize)
+        end
+    end
+    check(minText >= 14, "제어반 글자 크기 14 이상 (최소 " .. minText .. ")")
+    check(
+        panelA:FindFirstChild("PausePrompt") == nil
+            and panelA:FindFirstChild("RepairPrompt") ~= nil
+            and panelA.RepairPrompt.Enabled == false
+            and base.ModulePads.PadA.Pad:FindFirstChild("RepairPrompt") == nil
+            and #base.ModulePads.PadA.Pad:GetChildren() >= 1
+            and base.ModulePads.PadA.Pad:FindFirstChild("PausePrompt") == nil,
+        "Habitat 제어반: 가동 중지 없음, 수리 프롬프트는 손상 전 꺼짐, Pad에는 건설 프롬프트만"
+    )
+    check(
+        base.ModulePads.PadB:FindFirstChild("ControlPanel") == nil
+            and base.ModulePads.PadC:FindFirstChild("ControlPanel") == nil,
+        "아직 안 지은 Farm, Lab에는 제어반 없음"
+    )
+end
+do
     -- 저장 상한: 940을 들고 있으면 첫 DayTick에 상한(150)으로 잘리고 한 번 알린다. 계속 버려지면 5일마다
     local wasteSent = -wasteSentBefore
     for _, s in sent do
@@ -3842,10 +3959,11 @@ check(
     "B 가동, C 해금"
 )
 
--- Farm 가동 중지 (2026-10-18) ------------------------------------------------
+-- Farm 가동 중지 (2026-10-18, 19차부터 외벽 제어반) ---------------------------------
 do
     local padB = base.ModulePads.PadB.Pad
-    local pausePrompt = padB:FindFirstChild("PausePrompt")
+    local panelB = base.ModulePads.PadB:FindFirstChild("ControlPanel")
+    local pausePrompt = panelB and panelB:FindFirstChild("PausePrompt")
     local doneB = false
     for _, s in sent do
         if
@@ -3853,7 +3971,7 @@ do
             and string.find(tostring(s.args[1]), "Farm 가동 시작", 1, true) == 1
             and string.find(
                 tostring(s.args[1]),
-                "물이 모자라면 Farm 패드에서 끌 수 있습니다",
+                "Farm 벽의 제어반에서 E를 길게 눌러 대기 모드로",
                 1,
                 true
             )
@@ -3861,23 +3979,71 @@ do
             doneB = true
         end
     end
-    check(doneB, "Farm 완공 알림에 생산과 유지비, 끄는 법")
+    check(doneB, "Farm 완공 알림에 생산과 유지비, 제어반에서 끄는 법")
+    do
+        local ok, detail = panelPlacement(base.ModulePads.PadB)
+        check(ok, "Farm 완공: 외벽 제어반 " .. detail)
+        print("        PadB 제어반 월드 " .. tostring(panelB and panelB.CFrame.Position))
+    end
     check(
         pausePrompt ~= nil
             and pausePrompt:IsA("ProximityPrompt")
-            and pausePrompt.ObjectText == "Farm"
+            and pausePrompt.ObjectText == "Farm 제어반"
             and pausePrompt.ActionText == Config.PROMPT_TEXTS.pauseModule
-            and pausePrompt.HoldDuration == 0
-            and pausePrompt.MaxActivationDistance == Config.PROMPT.pauseDistance
+            and pausePrompt.KeyboardKeyCode == roblox.Enum.KeyCode.E
+            and pausePrompt.HoldDuration == 1
+            and pausePrompt.MaxActivationDistance == 8
+            and pausePrompt.RequiresLineOfSight == false
             and pausePrompt.Style == roblox.Enum.ProximityPromptStyle.Custom
             and pausePrompt.Enabled == true,
-        "완공된 Farm 패드에 '가동 중지' 프롬프트 (Farm, 홀드 0, 거리 8, Custom)"
+        "Farm 제어반에 '가동 중지' 프롬프트 (Farm 제어반, E, 홀드 1, 거리 8, Custom)"
     )
     check(
-        base.ModulePads.PadA.Pad:FindFirstChild("PausePrompt") == nil
-            and base.ModulePads.PadC.Pad:FindFirstChild("PausePrompt") == nil,
-        "Habitat A와 Lab C에는 가동 중지 프롬프트 없음"
+        padB:FindFirstChild("PausePrompt") == nil
+            and padB:FindFirstChild("RepairPrompt") == nil
+            and base.ModulePads.PadA.ControlPanel:FindFirstChild("PausePrompt") == nil,
+        "패드 중심에는 가동 중지, 수리 프롬프트 없음. Habitat 제어반에도 가동 중지 없음"
     )
+    check(
+        panelText(panelB, "Title") == "Farm 제어반"
+            and panelText(panelB, "Status") == Config.TEXTS.panelRunning
+            and panelText(panelB, "Effect") == string.format(
+                "물 -%d/일, 전력 -%d/일, 식량 +%d/일",
+                Config.MODULES.B.upkeep.water,
+                Config.MODULES.B.upkeep.energy,
+                Config.MODULES.B.foodPerDay
+            )
+            and panelText(panelB, "Hint") == "E 길게: 가동 중지",
+        "Farm 제어반 표면: '가동 중', 효과, 'E 길게: 가동 중지'"
+    )
+    do
+        -- 패널 앞(바깥 3 studs)에 선 대원에게 닿는 거리, 건물 밖
+        local stand = panelB.CFrame.Position + panelB.CFrame.LookVector * 3
+        local frame = ModulePanels.baseFrame(base)
+        local lo, hi = KitImportsCP.boundsIn(base.ModulePads.PadB.Built, frame)
+        local sp = frame:PointToObjectSpace(stand)
+        local outsideBuilding = sp.X < lo.X or sp.X > hi.X or sp.Z < lo.Z or sp.Z > hi.Z
+        local padDist = (Vector3.new(stand.X, 0, stand.Z) - Vector3.new(
+            padB.CFrame.Position.X,
+            0,
+            padB.CFrame.Position.Z
+        )).Magnitude
+        check(
+            outsideBuilding
+                and (stand - panelB.CFrame.Position).Magnitude
+                    <= pausePrompt.MaxActivationDistance,
+            string.format(
+                "벽 밖 3 studs에 서면 제어반 프롬프트 거리 안 (패드 중심까지는 %.1f, 예전 거리 8 밖)",
+                padDist
+            )
+        )
+    end
+    local toggleBefore = 0
+    for _, entry in soundLog do
+        if entry.name == "Sfx_" .. CP.toggleSound and entry.parent == panelB then
+            toggleBefore += 1
+        end
+    end
     signalFor(pausePrompt, "Triggered"):Fire(alice)
     advance(0)
     local sentState = lastSent("StateUpdate").args[1]
@@ -3890,6 +4056,24 @@ do
             and lastSent("Notify").args[2] == "info",
         "가동 중지: paused, upkeepText '대기 중', 프롬프트 '가동 재개', 알림"
     )
+    do
+        local toggled = 0
+        for _, entry in soundLog do
+            if entry.name == "Sfx_" .. CP.toggleSound and entry.parent == panelB then
+                toggled += 1
+            end
+        end
+        check(
+            panelText(panelB, "Status") == "대기 중"
+                and panelText(panelB, "Effect") == Config.TEXTS.panelPausedEffect
+                and panelText(panelB, "Hint") == "E 길게: 가동 재개"
+                and panelB.StatusLight.Color == roblox.Color3.fromRGB(
+                    table.unpack(CP.colors.paused)
+                )
+                and toggled == toggleBefore + 1,
+            "대기 중 표면: '대기 중', '생산과 소비 모두 멈춤', 'E 길게: 가동 재개', 표시등 노랑, 토글 소리"
+        )
+    end
     check(state().modules.C.status == "available", "Farm을 멈춰도 Lab C 착공 가능")
     signalFor(pausePrompt, "Triggered"):Fire(alice)
     advance(0)
@@ -3904,8 +4088,13 @@ do
                 B.foodPerDay
             )
             and pausePrompt.ActionText == Config.PROMPT_TEXTS.pauseModule
-            and lastSent("Notify").args[1] == string.format(Config.TEXTS.moduleResumed, "Farm"),
-        "가동 재개: upkeepText '" .. tostring(sentState.modules.B.upkeepText) .. "'"
+            and lastSent("Notify").args[1] == string.format(Config.TEXTS.moduleResumed, "Farm")
+            and panelText(panelB, "Status") == Config.TEXTS.panelRunning
+            and panelB.StatusLight.Color
+                == roblox.Color3.fromRGB(table.unpack(CP.colors.running)),
+        "가동 재개: upkeepText '"
+            .. tostring(sentState.modules.B.upkeepText)
+            .. "', 표면 '가동 중', 표시등 초록"
     )
 end
 
@@ -3974,27 +4163,38 @@ do
             },
         }
     end)
+    -- 19차: 외벽 수리 프롬프트는 완공된 모듈의 외벽 제어반에 붙는다 (패드 중심 X)
     local padA, padB, padC =
-        base.ModulePads.PadA.Pad, base.ModulePads.PadB.Pad, base.ModulePads.PadC.Pad
+        base.ModulePads.PadA.ControlPanel,
+        base.ModulePads.PadB.ControlPanel,
+        base.ModulePads.PadC:FindFirstChild("ControlPanel")
     local repairA, repairB =
         padA:FindFirstChild("RepairPrompt"), padB:FindFirstChild("RepairPrompt")
     check(
         repairA ~= nil
             and repairB ~= nil
-            and padC:FindFirstChild("RepairPrompt") ~= nil
+            and padC == nil
             and repairB.KeyboardKeyCode == roblox.Enum.KeyCode.R
             and repairB.HoldDuration == meteorCfg.repairHold
-            and repairB.MaxActivationDistance == meteorCfg.promptDistance
+            and repairB.MaxActivationDistance == CP.promptDistance
             and repairB.ActionText == Config.PROMPT_TEXTS.repairModule
-            and repairB.ObjectText == "Farm B"
+            and repairB.ObjectText == "Farm 제어반"
             and repairB.Style == roblox.Enum.ProximityPromptStyle.Custom
             and repairA.Enabled == false
             and repairB.Enabled == false,
-        "패드마다 외벽 수리 프롬프트 (R, 4초, 거리 12, Custom), 손상 전에는 꺼짐"
+        "제어반마다 외벽 수리 프롬프트 (R, 4초, 거리 8, Custom), 손상 전에는 꺼짐. 안 지은 Lab은 제어반 없음"
     )
+    local padPrompts = 0
+    for _, child in base.ModulePads.PadB.Pad:GetChildren() do
+        if child:IsA("ProximityPrompt") then
+            padPrompts += 1
+        end
+    end
     check(
-        padB:FindFirstChildOfClass("ProximityPrompt").Name ~= "RepairPrompt",
-        "Pad의 첫 프롬프트는 건설 프롬프트 그대로"
+        padPrompts == 1
+            and base.ModulePads.PadB.Pad:FindFirstChildOfClass("ProximityPrompt").Name
+                ~= "RepairPrompt",
+        "Pad에는 건설 프롬프트 하나만"
     )
 
     -- 미세운석: A, B 가동 중이고 roll 0.99면 뒤쪽 후보(Farm B)
@@ -4040,6 +4240,28 @@ do
         "손상된 Farm B만 수리 프롬프트 켜짐"
     )
     do
+        local red = roblox.Color3.fromRGB(table.unpack(CP.colors.damaged))
+        local off = roblox.Color3.fromRGB(table.unpack(CP.colors.off))
+        check(
+            panelText(padB, "Status") == "외벽 손상"
+                and panelText(padB, "Effect") == Config.TEXTS.panelDamagedEffect
+                and panelText(padB, "Hint") == "R 길게: 외벽 수리 (전력 10)\nE 길게: 가동 중지"
+                and panelText(padA, "Status") == Config.TEXTS.panelRunning,
+            "손상 표면: '외벽 손상', 생산 멈춤, 'R 길게: 외벽 수리 (전력 10)' (Habitat은 '가동 중')"
+        )
+        -- 표시등 빨강 깜빡임: 반 주기마다 빨강과 꺼짐이 바뀐다
+        local seen = {}
+        for _ = 1, 4 do
+            local c = padB.StatusLight.Color
+            seen[if c == red then "red" elseif c == off then "off" else "other"] = true
+            advance(CP.blinkSeconds / 2)
+        end
+        check(
+            seen.red and seen.off and not seen.other,
+            "손상 표시등 빨강 깜빡임 (주기 " .. CP.blinkSeconds .. "초)"
+        )
+    end
+    do
         local before = state()
         advanceToDay(meteorDay + 1)
         local B = Config.MODULES.B
@@ -4080,6 +4302,13 @@ do
             and lastSent("Notify").args[1] == string.format(Config.TEXTS.moduleRepaired, "Farm B")
             and repairB.Enabled == false,
         "수리: 전력 10, 손상 해제, 알림, 프롬프트 꺼짐"
+    )
+    advance(CP.blinkSeconds)
+    check(
+        panelText(padB, "Status") == Config.TEXTS.panelRunning
+            and padB.StatusLight.Color == roblox.Color3.fromRGB(table.unpack(CP.colors.running))
+            and padB.StatusLight:FindFirstChildOfClass("PointLight").Enabled == true,
+        "수리 뒤 제어반 '가동 중', 표시등 초록으로 고정"
     )
 
     -- 태양 입자 폭풍: 예고 D-2, 시작, 발전 절반, 실외 산소 1.5배, 끝
@@ -4182,8 +4411,11 @@ do
     )
     check(notified(Config.TEXTS.meteorPanel) ~= nil, "패널 파괴 토스트")
     check(
-        padA:FindFirstChild("RepairPrompt").Enabled and repairB.Enabled,
-        "손상된 A, B 수리 프롬프트 켜짐"
+        padA:FindFirstChild("RepairPrompt").Enabled
+            and repairB.Enabled
+            and panelText(padA, "Status") == "외벽 손상"
+            and panelText(padA, "Hint") == "R 길게: 외벽 수리 (전력 10)",
+        "손상된 A, B 수리 프롬프트 켜짐, Habitat 제어반 '외벽 손상'"
     )
     ResourceState.patch(function(s)
         s.modules.A.damaged = false
@@ -4263,6 +4495,18 @@ check(state().phase == "playing", "진행 중 재시작 요청 무시")
 local overBefore = countSent("GameOver")
 advance(Config.DAY_SECONDS * Config.MODULES.C.buildDays)
 check(state().phase == "won", "C 완공 즉시 승리")
+do
+    local ok, detail = panelPlacement(base.ModulePads.PadC)
+    local panelC = base.ModulePads.PadC:FindFirstChild("ControlPanel")
+    check(ok, "Lab C 완공: 외벽 제어반 " .. detail)
+    print("        PadC 제어반 월드 " .. tostring(panelC and panelC.CFrame.Position))
+    check(
+        panelC ~= nil
+            and panelC.RepairPrompt.Enabled == false
+            and base.ModulePads.PadB.ControlPanel.PausePrompt.Enabled == false,
+        "게임이 끝나면 제어반 프롬프트 꺼짐"
+    )
+end
 local over = lastSent("GameOver")
 check(countSent("GameOver") == overBefore + 1 and over.args[1].won == true, "GameOver won")
 check(
@@ -4427,6 +4671,10 @@ do
     )
 end
 check(Workspace:FindFirstChild("Base") == nil, "재시작: Base 제거")
+check(
+    loadModule(Server:FindFirstChild("ModulePanels")).count() == 0,
+    "재시작: 제어반 모두 정리"
+)
 check(
     loadModule(Server:FindFirstChild("Sfx")).loopCount() == 0,
     "재시작: 효과음 루프 모두 정지"

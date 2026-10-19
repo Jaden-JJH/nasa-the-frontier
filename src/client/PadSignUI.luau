@@ -1,6 +1,8 @@
 --!nonstrict
 -- 모듈 패드 표지판. Workspace.Base.ModulePads 아래 각 패드 모델의 Pad 파트 위에 BillboardGui로 그린다.
 -- 이름, 상태 배지, 건설 중 진행바, 건설 가능일 때 비용 한 줄을 보여 준다.
+-- 완공 뒤에는 이름과 상태 배지(가동 중, 대기 중, 외벽 손상)만 남긴다. 효과와 조작 안내는 건물 외벽의
+-- 제어반(서버 ModulePanels, 2026-10-19 19차)이 맡는다.
 -- 표지판은 앵커 위쪽으로 뻗고 PromptUI 패널은 아래쪽으로 뻗어 서로 겹치지 않는다.
 
 local Players = game:GetService("Players")
@@ -110,18 +112,6 @@ local function makeSign(moduleId, pad)
         Visible = false,
     }, { UI.worldStroke() })
 
-    local upkeepLabel = UI.create("TextLabel", {
-        Name = "Upkeep",
-        LayoutOrder = 7,
-        Size = UDim2.new(1, 0, 0, 18),
-        AutomaticSize = Enum.AutomaticSize.Y,
-        Preset = "caption",
-        Text = "",
-        TextColor3 = Colors.textDim,
-        TextWrapped = true,
-        Visible = false,
-    }, { UI.worldStroke() })
-
     local panel = UI.create("Frame", {
         Name = "Panel",
         AnchorPoint = Vector2.new(0.5, 1),
@@ -152,7 +142,6 @@ local function makeSign(moduleId, pad)
         daysLabel,
         costLabel,
         noteLabel,
-        upkeepLabel,
     })
 
     local gui = UI.create("BillboardGui", {
@@ -175,7 +164,6 @@ local function makeSign(moduleId, pad)
         daysLabel = daysLabel,
         costLabel = costLabel,
         noteLabel = noteLabel,
-        upkeepLabel = upkeepLabel,
     }
 end
 
@@ -209,9 +197,13 @@ local function applyState(sign, moduleId)
         end
     end
 
-    -- 가동 중이지만 대기(paused)면 회색 배지
+    -- 가동 중이지만 대기(paused)면 회색 배지, 미세운석 외벽 손상이면 빨간 배지 (손상이 먼저)
+    local damaged = status == "active" and moduleState ~= nil and moduleState.damaged == true
     local paused = status == "active" and moduleState ~= nil and moduleState.paused == true
-    if paused then
+    if damaged then
+        style = { text = "외벽 손상", color = Colors.bad }
+        lightBadge = false
+    elseif paused then
         style = { text = "대기 중", color = Colors.neutral }
         lightBadge = false
     end
@@ -229,12 +221,6 @@ local function applyState(sign, moduleId)
         sign.daysLabel.Text = string.format("%d일 남음", moduleState.daysLeft)
     end
     sign.costLabel.Visible = status == "available"
-    local upkeep = moduleState and moduleState.upkeepText
-    if status == "active" and type(upkeep) ~= "string" and paused then
-        upkeep = "대기 중"
-    end
-    sign.upkeepLabel.Visible = status == "active" and type(upkeep) == "string" and upkeep ~= ""
-    sign.upkeepLabel.Text = if type(upkeep) == "string" then upkeep else ""
     sign.noteLabel.Visible = note ~= ""
     sign.noteLabel.Text = note
     sign.noteLabel.TextColor3 = noteColor

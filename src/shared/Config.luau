@@ -13,7 +13,7 @@ export type ModuleDef = {
     upkeep: Cost, -- 가동 중 매일 유지 소비
     requires: { string }, -- 선행 모듈 id 목록
     foodPerDay: number, -- 가동 중 하루 식량 생산 (Farm만 0보다 큼)
-    canPause: boolean, -- 완공 뒤 패드 프롬프트로 가동 중지/재개 가능 (2026-10-18, Farm만)
+    canPause: boolean, -- 완공 뒤 외벽 제어반 프롬프트로 가동 중지/재개 가능 (2026-10-18, Farm만. 19차부터 제어반)
 }
 
 export type IceDifficulty = "easy" | "mid" | "hard"
@@ -247,7 +247,8 @@ local Config = {
         -- 충돌 뒤 bannerDays일 동안 HUD 배너를 보이며, 이 배너 기간이 폭풍(예고 포함) 기간과 겹치지 않게 날짜를 고른다.
         -- 가동 모듈(승리 모듈, 이미 손상된 모듈, 유예 기간 모듈, 직전 대상 제외)이 있으면 그중 하나가 손상(damaged),
         -- 없으면 설치된 패널 1장 파괴.
-        -- 손상 모듈은 생산이 멈추고 유지비는 계속 낸다. 패드에서 repairKey 홀드 repairHold초, 전력 repairEnergy로 수리
+        -- 손상 모듈은 생산이 멈추고 유지비는 계속 낸다. 외벽 제어반(CONTROL_PANEL)에서 repairKey 홀드 repairHold초,
+        -- 전력 repairEnergy로 수리 (19차: 패드 중심 프롬프트에서 제어반으로 옮김. 활성 거리는 CONTROL_PANEL.promptDistance)
         micrometeoroid = {
             countMin = 1,
             countMax = 2,
@@ -257,8 +258,7 @@ local Config = {
             bannerDays = 2,
             repairEnergy = 10,
             repairHold = 4,
-            repairKey = "R", -- 패드의 건설(E), 가동 중지(E) 프롬프트와 키를 나눈다 (Enum.KeyCode 이름)
-            promptDistance = 12, -- 패드 중심에서. 모듈 외벽(17 x 17) 앞에 서면 닿는 거리
+            repairKey = "R", -- 같은 제어반의 가동 중지(E) 프롬프트와 키를 나눈다 (Enum.KeyCode 이름)
             -- 공정성 (15차 후속, 심사 한 판에서 운으로 지는 경우를 없앤다): 가동 첫날부터 이 일수 안인 모듈은
             -- 후보에서 뺀다(Farm 완공 직후 식량이 가장 낮을 때 맞는 것 방지). 0이면 유예 없음
             graceDaysAfterActivation = 5,
@@ -329,8 +329,40 @@ local Config = {
         buildHold = 0.5, -- 건설 시작 홀드 시간(초)
         unloadHold = 0, -- 물 하역은 즉시
         boardDistance = 10, -- 로버 탑승 프롬프트 활성 거리
-        pauseDistance = 8, -- 모듈 가동 중지/재개 프롬프트 활성 거리
         serverDistanceSlack = 6, -- 서버가 탑승 요청 거리를 검사할 때 지연을 감안한 여유
+    },
+
+    -- 모듈 제어반 (2026-10-19 19차, 서버 ModulePanels). 완공된 모듈 외벽 중 기지 Origin 쪽 면에 붙는 패널.
+    -- 가동 중지(pauseKey 홀드, canPause 모듈)와 외벽 수리(EVENTS.micrometeoroid.repairKey 홀드) 프롬프트가 여기에 붙는다.
+    -- 크기와 거리는 studs, 색은 RGB 0..255 (클라이언트 UI.Colors와 같은 값: 가동 초록 = 식량, 대기 노랑 = 에너지, 손상 빨강)
+    CONTROL_PANEL = {
+        size = { 3, 1.9, 0.3 }, -- 폭, 높이, 두께. 네 줄(이름, 상태, 효과, 조작)이 글자 14 이상으로 들어가는 크기
+        wallGap = 0.2, -- 건물 경계 상자 면(또는 실제 외벽)에서 패널 뒷면까지
+        sideOffset = 3, -- 면 중앙에서 오른쪽(밖에서 벽을 볼 때)으로. 면 폭을 넘으면 줄이고, 문이 있으면 문을 피해 민다
+        doorMargin = 0.5, -- 문과 패널 사이 최소 여유
+        snapDepth = 3, -- 경계 상자 면보다 안쪽에 있는 실제 외벽(메시)을 광선으로 찾아 붙는 최대 깊이
+        height = 3.2, -- 패드 윗면에서 패널 중심까지 (눈높이 아래, 글이 읽히는 높이)
+        lightHeight = 0.18, -- 패널 위 상태 표시등(Neon 띠) 두께
+        lightRange = 8, -- 표시등 PointLight
+        lightBrightness = 1.5,
+        promptDistance = 8, -- 가동 중지, 외벽 수리 프롬프트 활성 거리 (패널에서)
+        pauseKey = "E", -- 가동 중지/재개 키 (Enum.KeyCode 이름)
+        toggleHold = 1.0, -- 가동 중지/재개 홀드(초). 지나가다 실수로 토글되지 않게
+        blinkSeconds = 0.8, -- 손상 표시등 깜빡임 주기(초). 절반 켜짐, 절반 꺼짐
+        pixelsPerStud = 70, -- SurfaceGui 해상도. 글자 14px = 0.2 studs
+        textSizes = { title = 16, status = 26, body = 14 },
+        guiMaxDistance = 100, -- 이 거리 밖에서는 패널 글자를 그리지 않는다
+        toggleSound = "ui_click", -- 토글 때 패널에서 재생하는 SoundIds 키 (버튼 클릭)
+        colors = {
+            body = { 30, 34, 44 }, -- 어두운 패널
+            bezel = { 70, 76, 90 }, -- 패널 테두리
+            text = { 255, 255, 255 },
+            textDim = { 165, 175, 200 },
+            running = { 96, 210, 120 }, -- 가동 중: 초록 (식량)
+            paused = { 255, 214, 64 }, -- 대기 중: 노랑 (에너지)
+            damaged = { 235, 80, 80 }, -- 외벽 손상: 빨강, 깜빡임
+            off = { 70, 28, 28 }, -- 깜빡임 꺼진 순간
+        },
     },
 
     -- 고스트 모델 투명도 (GDD 6절)
@@ -535,7 +567,7 @@ local Config = {
         -- 모듈별 완공 알림 (유지비 포함, %d 자리는 Construction이 Config 값으로 채운다). 없는 모듈은 buildDone
         buildDoneBy = {
             A = "Habitat A 가동. 물 -%d/일, 전력 -%d/일. 안에서 산소가 회복됩니다",
-            B = "Farm 가동 시작. 식량 +%d/일, 물 -%d/일, 전력 -%d/일. 물이 모자라면 Farm 패드에서 끌 수 있습니다",
+            B = "Farm 가동 시작. 식량 +%d/일, 물 -%d/일, 전력 -%d/일. 물이 모자라면 Farm 벽의 제어반에서 E를 길게 눌러 대기 모드로 바꿀 수 있습니다",
         } :: { [string]: string },
         modulePaused = "%s 가동 중지. 식량 생산과 물, 전력 소비가 멈춥니다",
         moduleResumed = "%s 가동 재개",
@@ -603,7 +635,7 @@ local Config = {
         stormBannerWarning = "태양 입자 폭풍 D-%d",
         stormBannerActive = "태양 입자 폭풍 진행 중 (남은 %d일)",
         stormEdu = "달에는 자기장과 대기가 없어 태양 입자가 지표까지 그대로 닿습니다. NASA는 기지 안에 폭풍 대피 공간을 설계합니다.",
-        meteorModule = "미세운석 충돌: %s에 외벽 손상. %s로 수리(에너지 %d)",
+        meteorModule = "미세운석 충돌: %s에 외벽 손상. 건물 벽 제어반에서 %s로 수리(에너지 %d)",
         meteorPanel = "미세운석 충돌: 태양광 패널 1장 파손",
         meteorMiss = "운석이 기지 옆에 떨어졌습니다",
         meteorBannerModule = "미세운석 충돌: %s 외벽 손상",
@@ -611,7 +643,7 @@ local Config = {
         meteorBannerMiss = "미세운석이 기지 옆에 떨어졌습니다",
         meteorEdu = "대기가 없어 작은 운석도 타지 않고 그대로 떨어집니다. 지구에선 별똥별로 끝날 알갱이가 달에선 초속 수십 km로 부딪힙니다.",
         moduleDamagedStatus = "손상, %s로 수리", -- HUD 모듈 행
-        upkeepDamaged = "외벽 손상: %s로 수리 (전력 %d)", -- ModuleState.upkeepText (패드 표지판)
+        upkeepDamaged = "외벽 손상: %s로 수리 (전력 %d)", -- ModuleState.upkeepText
         moduleRepaired = "%s 외벽 수리 완료. 다시 정상 가동합니다",
         moduleRepairNotNeeded = "손상된 곳이 없습니다",
 
@@ -706,6 +738,16 @@ local Config = {
         restartWaitChooser = "선택 권한자(%s)가 재도전을 결정합니다",
         restartWaitChooserUnknown = "선택 권한자가 재도전을 결정합니다",
 
+        -- 모듈 제어반 표면 (2026-10-19 19차, ModulePanels). 이름 줄은 PROMPT_TEXTS.panelObject
+        panelRunning = "가동 중",
+        panelPaused = "대기 중",
+        panelDamaged = "외벽 손상",
+        panelPausedEffect = "생산과 소비 모두 멈춤",
+        panelDamagedEffect = "생산 멈춤, 유지비는 계속",
+        panelPauseHint = "%s 길게: 가동 중지",
+        panelResumeHint = "%s 길게: 가동 재개",
+        panelRepairHint = "%s 길게: 외벽 수리 (전력 %d)",
+
         labelLocked = "%s (잠김)",
         labelAvailable = "%s 착공 가능",
         labelBuilding = "%s 건설 중 %d일 남음",
@@ -717,6 +759,7 @@ local Config = {
         -- ObjectText: 대상 이름
         solarObject = "태양광 필드",
         buildObject = "%s 패드",
+        panelObject = "%s 제어반", -- 모듈 외벽 제어반 (19차, 가동 중지와 외벽 수리 프롬프트, 패널 이름 줄)
         iceObject = "얼음",
         iceObjectAmount = "얼음 (남은 %d W)",
         tankObject = "물탱크",
@@ -745,14 +788,14 @@ local Config = {
         start = "먼저 태양광 패널을 3장 설치하세요. 전력이 있어야 물을 처리하고 건물을 지을 수 있습니다.",
         boost = "Shift를 누르면 부스터입니다. 배터리를 %d배로 쓰니 먼 길에만 잠깐 쓰세요.",
         radar = "레이더의 점이 얼음입니다. 숫자는 남은 매장량, 주황 점은 바위밭 속 큰 얼음입니다.",
-        farmWater = "물이 부족하면 Farm 패드에서 가동을 잠시 멈출 수 있습니다. 식량 생산도 함께 멈춥니다.",
+        farmWater = "물이 부족하면 Farm 건물 벽의 불 켜진 제어반에서 E를 길게 눌러 가동을 잠시 멈출 수 있습니다. 식량 생산도 함께 멈춥니다.",
         panelLimit = "패널은 하루 %d장까지 설치됩니다. 내일 다시 설치할 수 있습니다.",
         airlock = "문 앞에서 E로 에어락을 열고 안으로 들어가면 산소가 회복됩니다.",
         damage = "바위에 부딪히면 로버가 파손됩니다. 로버 옆에서 %s 키를 %d초 눌러 수리하세요(전력 %d).",
         energyCap = "배터리가 가득 차 전력이 버려지고 있습니다. 건설을 시작해 전력을 쓰세요.",
         -- 랜덤 이벤트 (2026-10-18 15차): 첫 폭풍 예고, 첫 모듈 손상
         storm = "폭풍 중에는 실내에 머물고, 폭풍 전에 물과 패널 작업을 끝내 두세요.",
-        moduleDamage = "손상된 모듈은 생산이 멈춥니다. 건물 앞에서 %s을 길게 눌러 수리하세요.",
+        moduleDamage = "손상된 모듈은 생산이 멈춥니다. 건물 벽의 빨간 불이 깜빡이는 제어반에서 %s 키를 길게 눌러 수리하세요.",
     },
 }
 
