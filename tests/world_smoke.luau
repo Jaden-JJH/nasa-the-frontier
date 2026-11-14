@@ -565,6 +565,39 @@ fixture.preview.Name = "AssetPreview"
 fixture.greenhouse:Clone().Parent = fixture.preview
 fixture.preview.Parent = Workspace
 
+-- 가짜 플레이어 (갇힘 방지 검사): 표 + 캐릭터 Model(HumanoidRootPart, Humanoid) -----------------
+local fakePlayers = {}
+roblox.implementMethod("Players", "GetPlayers", function()
+    return table.clone(fakePlayers)
+end)
+local function addFakePlayer(name: string, position)
+    local character = Instance.new("Model")
+    character.Name = name
+    local root = Instance.new("Part")
+    root.Name = "HumanoidRootPart"
+    root.Size = Vector3.new(2, 2, 1)
+    root.Anchored = true
+    root.CanCollide = false
+    root.CFrame = CFrame.new(position)
+    root.Parent = character
+    character.PrimaryPart = root
+    local humanoid = Instance.new("Humanoid")
+    humanoid.Parent = character
+    character.Parent = Workspace
+    local p = { Name = name, UserId = #fakePlayers + 1, Character = character }
+    table.insert(fakePlayers, p)
+    return p
+end
+local function rootOf(p)
+    return p.Character:FindFirstChild("HumanoidRootPart")
+end
+local function clearFakePlayers()
+    for _, p in fakePlayers do
+        p.Character:Destroy()
+    end
+    table.clear(fakePlayers)
+end
+
 -- 모듈 로더 -------------------------------------------------------------
 local warnings = {}
 local cache = {}
@@ -672,6 +705,35 @@ function H.bounds(root)
             for _, sy in { -1, 1 } do
                 for _, sz in { -1, 1 } do
                     local q = cf * Vector3.new(sx * half.X, sy * half.Y, sz * half.Z)
+                    lo = Vector3.new(math.min(lo.X, q.X), math.min(lo.Y, q.Y), math.min(lo.Z, q.Z))
+                    hi = Vector3.new(math.max(hi.X, q.X), math.max(hi.Y, q.Y), math.max(hi.Z, q.Z))
+                end
+            end
+        end
+    end
+    return lo, hi
+end
+-- frame 좌표계 경계 (회전된 건물을 로컬 축으로 본다)
+function H.boundsIn(root, frame)
+    local lo = Vector3.new(math.huge, math.huge, math.huge)
+    local hi = -lo
+    local parts = {}
+    if root:IsA("BasePart") then
+        table.insert(parts, root)
+    end
+    for _, d in root:GetDescendants() do
+        if d:IsA("BasePart") then
+            table.insert(parts, d)
+        end
+    end
+    for _, part in parts do
+        local cf, half = part.CFrame, part.Size / 2
+        for _, sx in { -1, 1 } do
+            for _, sy in { -1, 1 } do
+                for _, sz in { -1, 1 } do
+                    local q = frame:PointToObjectSpace(
+                        cf * Vector3.new(sx * half.X, sy * half.Y, sz * half.Z)
+                    )
                     lo = Vector3.new(math.min(lo.X, q.X), math.min(lo.Y, q.Y), math.min(lo.Z, q.Z))
                     hi = Vector3.new(math.max(hi.X, q.X), math.max(hi.Y, q.Y), math.max(hi.Z, q.Z))
                 end
@@ -1018,6 +1080,71 @@ do
     check(not overlap, "대피처: 착륙선과 에어록 산소 구역이 겹치지 않는다")
     check(#MissionWorld.oxygenZones() == 2, "산소: 구역 2개")
 
+    -- [2026-11-15 시험 피드백] 지붕이 열려 뛰어 나갈 수 있었다: 보이지 않는 천장이 벽 윗면에 붙고 벽 바깥까지 덮는다.
+    -- 문 위 틈도 막고(DoorLintel), 문 아래 출입구는 그대로 열려 있다
+    for _, shelter in { lander, airlock } do
+        local entryModel = shelter.model:FindFirstChild("Entry")
+        local frame = shelter.frame
+        local wallLo = Vector3.new(math.huge, math.huge, math.huge)
+        local wallHi = -wallLo
+        for _, child in entryModel:GetChildren() do
+            if string.sub(child.Name, 1, 4) == "Wall" then
+                local lo, hi = H.boundsIn(child, frame)
+                wallLo = Vector3.new(
+                    math.min(wallLo.X, lo.X),
+                    math.min(wallLo.Y, lo.Y),
+                    math.min(wallLo.Z, lo.Z)
+                )
+                wallHi = Vector3.new(
+                    math.max(wallHi.X, hi.X),
+                    math.max(wallHi.Y, hi.Y),
+                    math.max(wallHi.Z, hi.Z)
+                )
+            end
+        end
+        local ceiling = entryModel:FindFirstChild("Ceiling")
+        local clo, chi = H.boundsIn(ceiling, frame)
+        check(
+            ceiling ~= nil
+                and ceiling.CanCollide
+                and ceiling.Transparency == 1
+                and H.near(clo.Y, wallHi.Y, 1e-3),
+            "지붕: " .. shelter.id .. " 보이지 않는 천장이 벽 윗면에 붙는다"
+        )
+        check(
+            clo.X <= wallLo.X + 1e-3
+                and chi.X >= wallHi.X - 1e-3
+                and clo.Z <= wallLo.Z + 1e-3
+                and chi.Z >= wallHi.Z - 1e-3,
+            "지붕: " .. shelter.id .. " 천장이 벽 바깥 두께까지 덮는다"
+        )
+        local doorPart = entryModel:FindFirstChild("Door")
+        local dlo, dhi = H.boundsIn(doorPart, frame)
+        local lintel = entryModel:FindFirstChild("DoorLintel")
+        local llo2, lhi2 = H.boundsIn(lintel, frame)
+        check(
+            lintel ~= nil
+                and lintel.CanCollide
+                and llo2.Y >= dhi.Y - 1e-3
+                and H.near(lhi2.Y, wallHi.Y, 1e-3)
+                and llo2.X <= dlo.X
+                and lhi2.X >= dhi.X,
+            "지붕: "
+                .. shelter.id
+                .. " 문 위 틈을 막는다 (문보다 넓고 벽 윗면까지)"
+        )
+        local fl = entryModel:FindFirstChild("WallFrontLeft")
+        local fr = entryModel:FindFirstChild("WallFrontRight")
+        local _, flHi = H.boundsIn(fl, frame)
+        local frLo = H.boundsIn(fr, frame)
+        local leftEdge = math.min(flHi.X, frLo.X)
+        local rightEdge = math.max(flHi.X, frLo.X)
+        check(
+            rightEdge - leftEdge >= doorPart.Size.X - 1e-3,
+            "지붕: " .. shelter.id .. " 문 아래 출입구는 열려 있다"
+        )
+    end
+
     -- 태양광
     local slots = MissionWorld.panelSlots()
     local MissionConfig =
@@ -1150,12 +1277,214 @@ do
             and ice4:FindFirstChild("MinePoint") ~= nil,
         "얼음: IceSites.Ice4 SiteIndex 1, 채취 자리"
     )
+    -- [2026-11-15 시험 피드백] 얼음은 영구 음영 크레이터의 어두운 표토에 섞여 있다: 반짝이는 결정이 아니라 낮게 묻힌
+    -- 표토 색 덩어리. 네온, 빛, 반짝이 효과 없음. 이름표와 반짝임은 40 studs 안에서만 보인다
+    local reveal = MissionWorld.CONFIG.ice.revealDistance
+    check(reveal <= 40, "얼음: 가까이서만 보이는 거리 " .. reveal .. " studs 이하 40")
+    local depositOk, neonFree, colorsOk, collideFree, lowOk, buriedOk =
+        true, true, true, true, true, true
+    local noLights, guisNear, labelKeyOk, mineOk = true, true, true, true
+    for _, site in iceFolder:GetChildren() do
+        local deposit = site:FindFirstChild("Deposit")
+        local point = site:FindFirstChild("MinePoint")
+        if not deposit or deposit:GetAttribute("AssetSource") ~= "placeholder" then
+            depositOk = false
+        end
+        if
+            not point
+            or point:GetAttribute("SiteIndex") ~= site:GetAttribute("SiteIndex")
+            or point:GetAttribute("MarkerName") ~= site.Name
+        then
+            mineOk = false
+        end
+        if deposit then
+            local info = MissionWorld.getMarker(site.Name)
+            local dlo, dhi = H.bounds(deposit)
+            local gx, gz = (dlo.X + dhi.X) / 2, (dlo.Z + dhi.Z) / 2
+            local ground = groundAt(gx, gz)
+            if dhi.Y - ground > 1.3 then
+                lowOk = false
+            end
+            if dlo.Y > ground - 0.5 then
+                buriedOk = false
+            end
+            if dhi.Y - dlo.Y > MissionWorld.CONFIG.ice.maxHeight + 1e-3 then
+                lowOk = false
+            end
+            for _, item in deposit:GetDescendants() do
+                if item:IsA("BasePart") then
+                    if
+                        item.Material == Enum.Material.Neon
+                        or item.Material == Enum.Material.Glass
+                        or item.Material == Enum.Material.Ice
+                        or item.Material == Enum.Material.Glacier
+                        or item.Reflectance > 0
+                    then
+                        neonFree = false
+                    end
+                    local c = item.Color
+                    local r, g, b = c.R * 255, c.G * 255, c.B * 255
+                    -- 어두운 표토: 밝기 낮고, 푸른 기는 아주 약하게 (파랑이 빨강보다 20 이하로만 높다)
+                    if math.max(r, g, b) > 130 or b - r > 20 then
+                        colorsOk = false
+                    end
+                    if item.CanCollide then
+                        collideFree = false
+                    end
+                end
+            end
+            check(info ~= nil, "얼음: " .. site.Name .. " 표시 정보")
+        end
+        for _, item in site:GetDescendants() do
+            if
+                item:IsA("PointLight")
+                or item:IsA("SpotLight")
+                or item:IsA("SurfaceLight")
+                or item:IsA("ParticleEmitter")
+                or item:IsA("Sparkles")
+            then
+                noLights = false
+            elseif item:IsA("BillboardGui") then
+                if item.MaxDistance > reveal + 1e-6 or item.AlwaysOnTop then
+                    guisNear = false
+                end
+            end
+        end
+        local label = point and point:FindFirstChild("Label")
+        local text = label and H.label(label)
+        if not text or text:GetAttribute("TextKey") ~= "world.ice_site.name" or text.Text ~= "" then
+            labelKeyOk = false
+        end
+        if not (point and point:FindFirstChild("Glint")) then
+            guisNear = false
+        end
+    end
+    check(depositOk, "얼음: 외형은 표토 덩어리 대체 도형 (Kit IceCrystal 안 씀)")
+    check(neonFree, "얼음: 네온, 유리, 얼음 재질, 반사 없음")
+    check(colorsOk, "얼음: 어두운 표토 색, 아주 약한 푸른 기")
+    check(collideFree, "얼음: 덩어리는 충돌 없음 (로버가 지나간다)")
+    check(lowOk, "얼음: 지면 위로 낮다 (1.3 이하)")
+    check(buriedOk, "얼음: 대부분 땅속에 묻힌다")
+    check(noLights, "얼음: 빛, 파티클, 반짝이 효과 없음")
     check(
-        ice4
-            and ice4:FindFirstChild("Crystal")
-            and ice4.Crystal:GetAttribute("AssetSource") == "kit",
-        "얼음: 결정 외형은 Kit IceCrystal"
+        guisNear,
+        "얼음: 이름표와 반짝임은 40 studs 안에서만 (MaxDistance, AlwaysOnTop 끔)"
     )
+    check(labelKeyOk, "얼음: 이름표는 TextKey world.ice_site.name만")
+    check(mineOk, "얼음: MinePoint SiteIndex, MarkerName 유지")
+end
+
+-- 얼음 외형 규칙은 디자이너 Assets.IceDeposit에도 적용 (네온, 빛, 먼 이름표를 끈다) ---------------
+print("[얼음 에셋]")
+do
+    local asset = Instance.new("Model")
+    asset.Name = "IceDeposit"
+    local shiny = fixture.mesh(asset, "Shiny", Vector3.new(6, 2, 5), Vector3.new(0, 1, 0), {
+        Material = Enum.Material.Neon,
+        Color = Color3.fromRGB(170, 220, 255),
+    })
+    local light = Instance.new("PointLight")
+    light.Range = 60
+    light.Parent = shiny
+    local sparkles = Instance.new("Sparkles")
+    sparkles.Parent = shiny
+    local far = Instance.new("BillboardGui")
+    far.Name = "FarLabel"
+    far.MaxDistance = 500
+    far.AlwaysOnTop = true
+    far.Parent = shiny
+    asset.Parent = fixture.assets
+    MissionWorld.placeBase()
+    local deposit = H.find(runtime, "IceSites.Ice4.Deposit")
+    local part = deposit and deposit:FindFirstChild("Shiny")
+    check(
+        deposit ~= nil and deposit:GetAttribute("AssetSource") == "asset",
+        "얼음 에셋: Assets.IceDeposit 1단계"
+    )
+    check(
+        part ~= nil and part.Material ~= Enum.Material.Neon,
+        "얼음 에셋: 네온은 표토 재질로"
+    )
+    local pl = part and part:FindFirstChildOfClass("PointLight")
+    local sp = part and part:FindFirstChildOfClass("Sparkles")
+    local fg = part and part:FindFirstChild("FarLabel")
+    check(pl ~= nil and pl.Enabled == false, "얼음 에셋: 빛 끔")
+    check(sp ~= nil and sp.Enabled == false, "얼음 에셋: 반짝이 효과 끔")
+    check(
+        fg ~= nil and fg.MaxDistance <= 40 and fg.AlwaysOnTop == false,
+        "얼음 에셋: 글자 GUI는 가까이서만"
+    )
+    asset:Destroy()
+    MissionWorld.placeBase()
+    check(
+        H.find(runtime, "IceSites.Ice4.Deposit"):GetAttribute("AssetSource") == "placeholder",
+        "얼음 에셋: 빼면 대체 도형"
+    )
+    base = runtime:FindFirstChild("Base")
+end
+
+-- 대체 도형 오두막 대피처: 벽과 지붕이 맞닿고 충돌이 있다 (키트가 없을 때) ------------------------
+print("[오두막]")
+do
+    fixture.kit.Name = "KitOff"
+    MissionWorld.placeBase()
+    for _, id in { "lander", "airlock" } do
+        local shelter = MissionWorld.getShelter(id)
+        local visual = shelter.model:FindFirstChild("Visual")
+        local frame = shelter.frame
+        check(
+            visual:GetAttribute("AssetSource") == "placeholder",
+            "오두막: " .. id .. " 대체 도형"
+        )
+        local roof = visual:FindFirstChild("Roof")
+        local solidOk = roof ~= nil and roof.CanCollide and roof.Transparency == 0
+        local wallTop = -math.huge
+        local wallLo = Vector3.new(math.huge, math.huge, math.huge)
+        local wallHi = -wallLo
+        for _, name in
+            { "WallBack", "WallLeft", "WallRight", "WallFrontLeft", "WallFrontRight", "Lintel" }
+        do
+            local wall = visual:FindFirstChild(name)
+            if not wall or not wall.CanCollide then
+                solidOk = false
+            else
+                local lo, hi = H.boundsIn(wall, frame)
+                wallTop = math.max(wallTop, hi.Y)
+                wallLo = Vector3.new(math.min(wallLo.X, lo.X), 0, math.min(wallLo.Z, lo.Z))
+                wallHi = Vector3.new(math.max(wallHi.X, hi.X), 0, math.max(wallHi.Z, hi.Z))
+            end
+        end
+        check(
+            solidOk,
+            "오두막: " .. id .. " 벽과 지붕 충돌 (카메라와 점프를 막는다)"
+        )
+        local rlo, rhi = H.boundsIn(roof, frame)
+        check(
+            H.near(rlo.Y, wallTop, 1e-3),
+            "오두막: " .. id .. " 지붕 밑면 = 벽 윗면 (틈 없음)"
+        )
+        check(
+            rlo.X <= wallLo.X + 1e-3
+                and rhi.X >= wallHi.X - 1e-3
+                and rlo.Z <= wallLo.Z + 1e-3
+                and rhi.Z >= wallHi.Z - 1e-3,
+            "오두막: " .. id .. " 지붕이 벽 전체를 덮는다"
+        )
+        local _, flHi = H.boundsIn(visual:FindFirstChild("WallFrontLeft"), frame)
+        local frLo = H.boundsIn(visual:FindFirstChild("WallFrontRight"), frame)
+        local door = H.find(shelter.model, "Entry.Door")
+        check(
+            math.abs(frLo.X - flHi.X) >= door.Size.X - 1e-3,
+            "오두막: " .. id .. " 정면 출입구는 문 폭만큼 열려 있다"
+        )
+        check(
+            H.find(shelter.model, "Entry.Ceiling") ~= nil,
+            "오두막: " .. id .. " 보이지 않는 천장도 있다"
+        )
+    end
+    fixture.kit.Name = "Kit"
+    MissionWorld.placeBase()
+    base = runtime:FindFirstChild("Base")
 end
 
 -- 패널 수 ---------------------------------------------------------------------
@@ -1169,9 +1498,63 @@ do
     local slotTop = slot1.CFrame.Position.Y + slot1.Size.Y / 2
     local before = H.bounds(panel1)
     check(before.Y < slotTop - 1, "패널: 처음에는 슬롯 아래에서 시작")
+    local function allCollide(model, want)
+        for _, d in model:GetDescendants() do
+            if d:IsA("BasePart") and d.CanCollide ~= want then
+                return false
+            end
+        end
+        return true
+    end
+    check(allCollide(panel1, false), "패널: 솟아오르는 동안 충돌 없음")
+    -- 솟아오르는 패널 3 자리에 서 있는 플레이어 (다 오르면 가장 가까운 옆으로 비킨다)
+    local panel3 = folder:FindFirstChild("Panel3")
+    local slot3 = MissionWorld.panelSlots()[3]
+    local slot3Top = slot3.CFrame * CFrame.new(0, slot3.Size.Y / 2, 0)
+    local stander = addFakePlayer("PanelStander", (slot3Top * CFrame.new(0.4, 3, 0.2)).Position)
     advance(2)
     local after = H.bounds(panel1)
     check(H.near(after.Y, slotTop, 0.01), "패널: 솟아올라 슬롯 윗면에 선다")
+    check(allCollide(panel1, true), "패널: 다 오르면 충돌 (로버를 막는다)")
+    check(
+        panel1:HasTag(MissionWorld.CONFIG.solar.hazardTag)
+            and MissionWorld.CONFIG.solar.hazardTag == "RoverHazard",
+        "패널: RoverHazard 태그 (로버 충돌 판정, 패널은 부서지지 않는다)"
+    )
+    do
+        local plo3, phi3 = H.boundsIn(panel3, slot3Top)
+        local q = slot3Top:PointToObjectSpace(rootOf(stander).CFrame.Position)
+        local outside = q.X < plo3.X - 1 or q.X > phi3.X + 1 or q.Z < plo3.Z - 1 or q.Z > phi3.Z + 1
+        check(
+            outside,
+            "패널: 솟아오른 패널 안에 있던 플레이어는 옆으로 비킨다"
+        )
+        local p3 = rootOf(stander).CFrame.Position
+        check(H.near(p3.Y, groundAt(p3.X, p3.Z) + 3, 1e-3), "패널: 비킨 자리는 지면 위")
+    end
+    clearFakePlayers()
+    -- 로버 길: 주차판에서 출구까지 곧은 길은 태양광 판을 지나지 않는다 (지나면 표시를 옮기지 않고 보고)
+    check(
+        MissionWorld.pathCrossesSolarField("RoverPark", "BaseExit") == false,
+        "로버 길: RoverPark -> BaseExit 곧은 길은 SolarField 밖"
+    )
+    for _, pair in
+        {
+            { "RoverPark", "Ice4" },
+            { "RoverPark", "Ice5" },
+            { "BaseExit", "Ice5" },
+            { "Lander", "RoverPark" },
+        }
+    do
+        print(
+            string.format(
+                "  INFO 로버 길 %s -> %s 태양광 판 지남: %s",
+                pair[1],
+                pair[2],
+                tostring(MissionWorld.pathCrossesSolarField(pair[1], pair[2]))
+            )
+        )
+    end
     MissionWorld.setPanelCount(1)
     check(#folder:GetChildren() == 1, "패널: 줄이면 지운다")
     local slotTotal = #MissionWorld.panelSlots()
@@ -1255,6 +1638,23 @@ do
         H.near(info.offsets[1], -info.heights[1] / 2, 1e-3),
         "재배 공간: 진행 0.5면 절반 솟음"
     )
+    -- 건설 중 그린하우스 안에 들어간 플레이어 2명, 멀리 있는 1명, 로버에 앉은 1명 (완공 순간 갇힘 방지)
+    local farmCenter = MissionWorld.getMarker("FarmPad").position
+    local farmGround = groundAt(farmCenter.X, farmCenter.Z)
+    local insideA =
+        addFakePlayer("InsideA", Vector3.new(farmCenter.X, farmGround + 3, farmCenter.Z))
+    local insideB =
+        addFakePlayer("InsideB", Vector3.new(farmCenter.X + 3, farmGround + 3, farmCenter.Z - 2))
+    local farPos = Vector3.new(farmCenter.X + 120, farmGround + 3, farmCenter.Z)
+    local farAway = addFakePlayer("FarAway", farPos)
+    local driver =
+        addFakePlayer("Driver", Vector3.new(farmCenter.X - 2, farmGround + 3, farmCenter.Z + 2))
+    local seatPart = Instance.new("VehicleSeat")
+    seatPart.Anchored = true
+    seatPart.CanCollide = false
+    seatPart.Parent = driver.Character -- 참조가 DOM 안에 있어야 Lune이 SeatPart를 유지한다
+    driver.Character:FindFirstChildOfClass("Humanoid").SeatPart = seatPart
+    local driverPos = rootOf(driver).CFrame.Position
     MissionWorld.setActive("farm", true)
     info = MissionWorld.facilityInfo("farm")
     check(
@@ -1274,6 +1674,48 @@ do
     local toLander = (MissionWorld.getMarker("Lander").position - center) * Vector3.new(1, 0, 1)
     local toDoor = (mid - center) * Vector3.new(1, 0, 1)
     check(toDoor.Unit:Dot(toLander.Unit) > 0.7, "재배 공간: 출입구가 착륙선 쪽")
+    do
+        -- 완공하면 안에 있던 플레이어는 출입구(정면) 바깥 지면으로, 건물 반대쪽을 본다
+        local doorDir = toDoor.Unit
+        local frontFrame = CFrame.lookAt(
+            Vector3.new(center.X, farmGround, center.Z),
+            Vector3.new(center.X, farmGround, center.Z) + doorDir
+        )
+        local flo, fhi = H.boundsIn(farm, frontFrame)
+        local okOut, okGround, okFace = true, true, true
+        for _, p in { insideA, insideB } do
+            local root = rootOf(p)
+            local q = frontFrame:PointToObjectSpace(root.CFrame.Position)
+            if not (q.Z < flo.Z - 1.5) then
+                okOut = false
+            end
+            local pos = root.CFrame.Position
+            if not H.near(pos.Y, groundAt(pos.X, pos.Z) + 3, 1e-3) then
+                okGround = false
+            end
+            if root.CFrame.LookVector:Dot(doorDir) < 0.99 then
+                okFace = false
+            end
+        end
+        check(
+            okOut,
+            "갇힘 방지: 완공 순간 그린하우스 안 플레이어를 정면 바깥으로"
+        )
+        check(okGround, "갇힘 방지: 옮긴 자리는 지면 (지형 광선 + 3)")
+        check(okFace, "갇힘 방지: 건물 반대쪽을 본다")
+        local a, b = rootOf(insideA).CFrame.Position, rootOf(insideB).CFrame.Position
+        check((a - b).Magnitude >= 2.9, "갇힘 방지: 여러 명은 옆으로 나란히")
+        check(
+            rootOf(farAway).CFrame.Position == farPos,
+            "갇힘 방지: 멀리 있는 플레이어는 그대로"
+        )
+        check(
+            rootOf(driver).CFrame.Position == driverPos,
+            "갇힘 방지: 운전석에 앉은 플레이어는 건드리지 않는다"
+        )
+        check(fhi.Z > flo.Z, "갇힘 방지: 그린하우스 경계")
+        clearFakePlayers()
+    end
     check(
         H.find(farm, "Walls.Door") == nil and H.find(farm, "Entry") == nil,
         "재배 공간: 문 없는 출입구 (Airlock 모듈 대상 아님)"
@@ -1344,9 +1786,36 @@ do
         "수경: 가동이면 수경 베드 보임"
     )
 
-    -- 영양분
+    -- 영양분 (건설 중 장치 자리에 선 플레이어는 완공하면 장치 정면 바깥으로)
     MissionWorld.place("nutrient")
+    local unitBuilding = facilitiesFolder:FindFirstChild("nutrient")
+    local ublo, ubhi = H.bounds(unitBuilding:FindFirstChild("Visual"))
+    local ucx, ucz = (ublo.X + ubhi.X) / 2, (ublo.Z + ubhi.Z) / 2
+    local unitStander = addFakePlayer("UnitStander", Vector3.new(ucx, groundAt(ucx, ucz) + 3, ucz))
+    check(
+        H.allParts(H.find(unitBuilding, "Visual"):GetDescendants(), function(part)
+            return not part:IsA("BasePart") or part.CanCollide == false
+        end),
+        "영양분: 건설 중 장치는 충돌 없음"
+    )
     MissionWorld.setActive("nutrient", true)
+    do
+        local ulo2, uhi2 = H.bounds(unitBuilding:FindFirstChild("Visual"))
+        local pos = rootOf(unitStander).CFrame.Position
+        local outside = pos.X < ulo2.X - 1.5
+            or pos.X > uhi2.X + 1.5
+            or pos.Z < ulo2.Z - 1.5
+            or pos.Z > uhi2.Z + 1.5
+        local farmC = MissionWorld.getMarker("FarmPad").position
+        local function flatDist(v)
+            return math.sqrt((v.X - farmC.X) ^ 2 + (v.Z - farmC.Z) ^ 2)
+        end
+        check(
+            outside and flatDist(pos) > flatDist(Vector3.new(ucx, 0, ucz)),
+            "갇힘 방지: 장치 안 플레이어는 그린하우스 반대쪽(장치 정면)으로"
+        )
+        clearFakePlayers()
+    end
     local unit = facilitiesFolder:FindFirstChild("nutrient")
     check(
         unit ~= nil

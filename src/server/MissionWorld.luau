@@ -10,7 +10,10 @@
 --     물탱크, 로버 주차판, 기지 출구, 얼음 지점, 재배 공간 착공 자리. 모두 표시 자리의 지형 높이에 맞춘다.
 --   시설 손잡이: place, setBuildProgress(땅에서 솟아오름), setActive, setPaused, syncFacilities.
 --     그린하우스 안 Grow_LED_Bar는 LED가 가동 중일 때만, Hydroponic_Bed는 수경 재배가 가동 중일 때만 보인다.
---   iceSites(): 얼음 표시를 번호가 아니라 실제 수평 거리로 정렬한 목록(Q37)
+--   iceSites(): 얼음 표시를 번호가 아니라 실제 수평 거리로 정렬한 목록(Q37). 외형은 낮게 묻힌 표토 덩어리,
+--     이름표와 반짝임은 가까이(CFG.ice.revealDistance)서만 보인다
+--   갇힘 방지: 시설과 태양광 패널은 건설(솟아오름) 중 충돌이 없고, 충돌이 켜지는 순간 안에 있던 플레이어를
+--     정면 바깥 지면으로 옮긴다(CFG.eject). 설치한 패널은 로버를 막고 RoverHazard 태그가 붙는다
 --   reset(): 재시작. MissionRuntime을 비우고 기지를 다시 놓는다.
 --
 -- 서버는 화면 문장을 쓰지 않는다(CONTRACT 0절 2). 3D 글자(문 표지, 제어반, 대체 도형 이름표)는 TextLabel에
@@ -18,6 +21,7 @@
 -- 숫자(크기, 간격, 색)는 아래 CFG에 모았다. 리드가 나중에 MissionConfig로 옮긴다.
 -- 산소 구역 파트에는 태그 "OxygenZone"과 Attribute ZoneKind("shelter" | "refill"), ZoneId를 단다(Oxygen v2가 읽는다).
 
+local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerStorage = game:GetService("ServerStorage")
 
@@ -142,6 +146,7 @@ local CFG = {
         installPadSize = { 6, 0.6, 6 },
         installPadGap = 2,
         orderFrom = "Lander", -- 이 표시에 가까운 슬롯부터 채운다
+        hazardTag = "RoverHazard", -- RoverFleet.CONFIG.hazardTag와 같아야 한다 (설치한 패널에 붙인다)
     },
     -- 물탱크: 긴 축을 표시의 긴 변에 맞추고, 뒤 끝(+Z, 파이프가 붙는 쪽)이 얼음 쪽을 보게 놓는다.
     -- 디자이너 에셋(31 x 16.7 x 11.8)은 문과 경사로가 앞(-Z), 뒤쪽 설비가 뒤(+Z)다
@@ -198,7 +203,53 @@ local CFG = {
         radius = 0.7,
         lift = 0, -- 관 중심 높이 = 지면 (반쯤 묻힌 관로)
     },
-    ice = { role = "IceCrystal", fill = 0.45, maxHeight = 8 },
+    -- [2026-11-15 시험 피드백] 얼음은 영구 음영 크레이터의 어두운 표토에 섞여 있다(반짝이는 덩어리가 아니다).
+    -- 낮고 대부분 묻힌 표토 색 덩어리 무리, 아주 약한 푸른 기만. 네온, 빛, 반짝이 효과 없음.
+    -- 이름표와 작은 반짝임은 revealDistance(studs) 안에서만 보인다(BillboardGui.MaxDistance). 지도와 핀으로 찾게 한다
+    ice = {
+        role = "IceDeposit",
+        fill = 0.45, -- 덩어리 무리가 차지하는 표시 바닥 넓이 비율
+        maxHeight = 2.4, -- 덩어리 무리 전체 높이 상한 (묻기 전)
+        buryRatio = 0.55, -- 그중 땅속에 묻는 비율 (보이는 높이 약 1)
+        revealDistance = 40,
+        glintSize = 0.5, -- 반짝임 점 크기 (studs)
+        glintTransparency = 0.45,
+        labelOffset = 3, -- MinePoint 중심 위 이름표 높이
+        glintOffset = -1, -- MinePoint 중심 기준 반짝임 높이 (지면 근처)
+    },
+    -- 대체 도형 "deposit"의 덩어리 배치 (로컬, 바닥 중심 원점, 나중에 표시 크기에 맞춰 균일 배율)
+    iceDeposit = {
+        chunks = {
+            { size = { 3.2, 1.6, 2.6 }, at = { 0, 0 }, yaw = 15, tilt = 8, tint = true },
+            { size = { 2.4, 1.2, 2.0 }, at = { 2.8, 1.2 }, yaw = 60, tilt = -10, tint = false },
+            { size = { 2.6, 1.4, 1.8 }, at = { -2.6, 0.8 }, yaw = -35, tilt = 12, tint = true },
+            { size = { 1.8, 1.0, 1.6 }, at = { 1.2, -2.4 }, yaw = 80, tilt = 6, tint = false },
+            { size = { 2.0, 1.1, 1.4 }, at = { -1.4, -2.2 }, yaw = 25, tilt = -8, tint = true },
+            { size = { 1.4, 0.8, 1.2 }, at = { 3.4, -1.4 }, yaw = -50, tilt = 10, tint = false },
+        },
+    },
+    -- [2026-11-15 시험 피드백] 완공(충돌이 켜지는) 순간 구조물 안에 있는 플레이어를 정면 바깥 지면으로 옮긴다
+    eject = {
+        margin = 1.5, -- 구조물 경계를 수평으로 이만큼 넓혀 검사
+        headroom = 3, -- 구조물 윗면 위 이 높이까지 안으로 본다 (HumanoidRootPart는 발보다 약 3 높다)
+        clearance = 4, -- 경계(넓히기 전) 바깥으로 이만큼 떨어진 자리
+        panelClearance = 1.5, -- 태양광 패널은 가장 가까운 옆면으로 조금만
+        spacing = 3, -- 여러 명이면 옆으로 이 간격
+        rootHeight = 3, -- 지면 위 HumanoidRootPart 중심 높이 (R15 기본 HipHeight 2 + 반 높이 1)
+    },
+    -- 대체 도형 오두막(hut)은 걸어 들어가는 모양 그대로 충돌을 남긴다 (지붕과 벽이 카메라와 점프를 막는다).
+    -- 키트, 에셋 외형은 충돌을 끄고 buildEntry의 보이지 않는 벽, 문 위 막이, 천장이 막는다
+    hutSolid = {
+        "Floor",
+        "Central_Walkway",
+        "WallBack",
+        "WallLeft",
+        "WallRight",
+        "WallFrontLeft",
+        "WallFrontRight",
+        "Lintel",
+        "Roof",
+    },
     pausedUpgradeLook = "dim", -- 멈춘 LED, 수경: "dim"(보이되 꺼짐) | "hide"(숨김)
     dimFactor = 0.6, -- 멈춤 표시: 원래 색을 검정 쪽으로 이 비율만큼
     label = { width = 10, height = 2, offset = 1.5, maxDistance = 150 },
@@ -216,6 +267,7 @@ local CFG = {
         console = { 255, 140, 60 },
         pipe = { 190, 192, 198 },
         ledGlow = { 255, 120, 220 },
+        iceGlint = { 215, 232, 245 }, -- 얼음 후보지 가까이에서만 보이는 작은 반짝임
         bed = { 235, 236, 240 },
         labelText = { 255, 255, 255 },
         status = {
@@ -232,6 +284,7 @@ local CFG = {
 -- kit: Assets.Kit 조합. main은 본체, extras는 덧붙이는 조각
 --   layout "top"(본체 위), "ring"(본체 둘레 count개), "endX"(본체 +X 끝). scale은 본체 수평 최대 길이 대비
 -- shape: 대체 도형 "box" | "hut"(걸어 들어가는 오두막, 정면 -Z 가운데 비움) | "cylinder" | "panel"
+--   | "deposit"(표토에 섞인 얼음: 낮은 덩어리 무리, CFG.iceDeposit. tint는 얼음이 섞인 덩어리 색)
 -- textKey: 대체 도형 이름표 문구 키 (nil이면 이름표 없음)
 type KitExtra = { name: string, layout: string, scale: number, count: number? }
 type RoleSpec = {
@@ -239,6 +292,7 @@ type RoleSpec = {
     shape: string,
     size: { number },
     color: { number },
+    tint: { number }?,
     textKey: string?,
 }
 
@@ -345,12 +399,22 @@ local ROLES: { [string]: RoleSpec } = {
         color = { 190, 192, 198 },
         textKey = "facility.pipe.name",
     },
-    IceCrystal = {
+    IceCrystal = { -- 예전 얼음 외형 (v2는 IceDeposit을 쓴다. 너무 눈에 띄어 2026-11-15 교체)
         kit = { main = "IceCrystal" },
         shape = "box",
         size = { 6, 6, 6 },
         color = { 170, 220, 255 },
         textKey = "world.ice_site.name",
+    },
+    -- 얼음 후보지: 표토에 섞인 얼음 (Assets.IceDeposit -> 대체 도형). 반짝이는 Kit.IceCrystal은 쓰지 않는다.
+    -- 이름표는 buildIceSites가 가까이서만 보이게 따로 단다
+    IceDeposit = {
+        kit = nil,
+        shape = "deposit",
+        size = { 9, 1.6, 7 },
+        color = { 88, 88, 92 }, -- 어두운 표토
+        tint = { 102, 108, 118 }, -- 얼음이 섞인 덩어리: 아주 약한 푸른 기
+        textKey = nil,
     },
 }
 
@@ -401,7 +465,16 @@ export type IceSite = {
     distanceFromLander: number,
 }
 
-type Riser = { model: Model, pivot: CFrame, height: number, offset: number }
+-- exitFrame, exitMode: 완공(충돌이 켜지는) 순간 안에 있는 플레이어를 내보낼 기준 (CFG.eject). exitFrame의 -Z가 정면
+type Riser = {
+    model: Model,
+    pivot: CFrame,
+    height: number,
+    offset: number,
+    exitFrame: CFrame?,
+    exitMode: string?, -- "front" | "nearest"
+    exitClearance: number?,
+}
 
 type Look = { transparency: number, material: Enum.Material, color: Color3 }
 
@@ -712,6 +785,84 @@ local function footprintSamples(
     return samples, found
 end
 
+-- 갇힘 방지 ---------------------------------------------------------------
+-- 건설 중인 시설은 충돌이 없어 안으로 걸어 들어갈 수 있다. 완공(충돌이 켜지는) 순간 그 안에 있던 플레이어는
+-- 벽이나 바닥 판에 갇혔다 (2026-11-15 시험 피드백). 충돌을 켤 때마다 구조물 경계(조금 넓힘) 안의 플레이어를
+-- 정면 바깥 지면(지형 광선)으로 옮기고 건물 반대쪽을 보게 한다
+
+local function rootPartOf(player: Player): BasePart?
+    local character = player.Character
+    local root = character and character:FindFirstChild("HumanoidRootPart")
+    if root and root:IsA("BasePart") then
+        return root
+    end
+    return nil
+end
+
+-- root 경계(frame 좌표) 안의 플레이어를 바깥으로. mode "front"(frame -Z 면 바깥) | "nearest"(가장 가까운 옆면).
+-- 운전석에 앉은 플레이어는 로버째 움직이므로 건드리지 않는다. 반환: 옮긴 플레이어 수
+local function ejectPlayers(root: Instance, frame: CFrame, mode: string, clearance: number?): number
+    local ej = CFG.eject
+    local lo, hi = boundsIn(root, frame)
+    if (hi - lo).Magnitude < MIN_EXTENT then
+        return 0
+    end
+    local ok, list = pcall(function()
+        return Players:GetPlayers()
+    end)
+    if not ok or typeof(list) ~= "table" then
+        return 0
+    end
+    local moved = 0
+    for _, player in list do
+        local rootPart = rootPartOf(player)
+        local character = player.Character
+        local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+        local seated = humanoid ~= nil and humanoid.SeatPart ~= nil
+        if rootPart and character and not seated then
+            local p = frame:PointToObjectSpace(rootPart.CFrame.Position)
+            if WorldMath.insideBounds(p, lo, hi, ej.margin, ej.headroom) then
+                moved += 1
+                local spot, dx, dz = WorldMath.exitPoint(
+                    { X = p.X, Z = p.Z },
+                    { X = lo.X, Z = lo.Z },
+                    { X = hi.X, Z = hi.Z },
+                    clearance or ej.clearance,
+                    mode,
+                    WorldMath.spreadOffset(moved, ej.spacing)
+                )
+                local world = frame * Vector3.new(spot.X, 0, spot.Z)
+                local outward = frame:VectorToWorldSpace(Vector3.new(dx, 0, dz))
+                local flatOut = Vector3.new(outward.X, 0, outward.Z)
+                if flatOut.Magnitude < 1e-3 then
+                    flatOut = Vector3.new(0, 0, -1)
+                end
+                local h = terrainHeight(world.X, world.Z, frame.Position.Y)
+                local at = Vector3.new(world.X, (h or frame.Position.Y) + ej.rootHeight, world.Z)
+                local model = character :: Model
+                local moveOk, moveErr = pcall(function()
+                    model:PivotTo(CFrame.lookAt(at, at + flatOut.Unit))
+                end)
+                if not moveOk then
+                    warn("[MissionWorld] 플레이어 내보내기 실패: " .. tostring(moveErr))
+                end
+                pcall(function()
+                    rootPart.AssemblyLinearVelocity = Vector3.zero
+                end)
+            end
+        end
+    end
+    return moved
+end
+
+local function ejectFromRiser(riser: Riser): number
+    local frame = riser.exitFrame
+    if frame == nil or riser.model.Parent == nil then
+        return 0
+    end
+    return ejectPlayers(riser.model, frame, riser.exitMode or "front", riser.exitClearance)
+end
+
 -- 표시 정보 -------------------------------------------------------------
 
 local function flatYaw(cf: CFrame): number
@@ -981,6 +1132,36 @@ local function makePlaceholder(roleName: string, spec: RoleSpec): Model
             material = Enum.Material.Metal,
             parent = model,
         })
+    elseif spec.shape == "deposit" then
+        -- 표토 덩어리 무리: 네온, 반사 없음. 얼음이 섞인 덩어리만 아주 약하게 푸른 기
+        local tint = if spec.tint then rgb(spec.tint) else color
+        local first: BasePart? = nil
+        for i, chunk in CFG.iceDeposit.chunks do
+            local s = vec(chunk.size)
+            local part = newPart({
+                name = "Chunk" .. i,
+                size = s,
+                cframe = CFrame.new(chunk.at[1], s.Y / 2, chunk.at[2])
+                    * CFrame.Angles(0, math.rad(chunk.yaw), 0)
+                    * CFrame.Angles(math.rad(chunk.tilt), 0, 0),
+                color = if chunk.tint then tint else color,
+                material = Enum.Material.Slate,
+                parent = model,
+            })
+            part.Reflectance = 0
+            if first == nil then
+                first = part
+            end
+        end
+        body = first
+            or newPart({
+                name = "Body",
+                size = size,
+                cframe = CFrame.new(0, size.Y / 2, 0),
+                color = color,
+                material = Enum.Material.Slate,
+                parent = model,
+            })
     elseif spec.shape == "panel" then
         newPart({
             name = "Frame",
@@ -1162,6 +1343,51 @@ local function buildEntry(
         wall("WallBack", 2 * (halfX + t), Vector3.new(cx, 0, hi.Z + t / 2), Vector3.zAxis)
         wall("WallLeft", 2 * halfZ, Vector3.new(lo.X - t / 2, 0, cz), Vector3.new(-1, 0, 0))
         wall("WallRight", 2 * halfZ, Vector3.new(hi.X + t / 2, 0, cz), Vector3.xAxis)
+    end
+
+    -- 대피처(문이 있는 건물): 보이지 않는 천장과 문 위 막이. 외형은 충돌이 없어 지붕을 뚫고 뛰어 나가거나 들어올 수
+    -- 있었고, 문 틈은 벽 높이 끝까지 열려 있었다 (2026-11-15 시험 피드백). 천장은 벽 윗면에 딱 붙고 벽 바깥 두께까지 덮는다
+    if withDoor then
+        local function solid(name: string, size: Vector3, center: Vector3)
+            local part = newPart({
+                name = name,
+                size = size,
+                cframe = frame * CFrame.new(center),
+                color = rgb(CFG.colors.door),
+                transparency = 1,
+                canCollide = true,
+                parent = entry,
+            })
+            part.CanQuery = false
+            part.CastShadow = false
+        end
+        local frontZ: number
+        local ceilingX: number
+        local ceilingZ: number
+        if shape == "octagon" then
+            local radius = math.max(hi.X - lo.X, hi.Z - lo.Z) / 2
+            local apothem = radius + t / 2
+            frontZ = cz - apothem
+            ceilingX = 2 * (apothem + t) -- 대각 벽 모서리(바깥 반지름 apothem + 0.71t)까지 덮는다
+            ceilingZ = ceilingX
+        else
+            frontZ = lo.Z - t / 2
+            ceilingX = hi.X - lo.X + 2 * t
+            ceilingZ = hi.Z - lo.Z + 2 * t
+        end
+        solid(
+            "Ceiling",
+            Vector3.new(ceilingX, t, ceilingZ),
+            Vector3.new(cx, wallHeight + t / 2, cz)
+        )
+        local doorTop = e.doorHeight + e.frameBorder
+        if wallHeight - doorTop > MIN_EXTENT then
+            solid(
+                "DoorLintel",
+                Vector3.new(e.doorGap, wallHeight - doorTop, t),
+                Vector3.new(cx, (doorTop + wallHeight) / 2, frontZ)
+            )
+        end
     end
 
     local door: BasePart? = nil
@@ -1374,7 +1600,7 @@ local function buildShelter(id: string, parent: Instance)
         { X = footX, Z = footZ, Y = math.max(foot.Y, spec.minHeight) },
         spec.minHeight
     )
-    makeWalkIn(visual, CFG.farm.walkable)
+    makeWalkIn(visual, if source == "placeholder" then CFG.hutSolid else CFG.farm.walkable)
     visual.Parent = model
     local lo, hi = boundsIn(visual, frame)
     lo = Vector3.new(lo.X, 0, lo.Z)
@@ -1541,12 +1767,14 @@ local function setRiser(riser: Riser, offset: number)
     riser.model:PivotTo(riser.pivot + Vector3.new(0, offset, 0))
 end
 
--- risers를 targets(세로 오프셋)까지 seconds 동안 부드럽게 옮긴다. stillValid가 거짓이 되면 멈춘다
+-- risers를 targets(세로 오프셋)까지 seconds 동안 부드럽게 옮긴다. stillValid가 거짓이 되면 멈춘다.
+-- onDone은 끝까지 옮겼을 때만 부른다 (멈추면 부르지 않는다)
 local function animateRisers(
     risers: { Riser },
     targets: { number },
     seconds: number,
-    stillValid: () -> boolean
+    stillValid: () -> boolean,
+    onDone: (() -> ())?
 )
     local froms = {}
     for i, riser in risers do
@@ -1555,6 +1783,9 @@ local function animateRisers(
     if seconds <= 0 then
         for i, riser in risers do
             setRiser(riser, targets[i])
+        end
+        if onDone then
+            onDone()
         end
         return
     end
@@ -1572,6 +1803,9 @@ local function animateRisers(
                     setRiser(riser, WorldMath.lerp(froms[i], targets[i], eased))
                 end
             end
+        end
+        if onDone then
+            onDone()
         end
     end)
 end
@@ -1593,18 +1827,35 @@ local function spawnPanel(index: number, animate: boolean)
         top,
         { X = slot.Size.X * s.fill, Z = slot.Size.Z * s.fill, Y = s.panelMaxHeight }
     )
-    setStatic(panel, false)
+    -- [2026-11-15 시험 피드백] 설치한 패널은 로버를 막는다(충돌). RoverHazard 태그라 세게 부딪히면 로버 충돌 파손 1회
+    -- (RoverFleet 수동 충돌 판정과 같은 경로, 패널은 고정이라 부서지지 않는다). 솟아오르는 동안만 충돌을 끈다
+    setStatic(panel, true)
+    panel:AddTag(s.hazardTag)
     panel:SetAttribute("SlotIndex", index)
     panel.Parent = folder
-    local riser: Riser =
-        { model = panel, pivot = panel:GetPivot(), height = CFG.animation.panelSink, offset = 0 }
+    local riser: Riser = {
+        model = panel,
+        pivot = panel:GetPivot(),
+        height = CFG.animation.panelSink,
+        offset = 0,
+        exitFrame = top,
+        exitMode = "nearest",
+        exitClearance = CFG.eject.panelClearance,
+    }
     panelRisers[index] = riser
+    local function solidNow()
+        setStatic(panel, true)
+        ejectFromRiser(riser)
+    end
     if animate then
+        setStatic(panel, false)
         setRiser(riser, -CFG.animation.panelSink)
         local myGeneration = generation
         animateRisers({ riser }, { 0 }, CFG.animation.panelRiseSeconds, function()
             return myGeneration == generation and panelRisers[index] == riser
-        end)
+        end, solidNow)
+    else
+        solidNow()
     end
 end
 
@@ -1881,6 +2132,69 @@ function MissionWorld.iceDistances(): { [string]: number }
     return result
 end
 
+-- 얼음 외형이 멀리서 보이지 않게: 네온은 표토 재질로, 빛은 끄고, 반짝이 효과는 끄고, 글자 GUI는 가까이서만
+-- (디자이너 Assets.IceDeposit에 무엇이 들어 있어도 같은 규칙)
+local function quietIceVisual(model: Instance, maxDistance: number)
+    for _, d in model:GetDescendants() do
+        if d:IsA("BasePart") then
+            if d.Material == Enum.Material.Neon then
+                d.Material = Enum.Material.Slate
+            end
+            d.Reflectance = 0
+        elseif
+            d:IsA("Light")
+            or d:IsA("Highlight")
+            or d:IsA("ParticleEmitter")
+            or d:IsA("Sparkles")
+            or d:IsA("Fire")
+            or d:IsA("Smoke")
+            or d:IsA("Beam")
+            or d:IsA("Trail")
+        then
+            (d :: any).Enabled = false
+        elseif d:IsA("BillboardGui") then
+            d.MaxDistance = math.min(d.MaxDistance, maxDistance)
+            d.AlwaysOnTop = false
+        end
+    end
+end
+
+-- 가까이에서만 보이는 이름표와 작은 반짝임 (BillboardGui.MaxDistance = revealDistance)
+local function addIceReveal(point: BasePart)
+    local i = CFG.ice
+    local l = CFG.label
+    local label = Instance.new("BillboardGui")
+    label.Name = "Label"
+    label.Size = UDim2.fromScale(l.width, l.height)
+    label.StudsOffset = Vector3.new(0, i.labelOffset, 0)
+    label.MaxDistance = i.revealDistance
+    label.LightInfluence = 0
+    label.AlwaysOnTop = false
+    label.AutoLocalize = false
+    label.Parent = point
+    local text = keyedLabel(label, "world.ice_site.name", rgb(CFG.colors.labelText))
+    text.TextStrokeTransparency = 0.4
+    local glint = Instance.new("BillboardGui")
+    glint.Name = "Glint"
+    glint.Size = UDim2.fromScale(i.glintSize, i.glintSize)
+    glint.StudsOffset = Vector3.new(0, i.glintOffset, 0)
+    glint.MaxDistance = i.revealDistance
+    glint.LightInfluence = 0
+    glint.AlwaysOnTop = false
+    glint.AutoLocalize = false
+    glint.Parent = point
+    local dot = Instance.new("Frame")
+    dot.Name = "Dot"
+    dot.Size = UDim2.fromScale(1, 1)
+    dot.BackgroundColor3 = rgb(CFG.colors.iceGlint)
+    dot.BackgroundTransparency = i.glintTransparency
+    dot.BorderSizePixel = 0
+    dot.Parent = glint
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0.5, 0)
+    corner.Parent = dot
+end
+
 local function buildIceSites(parent: Instance)
     local i = CFG.ice
     local folder = childFolder(parent, "IceSites")
@@ -1891,11 +2205,15 @@ local function buildIceSites(parent: Instance)
         model:SetAttribute("MarkerName", site.markerName)
         local frame = yawFrame(info.position, groundY(info, "min") - CFG.ground.smallSink, info.yaw)
         local foot = footprintIn(info, frame)
-        local crystal = MissionWorld.resolveAsset(i.role)
-        crystal.Name = "Crystal"
-        fitIntoFrame(crystal, frame, { X = foot.X * i.fill, Z = foot.Z * i.fill, Y = i.maxHeight })
-        setStatic(crystal, false)
-        crystal.Parent = model
+        -- 표토에 섞인 얼음: 낮은 덩어리 무리를 맞춘 뒤 대부분 땅에 묻는다 (지면 위로 약 1만 보인다)
+        local deposit = MissionWorld.resolveAsset(i.role)
+        deposit.Name = "Deposit"
+        fitIntoFrame(deposit, frame, { X = foot.X * i.fill, Z = foot.Z * i.fill, Y = i.maxHeight })
+        local dlo, dhi = boundsIn(deposit)
+        translate(deposit, Vector3.new(0, -(dhi.Y - dlo.Y) * i.buryRatio, 0))
+        setStatic(deposit, false)
+        quietIceVisual(deposit, i.revealDistance)
+        deposit.Parent = model
         local point = newMarker(
             "MinePoint",
             Vector3.new(foot.X, 4, foot.Z),
@@ -1904,6 +2222,7 @@ local function buildIceSites(parent: Instance)
         )
         point:SetAttribute("SiteIndex", site.index)
         point:SetAttribute("MarkerName", site.markerName)
+        addIceReveal(point)
     end
 end
 
@@ -2020,6 +2339,26 @@ function MissionWorld.init(missionId: string): (boolean, { string })
     return #missing == 0, missing
 end
 
+-- 두 표시 사이 곧은 수평 길이 태양광 판(SolarField 표시 바닥 넓이)을 지나는지. 표시가 없으면 nil
+function MissionWorld.pathCrossesSolarField(fromName: string, toName: string): boolean?
+    local field = markers[CFG.solar.marker]
+    local a = markers[fromName]
+    local b = markers[toName]
+    if not field or not a or not b then
+        return nil
+    end
+    local frame = yawFrame(field.position, field.position.Y, field.yaw)
+    local foot = footprintIn(field, frame)
+    local pa = frame:PointToObjectSpace(a.position)
+    local pb = frame:PointToObjectSpace(b.position)
+    return WorldMath.segmentHitsBox(
+        { X = pa.X, Z = pa.Z },
+        { X = pb.X, Z = pb.Z },
+        foot.X / 2,
+        foot.Z / 2
+    )
+end
+
 -- 기지 고정 구조물을 놓는다 (init 뒤에). 다시 부르면 기지만 새로 만든다
 function MissionWorld.placeBase(options: BaseOptions?)
     local root = runtime
@@ -2067,6 +2406,13 @@ function MissionWorld.placeBase(options: BaseOptions?)
         buildIceSites(root)
     end)
     childFolder(root, "Facilities")
+    -- 설치한 패널은 로버를 막는다. 주차판에서 출구까지 곧은 길이 태양광 판을 지나면 표시를 옮기지 않고 알리기만 한다
+    if MissionWorld.pathCrossesSolarField("RoverPark", "BaseExit") then
+        warnOnce(
+            "roverPath",
+            "RoverPark에서 BaseExit까지 곧은 길이 SolarField를 지납니다. 패널이 로버를 막으니 표시 위치를 확인하세요"
+        )
+    end
     applyAirlockLook()
     -- 패널 수가 이미 있으면 연출 없이 다시 놓는다
     basePlaced = false
@@ -2277,7 +2623,9 @@ local function placeFarm(fac: Facility, parent: Instance): boolean
     )
     fac.panel, fac.light = panel, light
     container.Parent = parent
-    table.insert(fac.risers, newRiser(container))
+    local riser = newRiser(container)
+    riser.exitFrame = frame -- 정면(-Z, 착륙선 쪽)에 보이지 않는 벽의 출입 틈이 있다
+    table.insert(fac.risers, riser)
     return true
 end
 
@@ -2332,7 +2680,9 @@ local function placeUnit(fac: Facility, parent: Instance): boolean
     )
     fac.panel, fac.light = panel, light
     container.Parent = parent
-    table.insert(fac.risers, newRiser(container))
+    local riser = newRiser(container)
+    riser.exitFrame = frame -- 장치 정면(-Z)은 그린하우스 바깥쪽
+    table.insert(fac.risers, riser)
     return true
 end
 
@@ -2397,6 +2747,7 @@ local function buildPipeline(fac: Facility, siteIndex: number)
         table.insert(fac.dimParts, part)
     end)
     local whRiser = newRiser(wellhead)
+    whRiser.exitFrame = whFrame -- 우물머리 정면은 기지 쪽
     table.insert(fac.risers, whRiser)
     -- 관로: 펌프장에서 우물머리까지 segmentLength 간격, 점마다 지면 높이
     local points = WorldMath.pathPoints(xz(stationPos), xz(site.position), p.segmentLength)
@@ -2544,7 +2895,10 @@ local function placePipe(fac: Facility, parent: Instance, siteIndex: number?): b
     )
     fac.panel, fac.light = panel, light
     container.Parent = parent
-    table.insert(fac.risers, newRiser(model))
+    local riser = newRiser(model)
+    -- 연결관은 탱크 뒤 끝에 붙는다. 정면(-Z)을 탱크 반대쪽(얼음 쪽)으로 둔 frame
+    riser.exitFrame = CFrame.lookAt(frame.Position, frame.Position - frame.LookVector)
+    table.insert(fac.risers, riser)
     if siteIndex then
         buildPipeline(fac, siteIndex)
     end
@@ -2614,6 +2968,11 @@ function MissionWorld.setPipeSite(facilityId: string, siteIndex: number): boolea
     buildPipeline(fac, siteIndex)
     if wasCollide then
         disableCollision(fac)
+    elseif fac.status == "active" then
+        -- 가동 중에 지점을 바꾸면 새 우물머리가 바로 단단해진다
+        for i = 2, #fac.risers do
+            ejectFromRiser(fac.risers[i])
+        end
     end
     if fac.paused then
         applyLook(fac.dimParts, "dim")
@@ -2677,6 +3036,10 @@ function MissionWorld.setActive(facilityId: string, active: boolean)
             setRiser(riser, 0)
         end
         restoreCollision(fac)
+        -- 충돌이 켜지는 순간: 안에 있던 플레이어를 정면 바깥으로 (갇힘 방지)
+        for _, riser in fac.risers do
+            ejectFromRiser(riser)
+        end
         setStatusLight(fac.light, if fac.paused then "paused" else "active")
         fac.container:SetAttribute("Status", if fac.paused then "paused" else "active")
     else

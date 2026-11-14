@@ -12,6 +12,8 @@
 --   renderedSize, worldExtents: 표시 Part의 실제 렌더 크기(원기둥, 공)와 회전된 월드 경계 크기
 --   yawToward, snapAngle, faceToward: 문과 시설 정면 방향
 --   pathPoints, pointInBox, facilityDefId
+--   insideBounds, spreadOffset, exitPoint: 완공 순간 구조물 안에 있는 플레이어를 바깥으로 (갇힘 방지)
+--   segmentHitsBox: 수평 선분이 상자를 지나는지 (로버 길과 태양광 판 겹침 검사)
 
 local WorldMath = {}
 
@@ -300,6 +302,92 @@ function WorldMath.pointInBox(localPoint: Vec3, size: Vec3): boolean
     return math.abs(localPoint.X) <= size.X / 2
         and math.abs(localPoint.Y) <= size.Y / 2
         and math.abs(localPoint.Z) <= size.Z / 2
+end
+
+-- 로컬 좌표 점이 경계 lo..hi 안인지. 수평은 margin만큼 넓히고, 세로는 lo.Y - margin부터 hi.Y + headroom까지.
+-- 캐릭터 HumanoidRootPart는 발보다 약 3 높아서 낮은 구조물(패널)도 headroom으로 잡는다 (갇힘 검사)
+function WorldMath.insideBounds(
+    p: Vec3,
+    lo: Vec3,
+    hi: Vec3,
+    margin: number,
+    headroom: number
+): boolean
+    return p.X >= lo.X - margin
+        and p.X <= hi.X + margin
+        and p.Z >= lo.Z - margin
+        and p.Z <= hi.Z + margin
+        and p.Y >= lo.Y - margin
+        and p.Y <= hi.Y + headroom
+end
+
+-- 여러 명을 나란히 내보낼 때 i번째(1부터) 옆 간격: 0, +s, -s, +2s, -2s ...
+function WorldMath.spreadOffset(i: number, spacing: number): number
+    if i <= 1 then
+        return 0
+    end
+    local step = math.floor(i / 2)
+    local sign = if i % 2 == 0 then 1 else -1
+    return sign * step * spacing
+end
+
+-- 갇힌 점을 경계 lo..hi 바깥으로 내보낼 로컬 수평 위치.
+-- mode "front": 정면(-Z 면) 바깥 clearance, 옆 위치는 가운데 + lateral (경계 폭 안으로 자른다)
+-- mode "nearest": 가장 가까운 옆면 바깥 clearance (다른 축 위치는 그대로)
+-- 반환: 위치 XZ와 바깥 방향 (dirX, dirZ)
+function WorldMath.exitPoint(
+    p: XZ,
+    lo: XZ,
+    hi: XZ,
+    clearance: number,
+    mode: string,
+    lateral: number?
+): (XZ, number, number)
+    if mode == "nearest" then
+        local options = {
+            { d = p.X - lo.X, x = lo.X - clearance, z = p.Z, dx = -1, dz = 0 },
+            { d = hi.X - p.X, x = hi.X + clearance, z = p.Z, dx = 1, dz = 0 },
+            { d = p.Z - lo.Z, x = p.X, z = lo.Z - clearance, dx = 0, dz = -1 },
+            { d = hi.Z - p.Z, x = p.X, z = hi.Z + clearance, dx = 0, dz = 1 },
+        }
+        local best = options[1]
+        for _, option in options do
+            if option.d < best.d then
+                best = option
+            end
+        end
+        return { X = best.x, Z = best.z }, best.dx, best.dz
+    end
+    local x = math.clamp((lo.X + hi.X) / 2 + (lateral or 0), lo.X, math.max(lo.X, hi.X))
+    return { X = x, Z = lo.Z - clearance }, 0, -1
+end
+
+-- 수평 선분 a-b가 원점 중심, 반폭 halfX, halfZ인 상자(로컬 좌표)를 지나는지 (경로 검사, 슬랩 방식)
+function WorldMath.segmentHitsBox(a: XZ, b: XZ, halfX: number, halfZ: number): boolean
+    local t0, t1 = 0, 1
+    local d = { X = b.X - a.X, Z = b.Z - a.Z }
+    for _, axis in { "X", "Z" } do
+        local half = if axis == "X" then halfX else halfZ
+        local start = (a :: any)[axis]
+        local delta = (d :: any)[axis]
+        if math.abs(delta) < 1e-9 then
+            if start < -half or start > half then
+                return false
+            end
+        else
+            local ta = (-half - start) / delta
+            local tb = (half - start) / delta
+            if ta > tb then
+                ta, tb = tb, ta
+            end
+            t0 = math.max(t0, ta)
+            t1 = math.min(t1, tb)
+            if t0 > t1 then
+                return false
+            end
+        end
+    end
+    return true
 end
 
 -- Rules 시설 인스턴스 id에서 정의 id. Rules는 첫 파이프를 "pipe", 둘째부터 "pipe2", "pipe3"로 부른다

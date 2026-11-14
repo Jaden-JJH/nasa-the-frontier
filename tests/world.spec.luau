@@ -280,6 +280,65 @@ return function(t)
         t.eq(WorldMath.facilityDefId("42"), "42", "숫자만이면 그대로")
     end)
 
+    t.test("WorldMath: 갇힘 검사 경계 (수평 margin, 세로 headroom)", function()
+        local lo, hi = p(-5, -5, 0), p(5, 5, 4)
+        t.truthy(WorldMath.insideBounds(p(0, 0, 3), lo, hi, 1, 3), "가운데")
+        t.truthy(WorldMath.insideBounds(p(5.8, 0, 3), lo, hi, 1, 3), "옆으로 margin 안")
+        t.falsy(WorldMath.insideBounds(p(6.2, 0, 3), lo, hi, 1, 3), "margin 밖")
+        t.truthy(WorldMath.insideBounds(p(0, 0, 6.5), lo, hi, 1, 3), "지붕 위 headroom 안")
+        t.falsy(WorldMath.insideBounds(p(0, 0, 7.5), lo, hi, 1, 3), "지붕 위 멀리")
+        t.falsy(WorldMath.insideBounds(p(0, 0, -1.5), lo, hi, 1, 3), "밑")
+    end)
+
+    t.test("WorldMath: 내보내기 자리 (정면, 가장 가까운 면, 나란히)", function()
+        local lo, hi = { X = -4, Z = -6 }, { X = 4, Z = 6 }
+        local out, dx, dz = WorldMath.exitPoint({ X = 3, Z = 5 }, lo, hi, 3, "front")
+        t.near(out.X, 0, "정면은 가운데로")
+        t.near(out.Z, -9, "정면(-Z) 바깥 clearance")
+        t.eq(dx, 0)
+        t.eq(dz, -1)
+        local side = WorldMath.exitPoint({ X = 0, Z = 0 }, lo, hi, 3, "front", 20)
+        t.near(side.X, 4, "옆 간격은 경계 폭 안으로 자른다")
+        local near, ndx, ndz = WorldMath.exitPoint({ X = 3.5, Z = 1 }, lo, hi, 1, "nearest")
+        t.near(near.X, 5, "가장 가까운 +X 면 바깥")
+        t.near(near.Z, 1, "다른 축은 그대로")
+        t.eq(ndx, 1)
+        t.eq(ndz, 0)
+        local back = WorldMath.exitPoint({ X = 0, Z = 5.5 }, lo, hi, 1, "nearest")
+        t.near(back.Z, 7, "가장 가까운 +Z 면")
+        t.eq(WorldMath.spreadOffset(1, 3), 0)
+        t.eq(WorldMath.spreadOffset(2, 3), 3)
+        t.eq(WorldMath.spreadOffset(3, 3), -3)
+        t.eq(WorldMath.spreadOffset(4, 3), 6)
+    end)
+
+    t.test("WorldMath: 선분이 상자를 지나는지", function()
+        t.truthy(
+            WorldMath.segmentHitsBox({ X = -10, Z = 0 }, { X = 10, Z = 0 }, 2, 2),
+            "가로지름"
+        )
+        t.falsy(
+            WorldMath.segmentHitsBox({ X = -10, Z = 3 }, { X = 10, Z = 3 }, 2, 2),
+            "위로 비켜감"
+        )
+        t.falsy(
+            WorldMath.segmentHitsBox({ X = -10, Z = 0 }, { X = -3, Z = 0 }, 2, 2),
+            "닿기 전에 끝"
+        )
+        t.truthy(
+            WorldMath.segmentHitsBox({ X = 0, Z = 0 }, { X = 1, Z = 1 }, 2, 2),
+            "안에서 시작"
+        )
+        t.truthy(
+            WorldMath.segmentHitsBox({ X = -3, Z = -1 }, { X = -1, Z = 3 }, 2, 2),
+            "모서리 대각선"
+        )
+        t.falsy(
+            WorldMath.segmentHitsBox({ X = -4, Z = 0 }, { X = 0, Z = 4 }, 1.9, 1.9),
+            "모서리 비켜감"
+        )
+    end)
+
     t.test("WorldMath: clamp01, lerp", function()
         t.near(WorldMath.clamp01(1.5), 1)
         t.near(WorldMath.clamp01(-0.2), 0)
