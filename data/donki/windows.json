@@ -1,0 +1,378 @@
+{
+  "source": "NASA DONKI",
+  "range": [
+    "2021-01-01",
+    "2025-12-31"
+  ],
+  "sepEvents": 50,
+  "gstEventsKp6": 61,
+  "candidateWindows": 42,
+  "windows": [
+    {
+      "id": "2022-08-12",
+      "startDate": {
+        "year": 2022,
+        "month": 8,
+        "day": 12
+      },
+      "sepCount": 3,
+      "gstCount": 3,
+      "events": [
+        {
+          "kind": "GST",
+          "day": 6,
+          "durationDays": 1,
+          "sourceDate": {
+            "year": 2022,
+            "month": 8,
+            "day": 17
+          },
+          "kp": 6
+        },
+        {
+          "kind": "SEP",
+          "day": 16,
+          "durationDays": 1,
+          "sourceDate": {
+            "year": 2022,
+            "month": 8,
+            "day": 27
+          }
+        },
+        {
+          "kind": "GST",
+          "day": 24,
+          "durationDays": 1,
+          "sourceDate": {
+            "year": 2022,
+            "month": 9,
+            "day": 4
+          },
+          "kp": 6
+        },
+        {
+          "kind": "SEP",
+          "day": 32,
+          "durationDays": 2,
+          "sourceDate": {
+            "year": 2022,
+            "month": 9,
+            "day": 12
+          }
+        },
+        {
+          "kind": "GST",
+          "day": 47,
+          "durationDays": 1,
+          "sourceDate": {
+            "year": 2022,
+            "month": 9,
+            "day": 27
+          },
+          "kp": 6
+        },
+        {
+          "kind": "SEP",
+          "day": 51,
+          "durationDays": 2,
+          "sourceDate": {
+            "year": 2022,
+            "month": 10,
+            "day": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "2023-01-27",
+      "startDate": {
+        "year": 2023,
+        "month": 1,
+        "day": 27
+      },
+      "sepCount": 3,
+      "gstCount": 2,
+      "events": [
+        {
+          "kind": "SEP",
+          "day": 29,
+          "durationDays": 2,
+          "sourceDate": {
+            "year": 2023,
+            "month": 2,
+            "day": 24
+          }
+        },
+        {
+          "kind": "GST",
+          "day": 32,
+          "durationDays": 1,
+          "sourceDate": {
+            "year": 2023,
+            "month": 2,
+            "day": 27
+          },
+          "kp": 7
+        },
+        {
+          "kind": "SEP",
+          "day": 36,
+          "durationDays": 1,
+          "sourceDate": {
+            "year": 2023,
+            "month": 3,
+            "day": 3
+          }
+        },
+        {
+          "kind": "SEP",
+          "day": 46,
+          "durationDays": 2,
+          "sourceDate": {
+            "year": 2023,
+            "month": 3,
+            "day": 13
+          }
+        },
+        {
+          "kind": "GST",
+          "day": 56,
+          "durationDays": 1,
+          "sourceDate": {
+            "year": 2023,
+            "month": 3,
+            "day": 23
+          },
+          "kp": 8
+        }
+      ]
+    },
+    {
+      "id": "2023-03-31",
+      "startDate": {
+        "year": 2023,
+        "month": 3,
+        "day": 31
+      },
+      "sepCount": 2,
+      "gstCount": 3,
+      "events": [
+        {
+          "kind": "GST",
+          "day": 24,
+          "durationDays": 1,
+          "sourceDate": {
+            "year": 2023,
+            "month": 4,
+            "day": 23
+          },
+          "kp": 8
+        },
+        {
+          "kind": "SEP",
+          "day": 24,
+          "durationDays": 1,
+          "sourceDate": {
+            "year": 2023,
+            "month": 4,
+            "day": 23
+          }
+        },
+        {
+          "kind": "GST",
+          "day": 37,
+          "durationDays": 1,
+          "sourceDate": {
+            "year": 2023,
+            "month": 5,
+            "day": 6
+          },
+          "kp": 6
+        },
+        {
+          "kind": "SEP",
+          "day": 39,
+          "durationDays": 2,
+          "sourceDate": {
+            "year": 2023,
+            "month": 5,
+            "day": 8
+          }
+        },
+        {
+          "kind": "GST",
+          "day": 52,
+          "durationDays": 1,
+          "sourceDate": {
+            "year": 2023,
+            "month": 5,
+            "day": 21
+          },
+          "kp": 6
+        }
+      ]
+    },
+    {
+      "id": "2024-06-21",
+      "startDate": {
+        "year": 2024,
+        "month": 6,
+        "day": 21
+      },
+      "sepCount": 3,
+      "gstCount": 4,
+      "events": [
+        {
+          "kind": "GST",
+          "day": 8,
+          "durationDays": 1,
+          "sourceDate": {
+            "year": 2024,
+            "month": 6,
+            "day": 28
+          },
+          "kp": 8
+        },
+        {
+          "kind": "SEP",
+          "day": 33,
+          "durationDays": 1,
+          "sourceDate": {
+            "year": 2024,
+            "month": 7,
+            "day": 23
+          }
+        },
+        {
+          "kind": "SEP",
+          "day": 41,
+          "durationDays": 1,
+          "sourceDate": {
+            "year": 2024,
+            "month": 7,
+            "day": 31
+          }
+        },
+        {
+          "kind": "GST",
+          "day": 45,
+          "durationDays": 1,
+          "sourceDate": {
+            "year": 2024,
+            "month": 8,
+            "day": 4
+          },
+          "kp": 7
+        },
+        {
+          "kind": "SEP",
+          "day": 46,
+          "durationDays": 1,
+          "sourceDate": {
+            "year": 2024,
+            "month": 8,
+            "day": 5
+          }
+        },
+        {
+          "kind": "GST",
+          "day": 53,
+          "durationDays": 1,
+          "sourceDate": {
+            "year": 2024,
+            "month": 8,
+            "day": 12
+          },
+          "kp": 8
+        },
+        {
+          "kind": "GST",
+          "day": 58,
+          "durationDays": 1,
+          "sourceDate": {
+            "year": 2024,
+            "month": 8,
+            "day": 17
+          },
+          "kp": 7
+        }
+      ]
+    },
+    {
+      "id": "2025-04-04",
+      "startDate": {
+        "year": 2025,
+        "month": 4,
+        "day": 4
+      },
+      "sepCount": 2,
+      "gstCount": 4,
+      "events": [
+        {
+          "kind": "GST",
+          "day": 12,
+          "durationDays": 1,
+          "sourceDate": {
+            "year": 2025,
+            "month": 4,
+            "day": 15
+          },
+          "kp": 8
+        },
+        {
+          "kind": "SEP",
+          "day": 40,
+          "durationDays": 1,
+          "sourceDate": {
+            "year": 2025,
+            "month": 5,
+            "day": 13
+          }
+        },
+        {
+          "kind": "GST",
+          "day": 44,
+          "durationDays": 1,
+          "sourceDate": {
+            "year": 2025,
+            "month": 5,
+            "day": 17
+          },
+          "kp": 6
+        },
+        {
+          "kind": "GST",
+          "day": 56,
+          "durationDays": 1,
+          "sourceDate": {
+            "year": 2025,
+            "month": 5,
+            "day": 29
+          },
+          "kp": 7
+        },
+        {
+          "kind": "SEP",
+          "day": 58,
+          "durationDays": 2,
+          "sourceDate": {
+            "year": 2025,
+            "month": 5,
+            "day": 31
+          }
+        },
+        {
+          "kind": "GST",
+          "day": 59,
+          "durationDays": 1,
+          "sourceDate": {
+            "year": 2025,
+            "month": 6,
+            "day": 1
+          },
+          "kp": 8
+        }
+      ]
+    }
+  ]
+}
