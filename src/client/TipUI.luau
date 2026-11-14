@@ -37,6 +37,7 @@ local TIP_SOUND_VOLUME = 0.3
 local PANELS_TIP_DELAY = 20 -- 첫 Tip(에어록) 뒤 패널 Tip까지
 local OXYGEN_TIP_BELOW = 50
 local LOW_THRESHOLD = MissionConfig.SCORE.lowThreshold
+local SAVE_TIP_UPGRADES = { "led", "nutrient" }
 
 local CREAM = Color3.fromRGB(245, 240, 225)
 local INK = Color3.fromRGB(40, 36, 28)
@@ -59,6 +60,7 @@ local TIP_KEYS = {
     low_water_team = "tip.low_water_team",
     sep = "tip.sep",
     panels = "tip.panels",
+    pause_to_save = "tip.pause_to_save",
 }
 
 local gui
@@ -369,6 +371,17 @@ function TipUI.onState(state)
     local weather = state.weather
     if type(weather) == "table" and weather.kind == "SEP" then
         TipUI.push("sep")
+    end
+
+    -- 첫 업그레이드(LED 조명 또는 영양분 관리)가 가동되는 순간 한 번 (리드 요청)
+    local facilities = state.facilities or {}
+    for _, id in ipairs(SAVE_TIP_UPGRADES) do
+        local f = facilities[id]
+        local nowStatus = type(f) == "table" and f.status or nil
+        if nowStatus == "active" and prev["status_" .. id] == "building" then
+            TipUI.push("pause_to_save")
+        end
+        prev["status_" .. id] = nowStatus
     end
 end
 

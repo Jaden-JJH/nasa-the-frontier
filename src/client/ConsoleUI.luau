@@ -84,6 +84,7 @@ local STATUS_COLORS = {
     paused = L.orange,
     idle = L.gold,
 }
+local STALL_KEYS = { energy = "hud.stalled.energy", water = "hud.stalled.water" }
 local ROVER_KEYS = {
     parked = "map.rover.parked",
     driving = "map.rover.driving",
@@ -888,15 +889,17 @@ local function refreshBase(state)
         local facilityDef = def.facilities[item.defId] or {}
         UI.msg(r.name, FACILITY_NAMES[item.defId] or "facility.farm.name")
 
-        local status, daysLeft, detailMsg
+        local status, daysLeft, detailMsg, stalled
         if item.defId == "airlock" then
             local airlock = state.airlock or {}
             status = airlock.status or "idle"
             daysLeft = airlock.daysLeft or 0
+            stalled = airlock.stalled == true
         else
             local f = (state.facilities or {})[item.id] or {}
             status = f.status or "locked"
             daysLeft = f.daysLeft or 0
+            stalled = f.stalled == true
             if status == "locked" and Msg.isMsg(f.unlockMsg) then
                 detailMsg = f.unlockMsg
             elseif status == "active" and type(f.nextHarvestIn) == "number" then
@@ -911,6 +914,11 @@ local function refreshBase(state)
             UI.msg(r.statusLabel, STATUS_KEYS[status] or "map.fac.status.locked")
         end
         r.statusPill.BackgroundColor3 = STATUS_COLORS[status] or L.faint
+        -- 자원이 모자라 규칙이 멈춘 시설 (facilities[id].stalled, 덜 중요한 시설부터 멈춤)
+        if stalled then
+            r.statusPill.BackgroundColor3 = L.red
+            detailMsg = { key = STALL_KEYS[state.stallReason] or "hud.stalled" }
+        end
         r.detail.Visible = detailMsg ~= nil
         if detailMsg then
             UI.msg(r.detail, detailMsg)

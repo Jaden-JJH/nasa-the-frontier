@@ -240,10 +240,16 @@ local function roverWorldPosition(state)
             local p = ClientMath.tripPoint(exit, site, fraction)
             return Vector3.new(p.X, 0, p.Z)
         end
-    elseif rover.state == "broken" and type(rover.broken) == "table" and exit then
+    elseif rover.state == "broken" and type(rover.broken) == "table" then
+        -- 서버가 고장 자리에 로버를 다시 보이게 하고 rover.x, z를 보낸다. 수동 고장(manual)도 그 자리
         local site = worldSites[rover.broken.siteIndex]
-        if site then
+        if type(rover.broken.position) == "number" then
             lastBrokenFraction = ClientMath.roundTripFraction(rover.broken.position)
+        end
+        local shown = WorldPoints.rover()
+        if shown then
+            return shown
+        elseif site and exit and not rover.broken.manual then
             local p = ClientMath.tripPoint(exit, site, lastBrokenFraction)
             return Vector3.new(p.X, 0, p.Z)
         end
