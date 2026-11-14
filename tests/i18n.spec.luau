@@ -484,7 +484,7 @@ return function(t)
         )
         t.eq(
             Loc.resolve(Msg.count("score.deduct.oxygen_rescue", 1, { points = 100 }), "en", s),
-            "Needed an oxygen rescue 1 time: -100"
+            "Needed an Oxygen rescue 1 time: -100"
         )
         t.eq(
             Loc.resolve("mission.c.site", "ko", s),
@@ -1078,7 +1078,7 @@ return function(t)
             t.eq(label.Text, "로버가 고장 났어요! 가까이 가서 고치세요 (탭).")
             t.eq(
                 L.text(Msg.new("toast.rover.first_board", { key_boost = "X" })),
-                "운전 시작! 더 빨리 가려면: X 길게 누르기",
+                "운전 시작! X 키를 길게 누르면 더 빨리 가요.",
                 "Msg 값이 이긴다"
             )
             t.eq(
@@ -1243,7 +1243,7 @@ return function(t)
                 "ko",
                 s
             ),
-            "그린하우스 작업 시작! 1일 뒤 완성"
+            "그린하우스 작업 시작! 1일 뒤 완료"
         )
         t.eq(
             Loc.resolve(
@@ -1276,7 +1276,7 @@ return function(t)
         )
         t.eq(
             Loc.resolve(Msg.new("toast.oxygen.rescued", { points = 100 }), "en", s),
-            "Out of oxygen! You were brought back to the airlock.",
+            "Out of Oxygen! You were brought back to the Airlock.",
             "점수는 숨김 (Q4)"
         )
         t.eq(
