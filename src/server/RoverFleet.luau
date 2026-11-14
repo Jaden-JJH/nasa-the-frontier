@@ -2,8 +2,10 @@
 -- v2 로버 (docs/CONTRACT_V2.md 2.2 RoverFleet, V2_PLAN Q7, Q8, Q29, Q30, Q37)
 -- 로버 한 대를 MissionRuntime.Rover로 만들고 두 가지로 쓴다.
 --   직접 운전(멀티, 솔로도 가능): v1 RoverDrive, RoverBattery, RoverBoost, RoverDamage, RoverRecovery를 v2 숫자로 옮겼다.
---     탑승 프롬프트, 바퀴 구동(속도 배율 = 파손 x 배터리 x 부스터 x 우주 기상), 배터리(주행 중 소모, 주차판과 귀환 자리에서
---     기지 에너지로 충전, MANUAL_DRIVE.chargeKeepEnergy는 남긴다), 부스터(과열), 충돌 파손(운전 중 급정거 감지 +
+--     탑승 프롬프트, 바퀴 구동(속도 배율 = 파손 x 배터리 x 부스터 x 우주 기상), 배터리(운전석에 사람이 있고 수평으로 움직일
+--     때만 소모, 주차판과 귀환 자리 바닥 넓이 위에서 기지 에너지로 충전, MANUAL_DRIVE.chargeKeepEnergy는 남긴다. 못 채우면
+--     섀시 Attribute ChargeBlocked = energy | seat | pad 이유 키), 주차 브레이크(빈 로버가 잠깐 서 있으면 고정, 타면 풀림),
+--     부스터(과열), 충돌 파손(운전 중 급정거 감지 +
 --     RoverHazard 태그 파트, Rules 파손 수를 같이 쓴다), 뒤집힘과 추락 자동 복구, 탱크(얼음 채취 30, 물탱크 하역).
 --   자율주행(솔로, Q8): DispatchRover가 Rules.dispatchRover에 성공하면 로버가 기지 출구까지 짧게 달려가 사라진다(Parent = nil).
 --     돌아오면(Rules 상태 parked) 물탱크 옆 귀환 자리에 다시 선다. 고장(broken)이면 출구에서 얼음 후보지 쪽으로
@@ -31,9 +33,14 @@ local RoverFleet = {}
 RoverFleet.CONFIG = {
     tickSeconds = 0.25,
     publishSeconds = 0.5, -- 배터리 값만 바뀌었을 때 StateUpdate 최소 간격
-    movingSpeed = 1, -- 이보다 빠를 때만 배터리 소모 (studs/s)
+    movingSpeed = 1, -- 운전석에 사람이 있고 수평 속도가 이보다 빠를 때만 배터리 소모 (studs/s)
     chargeRatePerSecond = 2, -- v1 Config.ROVER
-    chargeRadius = 10, -- 섀시에서 주차판, 귀환 자리 중심까지 수평 거리
+    chargeRadius = 10, -- 섀시에서 주차판, 귀환 자리 중심까지 수평 거리 (판 바닥 넓이 안이어도 충전, padMargin)
+    padMargin = 2, -- 판 바닥 넓이 바깥으로 이만큼까지 "판 위"
+    -- 주차 브레이크: 빈 로버가 parkSettleSeconds 동안 parkStillSpeed보다 느리면 고정한다(물리 정지). 누가 타면 푼다.
+    -- 낮은 중력(32.7)에서 빈 로버가 조금씩 밀려 판 밖으로 나가면 충전도 막힌 이유도 없었다 (2026-11-15 Studio)
+    parkStillSpeed = 0.5,
+    parkSettleSeconds = 2,
     baseRadius = 25, -- 이 안이면 "기지에 있음" (자율주행 출발, 원격 끌어오기 판정)
     lowBatteryRatio = 0.25,
     recoverBatteryRatio = 0.2,
@@ -112,6 +119,8 @@ local speedHistory: { { t: number, speed: number } } = {} -- 최근 impactWindow
 local settleUntil = 0 -- 이 시각 전에는 급정거 감지를 하지 않는다
 local lastMultiplier = -1
 local flippedSince: number? = nil
+local braked = false -- 주차 브레이크로 고정 중
+local stillSince: number? = nil
 local recoverCooldownUntil = 0
 local boostLoop: Sfx.Handle? = nil
 local firstBoard: { [Player]: boolean } = setmetatable({}, { __mode = "k" }) :: any
@@ -185,6 +194,30 @@ local function nearPads(radius: number): boolean
         local pad = MissionWorld.anchor(id)
         if pad and flat(position, pad.CFrame.Position) <= radius then
             return true
+        end
+    end
+    return false
+end
+
+-- 섀시가 주차판이나 귀환 자리 위인지: 판 바닥 넓이(+ padMargin) 안이거나 중심에서 chargeRadius 안
+local function onChargePad(): boolean
+    local position = chassisPosition()
+    if not position then
+        return false
+    end
+    if nearPads(CFG.chargeRadius) then
+        return true
+    end
+    for _, id in { "roverPark", "roverDock" } do
+        local pad = MissionWorld.anchor(id)
+        if pad then
+            local p = pad.CFrame:PointToObjectSpace(position)
+            if
+                math.abs(p.X) <= pad.Size.X / 2 + CFG.padMargin
+                and math.abs(p.Z) <= pad.Size.Z / 2 + CFG.padMargin
+            then
+                return true
+            end
         end
     end
     return false
@@ -491,6 +524,8 @@ local function placeAt(ground: CFrame, anchored: boolean)
     setAnchored(true)
     model:PivotTo(ground * CFrame.new(0, rideHeight, 0))
     setAnchored(anchored)
+    braked = false
+    stillSince = nil
     hidden = false
     lastPosition = nil
     flippedSince = nil
@@ -508,6 +543,8 @@ local function hide()
     end
     hidden = true
     inField = false
+    braked = false
+    stillSince = nil
     setBoosting(false)
 end
 
@@ -633,6 +670,8 @@ function RoverFleet.onRulesChanged(prev: any, new: any)
             exitToken += 1
             inField = false
             setAnchored(false)
+            braked = false
+            stillSince = nil
             lastPosition = nil
         else
             showAtDock()
@@ -747,10 +786,14 @@ function RoverFleet.step(dt: number)
     local seatEmpty = s == nil or s.Occupant == nil
     local previous = lastPosition
     lastPosition = position
-    local speed = if previous and dt > 0 then (position - previous).Magnitude / dt else 0
+    -- 수평 속도만 본다 (위아래 흔들림은 주행이 아니다)
+    local delta = if previous then position - previous else Vector3.zero
+    local speed = if dt > 0 then Vector3.new(delta.X, 0, delta.Z).Magnitude / dt else 0
+    local moved = if dt > 0 then delta.Magnitude / dt else 0
     local before = battery
     local wasCharging = charging
-    if speed > CFG.movingSpeed and battery > 0 then
+    -- 배터리는 운전할 때만 쓴다: 빈 로버가 밀리거나 흔들려도 줄지 않는다 (2026-11-15 Studio: 주차만 했는데 100 -> 96)
+    if not seatEmpty and speed > CFG.movingSpeed and battery > 0 then
         local drain = m.batteryDrainPerSecond
             * dt
             * (if boosting then m.boostDrainMultiplier else 1)
@@ -760,7 +803,7 @@ function RoverFleet.step(dt: number)
     charging = false
     local wasBlocked = chargeBlocked
     chargeBlocked = nil
-    local onPad = battery < m.batteryMax and nearPads(CFG.chargeRadius)
+    local onPad = battery < m.batteryMax and onChargePad()
     if onPad and seatEmpty then
         local state = rulesState()
         if state then
@@ -784,6 +827,26 @@ function RoverFleet.step(dt: number)
     elseif onPad and speed <= CFG.movingSpeed then
         -- 운전석이 비어야 충전한다 (판 위를 지나가는 중에는 알리지 않는다)
         chargeBlocked = Msg.new("hud.rover.charge_blocked_seat")
+    elseif
+        battery < m.batteryMax
+        and seatEmpty
+        and speed <= CFG.movingSpeed
+        and RoverFleet.isAtBase()
+    then
+        -- 기지 안에 세웠지만 판 밖: 서버가 이유를 정해 보낸다 (클라이언트가 짐작하지 않게)
+        chargeBlocked = Msg.new("hud.rover.charge_blocked_pad")
+    end
+    -- 주차 브레이크: 빈 로버가 잠깐 가만히 있으면 고정해 밀려 나가지 않게 한다 (타면 onOccupantChanged가 푼다)
+    local now = os.clock()
+    local upright = s ~= nil and s.CFrame.UpVector.Y >= CFG.flipUpY
+    if seatEmpty and not exiting and upright and moved <= CFG.parkStillSpeed then
+        stillSince = stillSince or now
+        if not braked and now - (stillSince :: number) >= CFG.parkSettleSeconds then
+            braked = true
+            setAnchored(true)
+        end
+    else
+        stillSince = nil
     end
     local blockChanged = (wasBlocked and wasBlocked.key) ~= (chargeBlocked and chargeBlocked.key)
     -- 알림
@@ -819,7 +882,6 @@ function RoverFleet.step(dt: number)
         notifiedFull = false
     end
     refreshChargeAttrs()
-    local now = os.clock()
     if
         charging ~= wasCharging
         or blockChanged
@@ -838,6 +900,12 @@ local function onOccupantChanged()
         return
     end
     local player = ServerUtil.playerFromHumanoid(s.Occupant)
+    if s.Occupant ~= nil and braked and not hidden and not inField and not exiting then
+        braked = false
+        stillSince = nil
+        setAnchored(false)
+        resetImpact()
+    end
     Sfx.play(if player then "rover_board" else "rover_exit", s)
     if player and not firstBoard[player] and flow then
         firstBoard[player] = true

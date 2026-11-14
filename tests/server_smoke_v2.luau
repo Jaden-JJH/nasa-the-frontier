@@ -2252,21 +2252,50 @@ do
         local chassis = rover.PrimaryPart
         local keep = M.MissionConfig.MANUAL_DRIVE.chargeKeepEnergy
         local drained = M.MissionConfig.MANUAL_DRIVE.batteryMax * 0.5
-        -- 배터리를 반쯤 비운 상태로 만든다 (주행 소모 흉내: 섀시를 옮겨 가며 step)
-        local function drainTo(target)
-            local guard = 0
-            while H.state().rover.battery > target and guard < 4000 do
-                guard += 1
+        local function wiggle(times)
+            for i = 1, times do
                 rover:PivotTo(
-                    rover.PrimaryPart.CFrame * CFrame.new(0, 0, if guard % 2 == 0 then 6 else -6)
+                    rover.PrimaryPart.CFrame * CFrame.new(0, 0, if i % 2 == 0 then 6 else -6)
                 )
                 M.RoverFleet.step(1)
             end
+        end
+        -- [S10] 빈 로버는 밀리거나 흔들려도 배터리가 줄지 않는다 (Studio: 주차만 했는데 100 -> 96)
+        do
+            local full = H.state().rover.battery
+            wiggle(20)
+            advance(0.6)
+            check(
+                H.state().rover.battery == full,
+                "배터리: 운전석이 비면 움직여도 줄지 않는다"
+            )
+        end
+        -- 배터리를 반쯤 비운 상태로 만든다 (주행 소모: 운전석에 앉아 섀시를 옮겨 가며 step)
+        local function drainTo(target)
+            moveTo(ana, rover.PrimaryPart.CFrame.Position + Vector3.new(4, 0, 0))
+            H.trigger(rover.PrimaryPart:FindFirstChild("BoardPrompt"), ana)
+            local guard = 0
+            -- StateUpdate는 advance 때만 나가므로 서버 값(RoverFleet.view)을 바로 본다
+            while M.RoverFleet.view(H.rules()).battery > target and guard < 4000 do
+                guard += 1
+                wiggle(1)
+            end
+            H.unseat(ana)
+            rover:PivotTo(CFrame.new(park.CFrame.Position + Vector3.new(0, 3, 0)))
             advance(0.6)
         end
         H.topUp({ energy = keep })
+        local fullBefore = M.RoverFleet.view(H.rules()).battery
         drainTo(drained)
         advance(1)
+        check(
+            H.state().rover.battery < fullBefore and H.state().rover.battery > 0,
+            string.format(
+                "배터리: 운전하면 준다 (%.1f -> %.1f)",
+                fullBefore,
+                H.state().rover.battery
+            )
+        )
         local st = H.state()
         check(
             type(st.rover.charging) == "boolean"
@@ -2327,6 +2356,52 @@ do
         H.unseat(ana)
         advance(1)
         check(chassis:GetAttribute("ChargeBlocked") == nil, "충전: 내리면 다시 충전")
+        -- [S10] 주차 브레이크: 빈 로버가 잠깐 가만히 있으면 고정, 타면 풀린다
+        advance(3)
+        check(
+            chassis.Anchored == true,
+            "주차 브레이크: 빈 로버가 2초 넘게 서 있으면 고정"
+        )
+        moveTo(ana, rover.PrimaryPart.CFrame.Position + Vector3.new(4, 0, 0))
+        H.trigger(rover.PrimaryPart:FindFirstChild("BoardPrompt"), ana)
+        check(chassis.Anchored == false, "주차 브레이크: 타면 풀린다")
+        drainTo(drained)
+        -- 판 중심에서 10 stud 넘게 떨어져도 판 바닥 넓이 안이면 판 위 (에너지가 남길 양 이하면 이유 energy)
+        H.topUp({ energy = keep })
+        local padCf = park.CFrame
+        local longAxis = if park.Size.X >= park.Size.Z then Vector3.xAxis else Vector3.zAxis
+        local along = (if longAxis == Vector3.xAxis then park.Size.X else park.Size.Z) / 2 - 1
+        rover:PivotTo(
+            CFrame.new((padCf * CFrame.new(longAxis * along)).Position + Vector3.new(0, 3, 0))
+        )
+        advance(1)
+        local offCenter = H.flat(rover.PrimaryPart.CFrame.Position, park.CFrame.Position)
+        check(
+            offCenter > M.RoverFleet.CONFIG.chargeRadius
+                and chassis:GetAttribute("ChargeBlocked") == "hud.rover.charge_blocked_energy"
+                and H.state().rover.chargeBlocked.key == "hud.rover.charge_blocked_energy",
+            string.format(
+                "충전: 판 가장자리(중심에서 %.1f)도 판 위, 에너지 부족이면 이유 energy",
+                offCenter
+            )
+        )
+        -- 기지 안이지만 판 밖이면 이유 pad (서버가 보낸다)
+        local outside = (padCf * CFrame.new(
+            longAxis * (along + 1 + M.RoverFleet.CONFIG.padMargin + 4)
+        )).Position
+        rover:PivotTo(CFrame.new(outside + Vector3.new(0, 3, 0)))
+        advance(1)
+        local st2 = H.state()
+        check(
+            st2.rover.atBase == true
+                and st2.rover.charging == false
+                and chassis:GetAttribute("ChargeBlocked") == "hud.rover.charge_blocked_pad"
+                and st2.rover.chargeBlocked.key == "hud.rover.charge_blocked_pad",
+            "충전: 기지 안 판 밖이면 이유 pad"
+        )
+        rover:PivotTo(CFrame.new(park.CFrame.Position + Vector3.new(0, 3, 0)))
+        H.topUp({ energy = 90 })
+        advance(1)
     end
 end
 
