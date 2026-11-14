@@ -215,3 +215,16 @@ export type MissionResult = {
 - 새 클라이언트 모듈: TitleV2, MissionSelectUI, RoleSelectUI, HUDV2, ConsoleUI, ConsoleMap, PinArrowUI, ResultV2, HeadStatus, WeatherFX, Net, Session, Icons, WorldPoints, 공용 `src/shared/ClientMath.luau`.
 - v1 화면 파일(HUD, TitleUI, SiteSelectUI, ResultUI, RadarUI, DockSignUI, PadSignUI, ObjectiveHighlight, RoverHint, Layout)은 남아 있지만 Main이 불러오지 않는다. BoostFX는 그대로 쓴다.
 - 모든 UI 글자 요소는 `AutoLocalize = false`이고 Localizer로 그린다. 서버가 보내는 문구 키 11개는 새 키를 만들지 않고 기존 `toast.*` 키로 맞췄다.
+
+### 9.3 팀 플레이 테스트 피드백 반영 (2026-11-15, V2_PLAN 16절)
+- 프롬프트 비용 Attribute(서버 fb-server, 화면 PromptUI): `CostEnergy`, `CostWater`(number, 0이면 없음), `BuildDays`(건설을 시작하는 프롬프트만), `Affordable`(boolean, 비용이 있을 때만), `LockMsg`(JSON Msg: `toast.pipe.locked {need, done}`, `toast.build.need_prereq {facility}`, `toast.panel.limit_today {perDay}`). 대상: AirlockPrompt, PanelPrompt, BuildPrompt(그린하우스, 업그레이드 3종), PipePrompt, 로버 RepairPrompt(걸어서 수리 포함). 모든 commit과 publish 때 다시 쓴다. 숫자는 MissionConfig에서 읽는다.
+- 물 파이프 프롬프트는 해금 전에도 보이고, 누르면 `toast.pipe.locked`.
+- 로버 충전: StateUpdate `rover`에 `charging`, `battery`, `batteryMax`, `atBase`가 항상 있고 `batteryPercent`, `chargeBlocked`(Msg 또는 nil)를 더한다. 섀시(`Rover.Chassis`) Attribute `Charging`, `BatteryPercent`(0 ~ 100 정수), `ChargeBlocked`(키), `ChargeBlockedArgs`(JSON). 막힘 키: `hud.rover.charge_blocked_energy {keep}`(기지 에너지가 chargeKeepEnergy 이하), `hud.rover.charge_blocked_seat`(충전판 위 운전석에 사람), 화면 전용 `hud.rover.charge_blocked_pad`(주차판 밖).
+- 시설과 패널은 건설과 솟아오름 동안 충돌을 끄고, 충돌이 켜지는 순간 경계 안 플레이어를 정면 바깥 지면으로 옮긴다(운전석은 제외). 설치한 패널은 충돌이 켜지고 `RoverHazard` 태그(세게 부딪히면 로버 파손 1, 패널은 고정).
+- 대피처(착륙선, 에어록)마다 보이지 않는 `Ceiling`과 `DoorLintel`. 코드 오두막일 때는 벽과 지붕 충돌도 남긴다.
+- 얼음 후보지 외형: 묻힌 표토색 Slate 덩어리, 충돌 없음, 이름표와 반짝임은 `MaxDistance` 40. 네온, 빛, 파티클 없음. MinePoint와 `SiteIndex`, `MarkerName`은 그대로.
+- 화면 새 모듈: `BuildingInfoUI`(14 stud 안 가장 가까운 건물 카드, 키 `info.<id>.desc`), `RoverChargeSign`(로버 위 표지, 60 stud 안), `ScoutMarkers`(두 번째 탐사대원 정찰 표시, 대상은 시설 지을 자리만이고 얼음 후보지는 넣지 않는다).
+- 역할 미션(멀티만, 점수와 메달 무관, 서버 `RoleMissions.luau`, 수치는 `RoleMissions.CONFIG`): guide(관제사, 핀 찍은 얼음 후보지 수평 30 stud 안에 팀원 도착, 서로 다른 후보지 2곳), water(먼저 배정된 탐사대원, 본인 하역 3회), scout(두 번째 탐사대원, buildSpot, pipeSpot, installPad 3곳을 12 stud 안까지), panels(엔지니어, 본인 설치 6장, 남은 칸이 모자라면 줄임). 역할 선택이 끝난 뒤 배정하고, 역할이 바뀌면 새 미션을 0부터. playing일 때만 센다.
+  - `MissionState.roleMissions = { [tostring(userId)] = { id, progress, goal, done, radius?, targets? } }`. 솔로이거나 배정 전이면 nil. radius는 guide 30, scout 12. targets는 scout만 `{ { id, key, x, z, visited } }`.
+  - `GameOver.crew[i]`에 `userId`(모든 모드), `roleMission = { id, progress, goal, done }`(멀티만, 나간 플레이어 줄에도 남음).
+  - 완료 알림: 본인 `rolemission.<id>.done_self`, 다른 플레이어 `rolemission.done_team { name, role }`(role은 중첩 `role.*.name`).
