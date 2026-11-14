@@ -119,16 +119,17 @@ return function(t)
             table.insert(ids, site.id)
             table.insert(risks, site.risk)
         end
-        t.eq(table.concat(ids, ","), "Ice4,Ice1,Ice2,Ice3,Ice5")
+        t.eq(table.concat(ids, ","), "Ice4,Ice5,Ice1,Ice3,Ice2")
         t.eq(table.concat(risks, ","), "low,low,mid,mid,high")
-        t.eq(s.sites[1].distance, 185)
-        t.eq(s.sites[5].distance, 610)
+        t.eq(s.sites[1].distance, 412)
+        t.eq(s.sites[5].distance, 937)
     end)
 
     t.test("newState: 서버 실측 거리로 덮어쓰면 순서를 다시 정한다", function()
-        local s = Rules.newState("C", MissionConfig, 1, nil, { iceDistances = { Ice5 = 100 } })
-        t.eq(s.sites[1].id, "Ice5")
+        local s = Rules.newState("C", MissionConfig, 1, nil, { iceDistances = { Ice2 = 100 } })
+        t.eq(s.sites[1].id, "Ice2")
         t.eq(s.sites[1].risk, "low")
+        t.eq(s.sites[2].id, "Ice4")
     end)
 
     t.test("newState: B는 아직 자리 표시라 받지 않는다", function()
@@ -489,12 +490,16 @@ return function(t)
     t.test("화면 거리는 정수 미터 (metersPerStud = 2560 / 2044)", function()
         local s = fresh()
         s.rover.status = "broken"
-        s.rover.brokenDistance = 600
+        -- 한도(704)보다 50 studs 먼 고장 위치 (BaseExit 기준 + 에어록 출발 보정)
+        local broken = Rules.walkRepairLimit(MissionConfig)
+            - MissionConfig.WALK_REPAIR.startOffset
+            + 50
+        s.rover.brokenDistance = broken
         s.energy = 100
         local ok, _, m = Rules.walkRepairRover(s, MissionConfig)
         t.falsy(ok)
         t.eq(m.key, "toast.rover.too_far_walk")
-        local walk = 600 + MissionConfig.WALK_REPAIR.startOffset
+        local walk = broken + MissionConfig.WALK_REPAIR.startOffset
         t.eq(m.args and m.args.distance, math.round(walk * 2560 / 2044))
         t.eq(
             m.args and m.args.limit,
@@ -513,7 +518,7 @@ return function(t)
     end)
 
     t.test(
-        "로버 계획: 왕복 일수 1,2,2,2,3(가장 가까운 곳 1일, 가장 먼 곳 3일)과 거리 비례 에너지 [Q7, Q37]",
+        "로버 계획: 왕복 일수 1,1,2,2,3(가장 가까운 곳 1일, 가장 먼 곳 3일)과 거리 비례 에너지 [Q7, Q37]",
         function()
             local s = fresh()
             local days, energy = {}, {}
@@ -522,10 +527,20 @@ return function(t)
                 table.insert(days, tostring(plan.days))
                 table.insert(energy, plan.energy)
             end
-            t.eq(table.concat(days, ","), "1,2,2,2,3")
+            t.eq(table.concat(days, ","), "1,1,2,2,3")
+            -- 2026-11-15 기지 이동 뒤 재조정 (BALANCE_LOG 8절): 가장 가까운 곳은 확정 밸런스와 같은 11
+            t.eq(energy[1], 11)
+            -- 비용은 반올림 전 일수에 비례해 올림하므로 거의 같은 거리(412, 421)는 같은 값이 될 수 있다
             for i = 2, #energy do
-                t.truthy(energy[i] > energy[i - 1], "먼 곳일수록 에너지가 크다")
+                t.truthy(
+                    energy[i] >= energy[i - 1],
+                    "먼 곳일수록 에너지가 같거나 크다"
+                )
             end
+            t.truthy(
+                energy[#energy] > energy[1],
+                "가장 먼 곳이 가장 가까운 곳보다 비싸다"
+            )
         end
     )
 
@@ -776,7 +791,7 @@ return function(t)
                     break
                 end
             end
-            -- 걷는 거리 = 고장 위치(BaseExit 기준) + 에어록에서 BaseExit까지 176. 한도 704 안이면 broken_walkable
+            -- 걷는 거리 = 고장 위치(BaseExit 기준) + 에어록에서 BaseExit까지(startOffset). 한도 704 안이면 broken_walkable
             local offset = MissionConfig.WALK_REPAIR.startOffset
             local walkKey = if trip.rover.brokenDistance + offset <= Rules.walkRepairLimit(cfg)
                 then "toast.rover.broken_walkable"

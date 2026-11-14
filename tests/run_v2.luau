@@ -72,8 +72,10 @@ local function tripReport(config)
     for index, site in s.sites do
         local plan = Rules.tripPlan(s, config, index, false) :: Rules.TripPlan
         local rush = Rules.tripPlan(s, config, index, true) :: Rules.TripPlan
-        -- 고장 위치의 착륙선 거리는 0 ~ 거리 사이 고르게 나온다 (Rules.dispatchRover의 damageAt)
-        local walkable = math.min(1, limit / site.distance)
+        -- 고장 위치(BaseExit 기준)는 0 ~ 거리 사이 고르게 나온다 (Rules.dispatchRover의 damageAt).
+        -- 걷는 거리 = 고장 위치 + 에어록 출발 보정(startOffset)
+        local offset = config.WALK_REPAIR.startOffset or 0
+        local walkable = math.clamp((limit - offset) / site.distance, 0, 1)
         print(
             string.format(
                 "  %-5s %5d  %-4s  %d (%.2f)            %3d    | %d%s       %3d     %-8s | %3.0f%%",
@@ -95,52 +97,63 @@ local function tripReport(config)
 end
 
 -- 수동 운전 (멀티) -------------------------------------------------------------
+-- 지점별 왕복 시간과 배터리 (RoverPark 출발, MissionConfig manualDriveDistances). 부스터는 과열 때문에 4초 켜고 6초 식힌다:
+-- 부스터를 쓸 수 있을 때마다 쓰면 평균 속도 배율 (4 x 1.6 + 6 x 1) / 10 = 1.24, 배터리 소모 배율 (4 x 2 + 6 x 1) / 10 = 1.4
 local function manualReport(config)
     local md = config.MANUAL_DRIVE
-    -- 수동 운전은 RoverPark에서 출발 (MissionConfig manualDriveDistances, 자율주행의 BaseExit 거리와 다르다)
     local list = {}
-    for _, distance in config.MISSIONS.C.manualDriveDistances do
-        table.insert(list, distance)
+    for id, distance in config.MISSIONS.C.manualDriveDistances do
+        table.insert(list, { id = id, distance = distance })
     end
-    table.sort(list)
-    local nearest, farthest = list[1], list[#list]
-    -- 부스터는 4초 켜고 6초 식힌다: 평균 배율 = (4 x 1.6 + 6 x 1) / 10
+    table.sort(list, function(a, b)
+        return a.distance < b.distance
+    end)
     local cycle = md.v1BoostOnSeconds + md.v1BoostCooldownSeconds
-    local boostAvg = (md.v1BoostOnSeconds * md.v1BoostMultiplier + md.v1BoostCooldownSeconds)
+    local boostSpeed = (md.v1BoostOnSeconds * md.v1BoostMultiplier + md.v1BoostCooldownSeconds)
         / cycle
-    local function roundTrip(distance: number, speed: number, boost: boolean): number
-        local effective = speed * (if boost then boostAvg else 1)
-        return 2 * distance * md.detourFactor / effective + md.fillSeconds + md.unloadSeconds
-    end
+    local boostDrain = (md.v1BoostOnSeconds * md.boostDrainMultiplier + md.v1BoostCooldownSeconds)
+        / cycle
+    local handling = md.fillSeconds + md.unloadSeconds
     print("")
     print(
         string.format(
-            "[수동 운전] RoverPark에서 %d ~ %d studs, 우회 배율 %.2f, 채우기 %d초 + 하역 %d초, 부스터 평균 배율 %.2f (4초 켜고 6초 식힘)",
-            nearest,
-            farthest,
+            "[수동 운전] RoverPark 출발, 최고 속도 %d studs/s, 우회 배율 %.2f, 채우기 %d초 + 하역 %d초, 배터리 %d (초당 %.2f)",
+            md.v1MaxSpeed,
             md.detourFactor,
             md.fillSeconds,
             md.unloadSeconds,
-            boostAvg
+            md.batteryMax,
+            md.batteryDrainPerSecond
         )
     )
     print(
-        "  최고 속도  | 가장 가까운 곳 왕복(초, 일) | 가장 먼 곳 왕복(초, 일) | 부스터 계속 쓰면 가까운/먼(일)"
+        string.format(
+            "  부스터 사용 = 과열 한도까지 계속 (속도 x%.2f, 소모 x%.2f). 배터리는 운전 중에만 닳는다 (채우기, 하역 제외)",
+            boostSpeed,
+            boostDrain
+        )
     )
-    for _, speed in { md.v1MaxSpeed, 24, 30, 36, 45, 53 } do
-        local near = roundTrip(nearest, speed, false)
-        local far = roundTrip(farthest, speed, false)
+    print(
+        "  지점   거리 | 부스터 없음: 왕복 초(일)  배터리 | 부스터 사용: 왕복 초(일)  배터리 | 가득 찬 배터리로 왕복 수(없음/사용)"
+    )
+    for _, item in list do
+        local drive = 2 * item.distance * md.detourFactor / md.v1MaxSpeed
+        local driveBoost = drive / boostSpeed
+        local use = drive * md.batteryDrainPerSecond
+        local useBoost = driveBoost * md.batteryDrainPerSecond * boostDrain
         print(
             string.format(
-                "  %3d studs/s | %5.0f초 %4.1f일             | %5.0f초 %4.1f일         | %4.1f / %4.1f%s",
-                speed,
-                near,
-                near / config.DAY_SECONDS,
-                far,
-                far / config.DAY_SECONDS,
-                roundTrip(nearest, speed, true) / config.DAY_SECONDS,
-                roundTrip(farthest, speed, true) / config.DAY_SECONDS,
-                if speed == md.v1MaxSpeed then "  (v1 값)" else ""
+                "  %-5s %5d | %5.0f (%3.1f)            %4.1f   | %5.0f (%3.1f)            %4.1f   | %.1f / %.1f",
+                item.id,
+                item.distance,
+                drive + handling,
+                (drive + handling) / config.DAY_SECONDS,
+                use,
+                driveBoost + handling,
+                (driveBoost + handling) / config.DAY_SECONDS,
+                useBoost,
+                md.batteryMax / use,
+                md.batteryMax / useBoost
             )
         )
     end
@@ -164,10 +177,18 @@ local function manualReport(config)
             both
         )
     )
+    print(
+        string.format(
+            "  출발은 에어록: 에어록 -> BaseExit %d studs를 더해 BaseExit 기준 고장 위치 %d studs까지 걸어서 수리",
+            walk.startOffset or 0,
+            oneWay - (walk.startOffset or 0)
+        )
+    )
 end
 
 -- 밸런스 표 (2026-11-14 새 목표, 리드 전달) -------------------------------------------
 -- 목표는 실패/동/은/금 %. 3 ~ 4명은 목표 숫자 대신 "2명보다 조금 쉽게"로 본다
+-- accepted: 사용자가 확정한 결과 (BALANCE_LOG 7.5.1, 2026-11-14 기지, 같은 구간 5개 x 시드 40). 값을 바꾼 뒤 비교용
 local MODES = {
     {
         key = "h1",
@@ -175,6 +196,7 @@ local MODES = {
         profile = "human",
         players = 1,
         target = { 50, 40, 9, 1 },
+        accepted = { 28, 39, 34, 0 },
     },
     {
         key = "s1",
@@ -182,6 +204,7 @@ local MODES = {
         profile = "semi",
         players = 1,
         target = { 30, 50, 15, 5 },
+        accepted = { 20, 52, 20, 8 },
     },
     { key = "p1", label = "솔로 완벽(참고)", profile = "perfect", players = 1 },
     {
@@ -190,6 +213,7 @@ local MODES = {
         profile = "multi_first",
         players = 2,
         target = { 28, 50, 19, 3 },
+        accepted = { 32, 45, 22, 0 },
     },
     {
         key = "m2",
@@ -197,6 +221,7 @@ local MODES = {
         profile = "multi_second",
         players = 2,
         target = { 15, 50, 27, 8 },
+        accepted = { 18, 54, 22, 8 },
     },
     {
         key = "f3",
@@ -204,6 +229,7 @@ local MODES = {
         profile = "multi_first",
         players = 3,
         easierThan = "f2",
+        accepted = { 12, 54, 34, 0 },
     },
     {
         key = "m3",
@@ -218,6 +244,7 @@ local MODES = {
         profile = "multi_first",
         players = 4,
         easierThan = "f2",
+        accepted = { 10, 52, 38, 0 },
     },
     {
         key = "m4",
@@ -333,6 +360,17 @@ local function rowLine(mode, row: Row, results: { [string]: Row }): string
             " | 2명 대비 실패 %+.0f%%p, 은+금 %+.0f%%p",
             f - pctOf(base.fail, base.n),
             (sv + g) - pctOf(base.silver + base.gold, base.n)
+        )
+    end
+    if mode.accepted then
+        local a = mode.accepted
+        goal ..= string.format(
+            " | 7.5.1 %d/%d/%d/%d (실패 %+.0f%%p)",
+            a[1],
+            a[2],
+            a[3],
+            a[4],
+            f - a[1]
         )
     end
     return string.format(
