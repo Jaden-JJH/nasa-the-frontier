@@ -5664,13 +5664,16 @@ local function runDecorScenario()
         "Planet: 고정, CanCollide/CanTouch/CanQuery 꺼짐"
     )
     -- 시작 시에는 기본 착륙지(Pad2)에서 가장 가까운 얼음 쪽 하늘 (메시 Planet은 지름 260으로 스케일)
-    local function planetFrom(origin)
+    local function planetFrom(viewPoint)
         local lo, hi = boundsOf(planet)
-        local offset = (lo + hi) / 2 - origin
+        local offset = (lo + hi) / 2 - viewPoint
         local nearest, best = nil, math.huge
         for _, ice in Workspace2.IceSites:GetChildren() do
-            local d =
-                Vector3.new(ice.CFrame.Position.X - origin.X, 0, ice.CFrame.Position.Z - origin.Z)
+            local d = Vector3.new(
+                ice.CFrame.Position.X - viewPoint.X,
+                0,
+                ice.CFrame.Position.Z - viewPoint.Z
+            )
             if d.Magnitude < best then
                 nearest, best = d.Unit, d.Magnitude
             end
