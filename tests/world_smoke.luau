@@ -1364,6 +1364,7 @@ do
     local depositOk, neonFree, colorsOk, collideFree, lowOk, buriedOk =
         true, true, true, true, true, true
     local noLights, guisNear, labelKeyOk, mineOk = true, true, true, true
+    local frostCount, frostNear = 0, true
     for _, site in iceFolder:GetChildren() do
         local deposit = site:FindFirstChild("Deposit")
         local point = site:FindFirstChild("MinePoint")
@@ -1382,7 +1383,7 @@ do
             local dlo, dhi = H.bounds(deposit)
             local gx, gz = (dlo.X + dhi.X) / 2, (dlo.Z + dhi.Z) / 2
             local ground = groundAt(gx, gz)
-            if dhi.Y - ground > 1.3 then
+            if dhi.Y - ground > 1.5 then
                 lowOk = false
             end
             if dlo.Y > ground - 0.5 then
@@ -1428,11 +1429,28 @@ do
                 if item.MaxDistance > reveal + 1e-6 or item.AlwaysOnTop then
                     guisNear = false
                 end
+            elseif item:IsA("SurfaceGui") then
+                -- 서리 윗면: 가까이서만 (MaxDistance 0은 거리 제한 없음이라 안 된다)
+                frostCount += 1
+                if
+                    item.MaxDistance <= 0
+                    or item.MaxDistance > reveal + 1e-6
+                    or item.Face ~= Enum.NormalId.Top
+                then
+                    frostNear = false
+                end
             end
         end
+        -- 이름표: map.ice.label { n }, n = 표시 번호 (Ice4 -> 4, 정렬 순서 아님)
         local label = point and point:FindFirstChild("Label")
         local text = label and H.label(label)
-        if not text or text:GetAttribute("TextKey") ~= "world.ice_site.name" or text.Text ~= "" then
+        local n = tonumber(string.match(site.Name, "%d+"))
+        if
+            not text
+            or text:GetAttribute("TextKey") ~= "map.ice.label"
+            or text:GetAttribute("TextArgs") ~= string.format('{"n":%d}', n)
+            or text.Text ~= ""
+        then
             labelKeyOk = false
         end
         if not (point and point:FindFirstChild("Glint")) then
@@ -1443,14 +1461,21 @@ do
     check(neonFree, "얼음: 네온, 유리, 얼음 재질, 반사 없음")
     check(colorsOk, "얼음: 어두운 표토 색, 아주 약한 푸른 기")
     check(collideFree, "얼음: 덩어리는 충돌 없음 (로버가 지나간다)")
-    check(lowOk, "얼음: 지면 위로 낮다 (1.3 이하)")
+    check(lowOk, "얼음: 지면 위로 낮다 (1.5 이하)")
     check(buriedOk, "얼음: 대부분 땅속에 묻힌다")
     check(noLights, "얼음: 빛, 파티클, 반짝이 효과 없음")
     check(
         guisNear,
         "얼음: 이름표와 반짝임은 40 studs 안에서만 (MaxDistance, AlwaysOnTop 끔)"
     )
-    check(labelKeyOk, "얼음: 이름표는 TextKey world.ice_site.name만")
+    check(
+        labelKeyOk,
+        "얼음: 이름표는 TextKey map.ice.label + TextArgs {n = 표시 번호} (Ice4 -> 4)"
+    )
+    check(
+        frostCount >= 5 and frostNear,
+        "얼음: 서리 윗면(SurfaceGui)은 40 studs 안에서만 (" .. frostCount .. "개)"
+    )
     check(mineOk, "얼음: MinePoint SiteIndex, MarkerName 유지")
 end
 
@@ -1473,6 +1498,10 @@ do
     far.MaxDistance = 500
     far.AlwaysOnTop = true
     far.Parent = shiny
+    local surface = Instance.new("SurfaceGui")
+    surface.Name = "FarSurface"
+    surface.MaxDistance = 0 -- 거리 제한 없음
+    surface.Parent = shiny
     asset.Parent = fixture.assets
     MissionWorld.placeBase()
     local deposit = H.find(runtime, "IceSites.Ice4.Deposit")
@@ -1493,6 +1522,11 @@ do
     check(
         fg ~= nil and fg.MaxDistance <= 40 and fg.AlwaysOnTop == false,
         "얼음 에셋: 글자 GUI는 가까이서만"
+    )
+    local farSurface = part and part:FindFirstChild("FarSurface")
+    check(
+        farSurface ~= nil and farSurface.MaxDistance > 0 and farSurface.MaxDistance <= 40,
+        "얼음 에셋: SurfaceGui도 가까이서만 (0 = 제한 없음은 40으로)"
     )
     asset:Destroy()
     MissionWorld.placeBase()

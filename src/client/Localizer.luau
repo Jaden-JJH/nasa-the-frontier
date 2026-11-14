@@ -10,6 +10,8 @@
 --   등록 표는 약한 키 표라 지운 라벨은 따로 풀지 않아도 된다. AutoLocalize를 끈다(Q38, Roblox 자동 번역 금지).
 --   키에 .rich 마디가 있으면 RichText를 켠다.
 -- - bindTextKeys(root): 지원이 만든 화면처럼 TextKey 속성이 붙은 라벨을 한 번에 등록한다(Q38).
+--   TextArgs 속성(JSON 문자열, 프롬프트 ActionArgs와 같은 방식)이 있으면 { key, args }로 묶는다(2026-11-15, 얼음 후보지 번호).
+-- - bindTextObject(object): 글자 요소 하나를 같은 규칙으로 등록하고, TextKey나 TextArgs가 바뀌면 다시 그린다.
 -- - setKeyLabels(labels): 입력 장치별 키 라벨(I18N_PLAN 4.4). 문구의 {key_interact}, {key_repair}, {key_boost}는
 --   서버가 넣지 않고 여기서 채운다. 값은 문자열("E") 또는 Msg({ key = "key.touch.tap" }). 기본값은 키보드.
 --   장치가 바뀌면 화면 쪽(v2 UI)이 불러 주고, 등록된 라벨을 다시 그린다. Msg에 같은 이름의 값이 있으면 그 값이 이긴다.
@@ -27,6 +29,7 @@ local Localizer = {}
 
 Localizer.ATTRIBUTE = "Lang"
 Localizer.TEXT_KEY_ATTRIBUTE = "TextKey"
+Localizer.TEXT_ARGS_ATTRIBUTE = "TextArgs"
 Localizer.SEND_INTERVAL = 1.1 -- 초. 서버 PlayerPrefs.RATE_LIMIT(1초)보다 조금 길게
 Localizer.IN_FLIGHT_TIMEOUT = 5 -- 초
 
@@ -251,19 +254,85 @@ function Localizer.unbind(object: Instance)
     registry[object] = nil
 end
 
+-- TextArgs JSON을 값 표로 (없거나 깨지면 nil). HttpService는 처음 쓸 때 찾는다
+local httpService: any = nil
+local function decodeTextArgs(value: any): { [string]: any }?
+    if type(value) ~= "string" or value == "" then
+        return nil
+    end
+    if httpService == nil then
+        local ok, service = pcall(function()
+            return game:GetService("HttpService")
+        end)
+        httpService = if ok then service else false
+    end
+    if not httpService then
+        return nil
+    end
+    local ok, decoded = pcall(function()
+        return httpService:JSONDecode(value)
+    end)
+    if ok and type(decoded) == "table" then
+        return decoded
+    end
+    return nil
+end
+
+local function isTextObject(object: any): boolean
+    return object:IsA("TextLabel") or object:IsA("TextButton") or object:IsA("TextBox")
+end
+
+-- TextKey로 등록한 요소와 속성 변화를 구독한 요소 (약한 키 표)
+local keyBound: { [Instance]: boolean } = setmetatable({}, { __mode = "k" }) :: any
+local watched: { [Instance]: boolean } = setmetatable({}, { __mode = "k" }) :: any
+
+-- 글자 요소 하나: TextKey(+ TextArgs)가 있으면 등록, 없으면 AutoLocalize만 끈다(TextKey가 지워졌으면 등록을 푼다).
+-- TextKey나 TextArgs가 바뀌면 다시 그린다. 반환: 글자 요소인지, 등록했는지
+function Localizer.bindTextObject(object: Instance): (boolean, boolean)
+    ensureStarted()
+    if not isTextObject(object) then
+        return false, false
+    end
+    local key = object:GetAttribute(Localizer.TEXT_KEY_ATTRIBUTE)
+    local bound = false
+    if type(key) == "string" and key ~= "" then
+        local msg: Msg.Msg =
+            { key = key, args = decodeTextArgs(object:GetAttribute(Localizer.TEXT_ARGS_ATTRIBUTE)) }
+        if not Msg.isMsg(msg) then
+            msg = { key = key }
+        end
+        Localizer.bind(object, msg)
+        keyBound[object] = true
+        bound = true
+    else
+        if keyBound[object] then
+            keyBound[object] = nil
+            registry[object] = nil
+        end
+        (object :: any).AutoLocalize = false
+    end
+    if not watched[object] then
+        watched[object] = true
+        -- 속성 신호가 없는 객체(테스트 가짜 라벨)는 구독하지 않는다
+        pcall(function()
+            local function rebind()
+                Localizer.bindTextObject(object)
+            end
+            object:GetAttributeChangedSignal(Localizer.TEXT_KEY_ATTRIBUTE):Connect(rebind)
+            object:GetAttributeChangedSignal(Localizer.TEXT_ARGS_ATTRIBUTE):Connect(rebind)
+        end)
+    end
+    return true, bound
+end
+
 -- TextKey 속성이 붙은 글자 요소를 모두 등록하고, 모든 글자 요소의 AutoLocalize를 끈다. 등록한 수를 돌려준다
 function Localizer.bindTextKeys(root: Instance): number
     ensureStarted()
     local count = 0
     for _, object in root:GetDescendants() do
-        if object:IsA("TextLabel") or object:IsA("TextButton") or object:IsA("TextBox") then
-            local key = object:GetAttribute(Localizer.TEXT_KEY_ATTRIBUTE)
-            if type(key) == "string" and key ~= "" then
-                Localizer.bind(object, { key = key })
-                count += 1
-            else
-                (object :: any).AutoLocalize = false
-            end
+        local _, bound = Localizer.bindTextObject(object)
+        if bound then
+            count += 1
         end
     end
     return count

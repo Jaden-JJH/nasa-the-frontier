@@ -65,9 +65,13 @@ local function nameMsg(defId: string): Msg.Msg
     return Msg.new(key)
 end
 
--- 얼음 후보지 이름 (map.ice.label { n }, n = 출구에서 가까운 순 번호 siteIndex)
+-- 얼음 후보지 이름 (map.ice.label { n }). n은 표시 번호(Ice4 -> 4, 리드 결정 2026-11-15)이고 정렬 순서가 아니다.
+-- Rules의 토스트(siteLabel)와 같은 번호
 local function siteLabel(siteIndex: number): Msg.Msg
-    return Msg.new("map.ice.label", { n = siteIndex })
+    local state = if flow then flow.rules() else nil
+    local site = state and state.sites[siteIndex]
+    local n = site and tonumber(string.match(site.id, "%d+"))
+    return Msg.new("map.ice.label", { n = n or siteIndex })
 end
 
 local function mission(): any

@@ -126,17 +126,10 @@ UserInputService.LastInputTypeChanged:Connect(function(inputType)
 end)
 
 -- 3D 이름표와 표지판 (MissionWorld가 TextKey 속성만 단다, CONTRACT_V2 7.5)
+-- 글자 요소면 TextKey(+ TextArgs, 예: 얼음 후보지 번호)로 등록하고 true. 속성이 바뀌면 Localizer가 다시 그린다
 local function bindTextObject(object)
-    if object:IsA("TextLabel") or object:IsA("TextButton") or object:IsA("TextBox") then
-        local key = object:GetAttribute(Localizer.TEXT_KEY_ATTRIBUTE)
-        if type(key) == "string" and key ~= "" then
-            Localizer.bind(object, { key = key })
-        else
-            object.AutoLocalize = false
-        end
-        return true
-    end
-    return false
+    local isText = Localizer.bindTextObject(object)
+    return isText
 end
 
 local function watchRuntime(folder)

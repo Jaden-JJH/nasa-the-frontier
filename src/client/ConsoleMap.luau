@@ -110,7 +110,7 @@ local function makeSite(index)
         TextSize = 13,
         TextColor3 = L.white,
     }, { UI.worldStroke() })
-    UI.msg(label, { key = "map.ice.label", args = { n = index } })
+    -- 글자는 refreshSites가 표시 번호(ice[i].number)로 채운다
     local status = UI.create("TextLabel", {
         Name = "Status",
         AnchorPoint = Vector2.new(0.5, 0),
@@ -147,6 +147,7 @@ local function refreshSites(state)
         local index = site.index
         seen[index] = true
         local view = sites[index] or makeSite(index)
+        UI.msg(view.label, ClientMath.iceLabel(site))
         local pos = project(worldSites[index])
         view.button.Visible = pos ~= nil
         if pos then

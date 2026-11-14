@@ -269,7 +269,7 @@ local function dispatchBlock(state, site, energyCost)
     if site.pipe then
         return {
             key = "toast.rover.site_piped",
-            args = { site = { key = "map.ice.label", args = { n = site.index } } },
+            args = { site = ClientMath.iceLabel(site) },
         }
     end
     local cooldown = site.cooldownDaysLeft or 0
@@ -638,7 +638,7 @@ local function refreshSite(state)
         return
     end
     side.pickHint.Visible = false
-    UI.msg(side.siteTitle, { key = "map.ice.label", args = { n = site.index } })
+    UI.msg(side.siteTitle, ClientMath.iceLabel(site))
     side.siteStatus.Visible = true
     local cooldown = site.cooldownDaysLeft or 0
     if site.pipe then
@@ -705,7 +705,7 @@ local function refreshSite(state)
     if chosenHere then
         UI.msg(side.pipeHint, {
             key = "toast.pipe.site_set",
-            args = { site = { key = "map.ice.label", args = { n = site.index } } },
+            args = { site = ClientMath.iceLabel(site) },
         })
         side.pipeButton.Visible = false
     elseif pipeOpen then

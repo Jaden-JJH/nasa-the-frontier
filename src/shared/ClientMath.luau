@@ -17,6 +17,7 @@
 --   roverChargeView, batteryMsg, chargeLabel: 로버 충전 표시 (HUD 칩, 로버 머리 위 표지, 안내 카드)
 --   rectDistance, pickNearest, buildingInfo: 건물 안내 카드 (가장 가까운 건물, 상태 줄, 하루 유지비)
 --   roleMissionOf, normalizeRoleMission, scoutTargets: 멀티 역할 미션 (HUD 카드, 정찰 표시, 결과 배지)
+--   iceNumber, iceLabel, iceEntry: 얼음 후보지 표시 번호 (모든 화면 "Ice Site N", N = 표시 번호, 정렬 순서 아님)
 -- 화면 문구는 Msg 모양 표({ key, args })로만 돌려준다. 키는 i18n/strings.csv에 있어야 한다(lint 검사).
 
 local ClientMath = {}
@@ -818,6 +819,44 @@ function ClientMath.scoutTargets(raw: any): { ScoutTarget }
         end
     end
     return out
+end
+
+-- 얼음 후보지 표시 번호 -------------------------------------------------------------
+-- 리드 결정(2026-11-15): 모든 화면의 "Ice Site N"은 표시 이름의 번호(Ice4 -> 4)다. siteIndex(출구에서 가까운 순)가 아니다.
+-- 서버 ice[i].number를 쓰고, 없으면 markerName의 숫자, 그것도 없으면 index
+
+function ClientMath.iceNumber(site: any): number
+    if type(site) ~= "table" then
+        return 0
+    end
+    if isNumber(site.number) then
+        return ClientMath.wholeNumber(site.number)
+    end
+    if type(site.markerName) == "string" then
+        local digits = tonumber(string.match(site.markerName, "(%d+)$"))
+        if digits then
+            return digits
+        end
+    end
+    return ClientMath.wholeNumber(site.index)
+end
+
+-- "Ice Site N" Msg (map.ice.label)
+function ClientMath.iceLabel(site: any): { [string]: any }
+    return { key = "map.ice.label", args = { n = ClientMath.iceNumber(site) } }
+end
+
+-- siteIndex(정렬 순서, 핀과 파견이 쓰는 번호)로 StateUpdate ice 항목 찾기. 없으면 nil
+function ClientMath.iceEntry(state: any, siteIndex: any): any
+    if type(state) ~= "table" or type(state.ice) ~= "table" or siteIndex == nil then
+        return nil
+    end
+    for _, site in state.ice do
+        if type(site) == "table" and site.index == siteIndex then
+            return site
+        end
+    end
+    return nil
 end
 
 return ClientMath

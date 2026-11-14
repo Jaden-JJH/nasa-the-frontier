@@ -287,6 +287,7 @@ local function iceView(state: any): { any }
         table.insert(out, {
             index = index,
             markerName = site.id,
+            number = tonumber(string.match(site.id, "%d+")), -- 화면 이름 map.ice.label { n } (정렬 순서 index와 다르다)
             distance = math.floor(site.distance + 0.5),
             cooldownDaysLeft = site.cooldownLeft,
             pipe = site.pipeId ~= nil,

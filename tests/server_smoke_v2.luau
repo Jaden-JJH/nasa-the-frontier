@@ -1076,6 +1076,16 @@ do
             )
         end
         check(same, "ice[1 .. 5]: 왕복 일수, 에너지, 위험 = Rules.tripPlan")
+        local numbered = s ~= nil and #s.ice == 5
+        for _, site in (s and s.ice) or {} do
+            if site.number ~= tonumber(string.match(site.markerName, "%d+")) then
+                numbered = false
+            end
+        end
+        check(
+            numbered and s.ice[1].number == 4 and s.ice[1].index == 1,
+            "ice[i].number: 화면 이름 번호 = 표시 번호 (ice[1]은 Ice4 -> 4, 정렬 순서 index 1)"
+        )
     end
     do
         -- 왕복 일수는 MissionConfig(fb-balance)가 정한다. 화면 값이 Rules 계산과 같은지만 본다
@@ -1547,8 +1557,9 @@ do
     check(
         siteSet
             and siteSet.args[1].args.site.key == "map.ice.label"
-            and siteSet.args[1].args.site.args.n == target,
-        "toast.pipe.site_set: site = 중첩 map.ice.label { n }"
+            and siteSet.args[1].args.site.args.n
+                == tonumber(string.match(H.rules().sites[target].id, "%d+")),
+        "toast.pipe.site_set: site = 중첩 map.ice.label { n = 표시 번호 (정렬 순서 아님) }"
     )
     check(H.state().pipeSite == target, "SetPipeSite: MissionState.pipeSite")
     check(pipe:GetAttribute("ActionKey") == "prompt.act.build", "파이프 착공 프롬프트")

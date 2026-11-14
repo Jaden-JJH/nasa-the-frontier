@@ -85,7 +85,13 @@ local function update()
         ClientMath.toMeters(ClientMath.horizontalDistance(me, target), MissionConfig.metersPerStud)
     local label = {
         key = "map.pin.label",
-        args = { site = { key = "map.ice.label", args = { n = Session.pinSite } }, meters = meters },
+        args = {
+            -- 핀은 siteIndex(정렬 순서)라 ice 항목에서 표시 번호를 찾는다
+            site = ClientMath.iceLabel(
+                ClientMath.iceEntry(Session.state, Session.pinSite) or { index = Session.pinSite }
+            ),
+            meters = meters,
+        },
     }
     local point = camera:WorldToViewportPoint(target + Vector3.new(0, TARGET_HEIGHT, 0))
     local viewport = camera.ViewportSize

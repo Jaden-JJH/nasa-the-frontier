@@ -18,7 +18,7 @@
 --   reset(): 재시작. MissionRuntime을 비우고 기지를 다시 놓는다.
 --
 -- 서버는 화면 문장을 쓰지 않는다(CONTRACT 0절 2). 3D 글자(문 표지, 제어반, 대체 도형 이름표)는 TextLabel에
--- Attribute "TextKey"만 달고 Text는 비워 둔다. 클라이언트 Localizer.bindTextKeys가 언어에 맞게 채운다. AutoLocalize = false.
+-- Attribute "TextKey"(인자가 있으면 "TextArgs" JSON, 예: 얼음 후보지 map.ice.label {"n":4})만 달고 Text는 비워 둔다. 클라이언트 Localizer.bindTextKeys가 언어에 맞게 채운다. AutoLocalize = false.
 -- 숫자(크기, 간격, 색)는 아래 CFG에 모았다. 리드가 나중에 MissionConfig로 옮긴다.
 -- 산소 구역 파트에는 태그 "OxygenZone"과 Attribute ZoneKind("shelter" | "refill"), ZoneId를 단다(Oxygen v2가 읽는다).
 
@@ -211,12 +211,15 @@ local CFG = {
         role = "IceDeposit",
         fill = 0.45, -- 덩어리 무리가 차지하는 표시 바닥 넓이 비율
         maxHeight = 2.4, -- 덩어리 무리 전체 높이 상한 (묻기 전)
-        buryRatio = 0.55, -- 그중 땅속에 묻는 비율 (보이는 높이 약 1)
+        buryRatio = 0.45, -- 그중 땅속에 묻는 비율 (보이는 높이 약 1.3. 0.55면 30 stud에서도 거의 안 보였다)
         revealDistance = 40,
         glintSize = 0.5, -- 반짝임 점 크기 (studs)
         glintTransparency = 0.45,
         labelOffset = 3, -- MinePoint 중심 위 이름표 높이
         glintOffset = -1, -- MinePoint 중심 기준 반짝임 높이 (지면 근처)
+        -- 얼음이 섞인 덩어리 윗면의 옅은 서리 (SurfaceGui, revealDistance 안에서만 그린다. 멀리서는 표토 색 그대로)
+        frostTransparency = 0.35,
+        frostLightInfluence = 0.2,
     },
     -- 대체 도형 "deposit"의 덩어리 배치 (로컬, 바닥 중심 원점, 나중에 표시 크기에 맞춰 균일 배율)
     iceDeposit = {
@@ -269,6 +272,7 @@ local CFG = {
         pipe = { 190, 192, 198 },
         ledGlow = { 255, 120, 220 },
         iceGlint = { 215, 232, 245 }, -- 얼음 후보지 가까이에서만 보이는 작은 반짝임
+        iceFrost = { 200, 214, 228 }, -- 얼음 덩어리 윗면 서리 (가까이에서만)
         bed = { 235, 236, 240 },
         labelText = { 255, 255, 255 },
         status = {
@@ -1150,6 +1154,23 @@ local function makePlaceholder(roleName: string, spec: RoleSpec): Model
                 parent = model,
             })
             part.Reflectance = 0
+            if chunk.tint then
+                -- 옅은 서리 윗면: 가까이(revealDistance)에서만 그려 채취 자리를 알아보게 한다
+                local frost = Instance.new("SurfaceGui")
+                frost.Name = "Frost"
+                frost.Face = Enum.NormalId.Top
+                frost.MaxDistance = CFG.ice.revealDistance
+                frost.LightInfluence = CFG.ice.frostLightInfluence
+                frost.AutoLocalize = false
+                frost.Parent = part
+                local coat = Instance.new("Frame")
+                coat.Name = "Coat"
+                coat.Size = UDim2.fromScale(1, 1)
+                coat.BackgroundColor3 = rgb(CFG.colors.iceFrost)
+                coat.BackgroundTransparency = CFG.ice.frostTransparency
+                coat.BorderSizePixel = 0
+                coat.Parent = frost
+            end
             if first == nil then
                 first = part
             end
@@ -2171,12 +2192,18 @@ local function quietIceVisual(model: Instance, maxDistance: number)
         elseif d:IsA("BillboardGui") then
             d.MaxDistance = math.min(d.MaxDistance, maxDistance)
             d.AlwaysOnTop = false
+        elseif d:IsA("SurfaceGui") then
+            -- SurfaceGui.MaxDistance 0은 거리 제한 없음
+            if d.MaxDistance <= 0 or d.MaxDistance > maxDistance then
+                d.MaxDistance = maxDistance
+            end
+            d.AlwaysOnTop = false
         end
     end
 end
 
 -- 가까이에서만 보이는 이름표와 작은 반짝임 (BillboardGui.MaxDistance = revealDistance)
-local function addIceReveal(point: BasePart)
+local function addIceReveal(point: BasePart, markerName: string)
     local i = CFG.ice
     local l = CFG.label
     local label = Instance.new("BillboardGui")
@@ -2188,7 +2215,10 @@ local function addIceReveal(point: BasePart)
     label.AlwaysOnTop = false
     label.AutoLocalize = false
     label.Parent = point
-    local text = keyedLabel(label, "world.ice_site.name", rgb(CFG.colors.labelText))
+    -- 모든 화면 이름 "Ice Site N / 얼음 후보지 N" (map.ice.label { n }, n = 표시 번호). 인자는 TextArgs(JSON)로 단다
+    local text = keyedLabel(label, "map.ice.label", rgb(CFG.colors.labelText))
+    local n = tonumber(string.match(markerName, "%d+")) or 0
+    text:SetAttribute("TextArgs", string.format('{"n":%d}', n))
     text.TextStrokeTransparency = 0.4
     local glint = Instance.new("BillboardGui")
     glint.Name = "Glint"
@@ -2238,7 +2268,7 @@ local function buildIceSites(parent: Instance)
         )
         point:SetAttribute("SiteIndex", site.index)
         point:SetAttribute("MarkerName", site.markerName)
-        addIceReveal(point)
+        addIceReveal(point, site.markerName)
     end
 end
 

@@ -539,6 +539,29 @@ return function(t)
         t.eq(#ClientMath.scoutTargets(nil), 0)
     end)
 
+    t.test("ClientMath: 얼음 후보지 표시 번호 (정렬 순서 아님)", function()
+        local state = {
+            ice = {
+                { index = 1, markerName = "Ice4", number = 4 },
+                { index = 2, markerName = "Ice1" },
+                { index = 3 },
+            },
+        }
+        local first = ClientMath.iceEntry(state, 1)
+        t.eq(ClientMath.iceNumber(first), 4, "서버 number")
+        t.eq(ClientMath.iceLabel(first).key, "map.ice.label")
+        t.eq(ClientMath.iceLabel(first).args.n, 4, "지도 첫 줄(Ice4)은 Ice Site 4")
+        t.eq(
+            ClientMath.iceNumber(ClientMath.iceEntry(state, 2)),
+            1,
+            "number가 없으면 표시 이름 숫자"
+        )
+        t.eq(ClientMath.iceNumber(ClientMath.iceEntry(state, 3)), 3, "그것도 없으면 index")
+        t.eq(ClientMath.iceEntry(state, 9), nil)
+        t.eq(ClientMath.iceEntry(nil, 1), nil)
+        t.eq(ClientMath.iceNumber({ index = 2 }), 2, "핀만 알 때 대체")
+    end)
+
     t.test("ClientMath: 미터 환산은 MissionConfig 배율과 반올림", function()
         t.eq(ClientMath.toMeters(2044, MissionConfig.metersPerStud), 2560, "지형 한 변")
         t.eq(ClientMath.toMeters(100, nil), 100, "배율 없음")
