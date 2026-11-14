@@ -6,7 +6,9 @@
 -- 화면 전환
 --   StateUpdate 전이나 selecting: 타이틀(로컬에서 시작을 누르기 전) -> 미션 선택
 --   landing: 착륙 카메라 (RoleUpdate selecting이면 역할 선택이 위에 뜬다)
---   playing: HUD, 산소 바, 설정, Tip/사실 카드, 콘솔(프롬프트로 열기), 핀 화살표(탐사대원)
+--   playing: HUD, 산소 바, 설정, Tip/사실 카드, 콘솔(프롬프트로 열기), 핀 화살표(탐사대원),
+--            건물 안내 카드(콘솔, 결과, 역할 선택이 닫혀 있을 때), 로버 충전 표지,
+--            멀티 역할 미션(HUD 카드는 HUDV2, 정찰 표시는 ScoutMarkers)
 --   result: 결과 화면 (GameOver, 놓쳤으면 상태로 최소 표시)
 
 local Players = game:GetService("Players")
@@ -38,6 +40,9 @@ local SettingsUI = require(script.Parent.SettingsUI)
 local ConsoleUI = require(script.Parent.ConsoleUI)
 local PinArrowUI = require(script.Parent.PinArrowUI)
 local ResultV2 = require(script.Parent.ResultV2)
+local BuildingInfoUI = require(script.Parent.BuildingInfoUI)
+local RoverChargeSign = require(script.Parent.RoverChargeSign)
+local ScoutMarkers = require(script.Parent.ScoutMarkers)
 
 local RUNTIME_FOLDER = "MissionRuntime"
 local RESET_RETRY_COUNT = 10
@@ -191,6 +196,14 @@ local function applyScreens()
     safe("SettingsUI.setVisible", SettingsUI.setVisible, playing)
     safe("TipUI.setContext", TipUI.setContext, Session.mode(), role)
     safe("PinArrowUI.setActive", PinArrowUI.setActive, pinArrow)
+    safe(
+        "BuildingInfoUI.setVisible",
+        BuildingInfoUI.setVisible,
+        playing
+            and not ConsoleUI.isOpen()
+            and not ResultV2.isVisible()
+            and not (Session.rolesSelecting and Session.isMulti())
+    )
     if phase ~= "landing" then
         safe("LandingCamera.stop", LandingCamera.stop)
     end
@@ -218,6 +231,9 @@ local MODULES = {
     { name = "RoleSelectUI", module = RoleSelectUI },
     { name = "LandingCamera", module = LandingCamera },
     { name = "HUDV2", module = HUDV2 },
+    { name = "BuildingInfoUI", module = BuildingInfoUI }, -- HUDV2 뒤 (compact 위치가 HUD 오른쪽 열을 따른다)
+    { name = "RoverChargeSign", module = RoverChargeSign },
+    { name = "ScoutMarkers", module = ScoutMarkers },
     { name = "HeadStatus", module = HeadStatus },
     { name = "WeatherFX", module = WeatherFX },
     { name = "OxygenBar", module = OxygenBar },
@@ -257,6 +273,9 @@ Net.on("StateUpdate", function(state)
     -- 화면 전환을 먼저 한다 (아래 소비자 하나가 실패해도 화면은 바뀐다)
     safe("applyScreens", applyScreens)
     safe("HUDV2.update", HUDV2.update, state)
+    safe("BuildingInfoUI.update", BuildingInfoUI.update, state)
+    safe("RoverChargeSign.update", RoverChargeSign.update, state)
+    safe("ScoutMarkers.update", ScoutMarkers.update, state)
     safe("HeadStatus.update", HeadStatus.update, state)
     safe("WeatherFX.update", WeatherFX.update, state)
     safe("BoostFX.update", BoostFX.update, state)

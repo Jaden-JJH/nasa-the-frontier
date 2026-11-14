@@ -2,16 +2,23 @@
 -- v2 HUD (CONTRACT_V2 2.3, V2_PLAN 15.2 ~ 15.9). 루나 소프트 디자인.
 -- - 왼쪽 위: 자원 3개 칩(아이콘 + 숫자 + 상한 100 막대, 20 미만이면 "부족!" 표시), 그 아래 기지 정지 표시
 -- - 가운데 위: "Day x of 60"과 남은 일수, 미션 문구(서버 Msg), 우주 기상 배너(사건 이름, 문구, NASA DONKI 날짜 출처, Q36)
--- - 오른쪽 위: 로버 상태 칩(자율주행, 고장, 회수, 폭풍 대기), 운전 중 배터리
+-- - 오른쪽 위: 로버 상태 칩(자율주행, 고장, 회수, 폭풍 대기), 배터리 칩(로버가 보이면 늘: 퍼센트와 막대, 충전 중이면
+--   번개 아이콘이 깜빡임), 그 아래 충전 상태 알약(충전 중, 가득 참, 충전이 안 되는 이유: 기지 에너지가
+--   MANUAL_DRIVE.chargeKeepEnergy 이하, 주차판 밖, 누가 타고 있음). 판정은 ClientMath.roverChargeView
+-- - 가운데 위 마지막: 멀티 역할 미션 카드(C4, 점수와 무관). 미션 문구 바로 아래 같은 열이라 겹치지 않는다.
+--   아이콘, 배지 이름, 진행 n / goal, 끝나면 체크와 "완료!" + 잠깐 커지는 효과. compact는 한 줄(설명 숨김)
 -- 숫자는 화면용으로 내림(ClientMath.wholeNumber). 문구는 모두 Localizer(UI.msg)로 그린다.
 -- compact(Layout.isCompact)는 칩과 글자를 줄이고 남은 일수 줄을 숨긴다.
 
+local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local ClientMath = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ClientMath"))
 local MissionConfig =
     require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("MissionConfig"))
 local Msg = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Msg"))
+
+local TweenService = game:GetService("TweenService")
 
 local Icons = require(script.Parent.Icons)
 local Layout = require(script.Parent.Layout)
@@ -23,6 +30,9 @@ local HUDV2 = {}
 
 local RESOURCES = { "energy", "water", "food" }
 local LOW_THRESHOLD = MissionConfig.SCORE.lowThreshold
+local CHARGE_KEEP = MissionConfig.MANUAL_DRIVE.chargeKeepEnergy
+local BATTERY_LOW_RATIO = 0.2
+local PULSE_SECONDS = 0.6
 local DEFAULT_CAP = 100
 local ENDED_BANNER_SECONDS = 6
 local EDGE = 12
@@ -76,9 +86,62 @@ local roverLabel
 local batteryChip
 local batteryLabel
 local batteryFill
+local chargeIcon
+local chargePulse = nil
+local chargeTag
+local chargeTagLabel
+local roleCard
+local roleTitle
+local roleIconSlot
+local roleBadge
+local roleProgress
+local roleDone
+local roleDesc
+local roleScale
+local roleStroke
+local roleShown = nil -- { id, done } 지난번 그린 역할 미션 (끝나는 순간 효과용)
 
 local lastState = nil
 local endedBanner = nil -- { kind, sourceDate, untilTime }
+
+-- 충전 상태 알약 색 (모드, 이유)
+local function tagColor(view)
+    if view.mode == "charging" then
+        return L.gold
+    elseif view.mode == "full" then
+        return L.mint
+    elseif view.reason == "energy" then
+        return L.red
+    end
+    return L.orange
+end
+
+local function setChargePulse(on)
+    if on then
+        chargeIcon.Visible = true
+        if not chargePulse then
+            chargePulse = TweenService:Create(
+                chargeIcon,
+                TweenInfo.new(
+                    PULSE_SECONDS,
+                    Enum.EasingStyle.Sine,
+                    Enum.EasingDirection.InOut,
+                    -1,
+                    true
+                ),
+                { Size = UDim2.fromOffset(12, 12) }
+            )
+            chargePulse:Play()
+        end
+    else
+        chargeIcon.Visible = false
+        if chargePulse then
+            chargePulse:Cancel()
+            chargePulse = nil
+            chargeIcon.Size = UDim2.fromOffset(18, 18)
+        end
+    end
+end
 
 local function sizes()
     return if Layout.isCompact() then SIZES.compact else SIZES.pc
@@ -292,6 +355,118 @@ local function buildCenter()
         weatherSource,
     })
 
+    -- 역할 미션 카드 (멀티)
+    roleTitle = UI.create("TextLabel", {
+        Name = "Title",
+        LayoutOrder = 1,
+        Size = UDim2.new(1, 0, 0, 16),
+        FontFace = UI.MonoBold,
+        TextSize = 13,
+        TextColor3 = L.gold,
+        TextXAlignment = Enum.TextXAlignment.Left,
+    })
+    UI.msg(roleTitle, "rolemission.title")
+    roleIconSlot = UI.create("Frame", {
+        Name = "IconSlot",
+        LayoutOrder = 1,
+        Size = UDim2.fromOffset(20, 20),
+        BackgroundTransparency = 1,
+    })
+    roleBadge = UI.create("TextLabel", {
+        Name = "Badge",
+        LayoutOrder = 2,
+        Size = UDim2.fromOffset(0, 24),
+        AutomaticSize = Enum.AutomaticSize.X,
+        FontFace = UI.RoundHeavy,
+        TextSize = 16,
+        TextColor3 = L.white,
+    })
+    roleProgress = UI.create("TextLabel", {
+        Name = "Progress",
+        LayoutOrder = 3,
+        Size = UDim2.fromOffset(0, 24),
+        AutomaticSize = Enum.AutomaticSize.X,
+        FontFace = UI.MonoBold,
+        TextSize = 15,
+        TextColor3 = L.gold,
+    })
+    local doneLabel = UI.create("TextLabel", {
+        Name = "Text",
+        LayoutOrder = 2,
+        Size = UDim2.fromOffset(0, 20),
+        AutomaticSize = Enum.AutomaticSize.X,
+        FontFace = UI.RoundHeavy,
+        TextSize = 13,
+        TextColor3 = L.ink,
+    })
+    UI.msg(doneLabel, "rolemission.done")
+    local check = UI.checkMark(L.ink, { LayoutOrder = 1 })
+    roleDone = UI.create("Frame", {
+        Name = "Done",
+        LayoutOrder = 4,
+        Size = UDim2.fromOffset(0, 20),
+        AutomaticSize = Enum.AutomaticSize.X,
+        BackgroundColor3 = L.mint,
+        Visible = false,
+    }, {
+        UI.roundCorner(),
+        UI.padding({ 0, 0, 6, 8 }),
+        UI.create("UIListLayout", {
+            FillDirection = Enum.FillDirection.Horizontal,
+            Padding = UDim.new(0, 2),
+            SortOrder = Enum.SortOrder.LayoutOrder,
+            VerticalAlignment = Enum.VerticalAlignment.Center,
+        }),
+        check,
+        doneLabel,
+    })
+    local roleRow = UI.create("Frame", {
+        Name = "Row",
+        LayoutOrder = 2,
+        Size = UDim2.new(1, 0, 0, 24),
+        BackgroundTransparency = 1,
+    }, {
+        UI.create("UIListLayout", {
+            FillDirection = Enum.FillDirection.Horizontal,
+            Padding = UDim.new(0, 8),
+            SortOrder = Enum.SortOrder.LayoutOrder,
+            VerticalAlignment = Enum.VerticalAlignment.Center,
+        }),
+        roleIconSlot,
+        roleBadge,
+        roleProgress,
+        roleDone,
+    })
+    roleDesc = UI.create("TextLabel", {
+        Name = "Desc",
+        LayoutOrder = 3,
+        Size = UDim2.fromScale(1, 0),
+        AutomaticSize = Enum.AutomaticSize.Y,
+        Font = UI.Font,
+        TextSize = 14,
+        TextColor3 = L.body,
+        TextWrapped = true,
+        TextXAlignment = Enum.TextXAlignment.Left,
+    })
+    roleScale = UI.create("UIScale", { Scale = 1 })
+    roleCard = UI.lunaPanel({
+        Name = "RoleMission",
+        LayoutOrder = 4,
+        Size = UDim2.fromOffset(s.missionW, 0),
+        AutomaticSize = Enum.AutomaticSize.Y,
+        BackgroundColor3 = L.bgTop,
+        BackgroundTransparency = 0.25,
+        Visible = false,
+    }, {
+        roleScale,
+        UI.padding({ 6, 8, 14, 14 }),
+        UI.list(Enum.FillDirection.Vertical, 2),
+        roleTitle,
+        roleRow,
+        roleDesc,
+    }, 14)
+    roleStroke = roleCard:FindFirstChildOfClass("UIStroke")
+
     center = UI.create("Frame", {
         Name = "Center",
         AnchorPoint = Vector2.new(0.5, 0),
@@ -305,6 +480,7 @@ local function buildCenter()
         dayRow,
         missionPanel,
         weatherPanel,
+        roleCard,
     })
 end
 
@@ -356,6 +532,17 @@ local function buildRight()
     }, { UI.corner(3) })
     local batteryIcon = Icons.resource("battery", 20)
     batteryIcon.LayoutOrder = 1
+    -- 충전 중 번개 (막대 오른쪽, 크기가 오르내린다). 18 x 18 칸 가운데에 둔다
+    chargeIcon = Icons.resource("energy", 18)
+    chargeIcon.AnchorPoint = Vector2.new(0.5, 0.5)
+    chargeIcon.Position = UDim2.fromScale(0.5, 0.5)
+    chargeIcon.Visible = false
+    local chargeSlot = UI.create("Frame", {
+        Name = "ChargeSlot",
+        LayoutOrder = 4,
+        Size = UDim2.fromOffset(18, 18),
+        BackgroundTransparency = 1,
+    }, { chargeIcon })
     batteryChip = UI.lunaPanel({
         Name = "Battery",
         LayoutOrder = 2,
@@ -381,7 +568,25 @@ local function buildRight()
             BackgroundColor3 = L.white,
             BackgroundTransparency = 0.85,
         }, { UI.corner(3), batteryFill }),
+        chargeSlot,
     }, 17)
+
+    chargeTagLabel = UI.create("TextLabel", {
+        Name = "Text",
+        Size = UDim2.fromOffset(0, 24),
+        AutomaticSize = Enum.AutomaticSize.X,
+        FontFace = UI.RoundBold,
+        TextSize = 14,
+        TextColor3 = L.inkDeep,
+    })
+    chargeTag = UI.create("Frame", {
+        Name = "ChargeTag",
+        LayoutOrder = 3,
+        Size = UDim2.fromOffset(0, 24),
+        AutomaticSize = Enum.AutomaticSize.X,
+        BackgroundColor3 = L.gold,
+        Visible = false,
+    }, { UI.roundCorner(), UI.padding({ 0, 0, 10, 10 }), chargeTagLabel })
 
     rightColumn = UI.create("Frame", {
         Name = "Right",
@@ -395,6 +600,7 @@ local function buildRight()
         UI.list(Enum.FillDirection.Vertical, 6, Enum.HorizontalAlignment.Right),
         roverChip,
         batteryChip,
+        chargeTag,
     })
 end
 
@@ -413,6 +619,10 @@ local function applyLayout()
     daysLeftLabel.Visible = not Layout.isCompact()
     missionPanel.Size = UDim2.fromOffset(s.missionW, 0)
     weatherPanel.Size = UDim2.fromOffset(s.missionW, 0)
+    roleCard.Size = UDim2.fromOffset(s.missionW, 0)
+    -- compact는 역할 미션을 한 줄로 (머리글과 설명 숨김)
+    roleTitle.Visible = not Layout.isCompact()
+    roleDesc.Visible = not Layout.isCompact()
     center.Size = UDim2.fromOffset(s.missionW, 0)
     missionLabel.TextSize = s.body
     weatherText.TextSize = s.body
@@ -490,17 +700,114 @@ local function refreshRover(state)
     if key then
         UI.msg(roverLabel, key)
     end
-    local driving = RoverBoost.isDriving() and type(rover) == "table"
-    batteryChip.Visible = driving
-    if driving then
-        UI.msg(
-            batteryLabel,
-            { key = "hud.battery.value", args = { n = ClientMath.wholeNumber(rover.battery) } }
-        )
-        local ratio = ClientMath.ratio(rover.battery, rover.batteryMax)
-        batteryFill.Size = UDim2.fromScale(ratio, 1)
-        batteryFill.BackgroundColor3 = if ratio < 0.2 then L.red else L.mint
+    -- 배터리 칩: 로버가 보이면(주차, 운전) 늘 보인다. 자율주행과 고장은 위 칩이 말한다
+    if type(rover) ~= "table" then
+        batteryChip.Visible = false
+        chargeTag.Visible = false
+        setChargePulse(false)
+        return
     end
+    local resources = if type(state.resources) == "table" then state.resources else {}
+    local view = ClientMath.roverChargeView({
+        status = rover.state,
+        atBase = rover.atBase,
+        charging = rover.charging,
+        battery = rover.battery,
+        batteryMax = rover.batteryMax,
+        percent = rover.batteryPercent,
+        blocked = rover.chargeBlocked,
+        serverReasons = type(rover.batteryPercent) == "number",
+        energy = resources.energy,
+        keep = CHARGE_KEEP,
+        localDriving = RoverBoost.isDriving(),
+    })
+    local visible = view.mode ~= "hidden"
+    batteryChip.Visible = visible
+    if not visible then
+        chargeTag.Visible = false
+        setChargePulse(false)
+        return
+    end
+    UI.msg(batteryLabel, ClientMath.batteryMsg(view.percent))
+    local ratio = view.percent / 100
+    batteryFill.Size = UDim2.fromScale(ratio, 1)
+    batteryFill.BackgroundColor3 = if view.mode == "charging"
+        then L.gold
+        elseif ratio < BATTERY_LOW_RATIO then L.red
+        else L.mint
+    setChargePulse(view.mode == "charging")
+    local label = ClientMath.chargeLabel(view, CHARGE_KEEP)
+    chargeTag.Visible = label ~= nil
+    if label then
+        chargeTag.BackgroundColor3 = tagColor(view)
+        UI.msg(chargeTagLabel, label)
+    end
+end
+
+local ROLE_ICONS = {
+    water = function(size)
+        return Icons.resource("water", size)
+    end,
+    panels = function(size)
+        return Icons.resource("energy", size)
+    end,
+    guide = function(size)
+        return Icons.pin(size, L.mint)
+    end,
+    scout = function(size)
+        return Icons.base(size, L.sky)
+    end,
+}
+
+-- 끝나는 순간 카드가 잠깐 커지고 테두리가 민트로 빛난다
+local function playRoleDoneEffect()
+    roleScale.Scale = 1
+    local grow = TweenService:Create(
+        roleScale,
+        TweenInfo.new(0.18, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
+        { Scale = 1.08 }
+    )
+    grow.Completed:Once(function()
+        TweenService:Create(roleScale, TweenInfo.new(0.25, Enum.EasingStyle.Quad), { Scale = 1 })
+            :Play()
+    end)
+    grow:Play()
+    if roleStroke then
+        roleStroke.Color = L.mint
+        roleStroke.Transparency = 0
+        roleStroke.Thickness = 2
+        TweenService:Create(
+            roleStroke,
+            TweenInfo.new(1.5, Enum.EasingStyle.Quad),
+            { Transparency = UI.LUNA_STROKE_TRANSPARENCY, Thickness = 1 }
+        ):Play()
+    end
+end
+
+local function refreshRole(state)
+    local mission = ClientMath.roleMissionOf(state, Players.LocalPlayer.UserId)
+    roleCard.Visible = mission ~= nil
+    if not mission then
+        roleShown = nil
+        return
+    end
+    local keys = ClientMath.ROLE_MISSION_KEYS[mission.id]
+    if not roleShown or roleShown.id ~= mission.id then
+        roleIconSlot:ClearAllChildren()
+        ROLE_ICONS[mission.id](20).Parent = roleIconSlot
+    end
+    UI.msg(roleBadge, keys.badge)
+    UI.msg(roleDesc, keys.desc)
+    UI.msg(
+        roleProgress,
+        { key = "fmt.fraction", args = { value = mission.progress, max = mission.goal } }
+    )
+    roleProgress.TextColor3 = if mission.done then L.mint else L.gold
+    roleDone.Visible = mission.done
+    if mission.done and roleShown and roleShown.id == mission.id and not roleShown.done then
+        playRoleDoneEffect()
+    end
+    roleShown = { id = mission.id, done = mission.done }
 end
 
 function HUDV2.init(_ctx)
@@ -564,6 +871,7 @@ function HUDV2.update(state)
 
     refreshWeather(state)
     refreshRover(state)
+    refreshRole(state)
 end
 
 -- SpaceWeather(S->C) "ended" 단계: 끝났다는 배너를 잠깐 보여 준다

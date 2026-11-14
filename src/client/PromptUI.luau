@@ -5,27 +5,45 @@
 -- ActionText, ObjectText를 그대로 보여 준다. 언어가 바뀌면 Localizer가 다시 그린다.
 -- 패널은 앵커 아래쪽으로 뻗고, 같은 자리의 프롬프트는 아래로 쌓는다(최대 2개, 카메라에 가까운 것).
 -- 키 상자: 키보드는 KeyCode 이름(E, R), 게임패드는 버튼 이름, 터치는 key.touch.tap.
+-- 건설비 줄(2026-11-15 플레이테스트): 서버 Attribute CostEnergy, CostWater(숫자), BuildDays(일), Affordable(bool),
+-- LockMsg(JSON Msg)가 있으면 행동 줄 아래에 에너지, 물 아이콘과 숫자, 건설 일수를 보이고, 살 수 없으면 모자란 숫자를
+-- 빨갛게(ClientMath.costShortfall), 잠김이면 그 사유를 한 줄 더 쓴다. 자원이 바뀌면(StateUpdate) 색을 다시 맞춘다.
+-- 패널 높이는 줄 수에 따라 바뀌고, 쌓을 때는 위 패널의 실제 높이만큼 내린다.
 
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local ProximityPromptService = game:GetService("ProximityPromptService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 
+local ClientMath = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ClientMath"))
+local Msg = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Msg"))
+
+local Icons = require(script.Parent.Icons)
+local Session = require(script.Parent.Session)
 local UI = require(script.Parent.UI)
 local L = UI.Luna
 
 local PromptUI = {}
 
 local PANEL_WIDTH = 260
-local PANEL_HEIGHT = 72
+local PANEL_HEIGHT = 72 -- 최소 높이 (물체, 행동 두 줄)
 local KEY_BOX = 44
 local TEXT_LEFT = 70
+local TEXT_PAD = 8 -- 글자 묶음 위아래 여백
+local OBJECT_ROW = 18
+local ACTION_ROW = 26
+local COST_ROW = 22
+local COST_ICON = 16
+local LOCK_ROW = 30 -- 잠김 사유 (두 줄까지, 넘치면 글자를 줄인다)
+local BAR_GAP = 4
 local BAR_HEIGHT = 6
 local FADE_SECONDS = 0.15
 local ANCHOR_GAP = 4
-local STACK_STEP = 82 -- 같은 위치 프롬프트를 아래로 쌓는 픽셀 간격
+local MAX_PANEL_HEIGHT = PANEL_HEIGHT + COST_ROW + LOCK_ROW
 local MAX_VISIBLE = 2
 local COOLDOWN_TICK = 0.25
+local COST_ATTRIBUTES = { "CostEnergy", "CostWater", "BuildDays", "Affordable", "LockMsg" }
 
 local active = {} -- { [ProximityPrompt] = entry }
 local order = {} -- PromptShown 순서의 프롬프트 목록
@@ -71,6 +89,29 @@ local function decodeArgs(value)
     return nil
 end
 
+-- JSON 문자열 Attribute를 Msg로 (형식이 틀리면 nil)
+local function decodeMsg(value)
+    local decoded = decodeArgs(value)
+    if decoded and Msg.isMsg(decoded) then
+        return decoded
+    end
+    return nil
+end
+
+-- 양수 숫자 Attribute (없거나 0 이하면 nil)
+local function positive(prompt, name)
+    local value = prompt:GetAttribute(name)
+    if type(value) == "number" and value > 0 then
+        return value
+    end
+    return nil
+end
+
+-- 패널 하나가 차지하는 높이 (패널 + 홀드 바)
+local function stackHeight(entry)
+    return entry.height + BAR_GAP + BAR_HEIGHT
+end
+
 -- 표시 순서대로 슬롯을 배정한다. MAX_VISIBLE 초과 시 카메라에 가까운 것만 남긴다.
 local function relayout()
     local list = {}
@@ -108,9 +149,12 @@ local function relayout()
             active[prompt].gui.Enabled = true
         end
     end
+    local offset = ANCHOR_GAP
     for slot, prompt in ipairs(list) do
         local entry = active[prompt]
-        local target = UDim2.new(0.5, 0, 0.5, ANCHOR_GAP + (slot - 1) * STACK_STEP)
+        local target = UDim2.new(0.5, 0, 0.5, offset)
+        entry.offsetY = offset
+        offset += stackHeight(entry)
         if entry.slot == nil then
             entry.group.Position = target
         else
@@ -176,6 +220,132 @@ local function refreshTexts(prompt, entry)
         UI.raw(entry.action, prompt.ActionText)
     end
     entry.keyBox.BackgroundTransparency = if left > 0 then 0.9 else 0.8
+
+    -- 건설비 줄과 잠김 사유
+    local energy = positive(prompt, "CostEnergy")
+    local water = positive(prompt, "CostWater")
+    local days = positive(prompt, "BuildDays")
+    local lock = decodeMsg(prompt:GetAttribute("LockMsg"))
+    local state = Session.state
+    local short = ClientMath.costShortfall(
+        { energy = energy, water = water },
+        state and state.resources,
+        prompt:GetAttribute("Affordable"),
+        lock ~= nil
+    )
+    local cost = entry.cost
+    cost.energy.Visible = energy ~= nil
+    cost.water.Visible = water ~= nil
+    cost.days.Visible = days ~= nil
+    if energy then
+        UI.raw(cost.energyNumber, ClientMath.formatAmount(energy))
+        cost.energyNumber.TextColor3 = if short.energy then L.red else L.white
+    end
+    if water then
+        UI.raw(cost.waterNumber, ClientMath.formatAmount(water))
+        cost.waterNumber.TextColor3 = if short.water then L.red else L.white
+    end
+    if days then
+        UI.msg(cost.days, Msg.count("unit.day", ClientMath.wholeNumber(days)))
+    end
+    local hasCost = energy ~= nil or water ~= nil or days ~= nil
+    cost.row.Visible = hasCost
+    entry.lock.Visible = lock ~= nil
+    if lock then
+        UI.msg(entry.lock, lock)
+    else
+        UI.msg(entry.lock, nil)
+    end
+
+    -- 줄 수에 맞춘 패널 높이. 바뀌면 다시 쌓는다
+    local textHeight = (if entry.object.Visible then OBJECT_ROW else 0)
+        + ACTION_ROW
+        + (if hasCost then COST_ROW else 0)
+        + (if lock then LOCK_ROW else 0)
+    local height = math.max(PANEL_HEIGHT, textHeight + 2 * TEXT_PAD)
+    if height ~= entry.height then
+        entry.height = height
+        entry.panel.Size = UDim2.new(1, 0, 0, height)
+        entry.holdBar.root.Position = UDim2.fromOffset(0, height + BAR_GAP)
+        entry.group.Size = UDim2.fromOffset(PANEL_WIDTH, height + BAR_GAP + BAR_HEIGHT)
+        if active[prompt] == entry then
+            relayout()
+        end
+    end
+end
+
+-- 건설비 줄 (아이콘 + 숫자 묶음 둘, 일수). 글자는 refreshTexts가 채운다
+local function makeCostRow()
+    local function amount(kind, layoutOrder)
+        local icon = Icons.resource(kind, COST_ICON)
+        icon.LayoutOrder = 1
+        local number = UI.create("TextLabel", {
+            Name = "Number",
+            LayoutOrder = 2,
+            Size = UDim2.fromOffset(0, COST_ROW),
+            AutomaticSize = Enum.AutomaticSize.X,
+            FontFace = UI.RoundHeavy,
+            TextSize = 16,
+            TextColor3 = L.white,
+            Text = "",
+        }, { UI.worldStroke() })
+        local holder = UI.create("Frame", {
+            Name = "Cost_" .. kind,
+            LayoutOrder = layoutOrder,
+            Size = UDim2.fromOffset(0, COST_ROW),
+            AutomaticSize = Enum.AutomaticSize.X,
+            BackgroundTransparency = 1,
+            Visible = false,
+        }, {
+            UI.create("UIListLayout", {
+                FillDirection = Enum.FillDirection.Horizontal,
+                Padding = UDim.new(0, 3),
+                SortOrder = Enum.SortOrder.LayoutOrder,
+                VerticalAlignment = Enum.VerticalAlignment.Center,
+            }),
+            icon,
+            number,
+        })
+        return holder, number
+    end
+    local energy, energyNumber = amount("energy", 1)
+    local water, waterNumber = amount("water", 2)
+    local days = UI.create("TextLabel", {
+        Name = "Days",
+        LayoutOrder = 3,
+        Size = UDim2.fromOffset(0, COST_ROW),
+        AutomaticSize = Enum.AutomaticSize.X,
+        Font = UI.FontBold,
+        TextSize = 14,
+        TextColor3 = L.label,
+        Text = "",
+        Visible = false,
+    }, { UI.worldStroke() })
+    local row = UI.create("Frame", {
+        Name = "CostRow",
+        LayoutOrder = 3,
+        Size = UDim2.new(1, 0, 0, COST_ROW),
+        BackgroundTransparency = 1,
+        Visible = false,
+    }, {
+        UI.create("UIListLayout", {
+            FillDirection = Enum.FillDirection.Horizontal,
+            Padding = UDim.new(0, 10),
+            SortOrder = Enum.SortOrder.LayoutOrder,
+            VerticalAlignment = Enum.VerticalAlignment.Center,
+        }),
+        energy,
+        water,
+        days,
+    })
+    return {
+        row = row,
+        energy = energy,
+        energyNumber = energyNumber,
+        water = water,
+        waterNumber = waterNumber,
+        days = days,
+    }
 end
 
 local function destroyEntry(prompt, entry)
@@ -222,7 +392,7 @@ local function show(prompt, inputType)
     local objectLabel = UI.create("TextLabel", {
         Name = "ObjectText",
         LayoutOrder = 1,
-        Size = UDim2.new(1, 0, 0, 18),
+        Size = UDim2.new(1, 0, 0, OBJECT_ROW),
         Font = UI.Font,
         TextColor3 = L.label,
         Text = "",
@@ -232,13 +402,26 @@ local function show(prompt, inputType)
     local actionLabel = UI.create("TextLabel", {
         Name = "ActionText",
         LayoutOrder = 2,
-        Size = UDim2.new(1, 0, 0, 26),
+        Size = UDim2.new(1, 0, 0, ACTION_ROW),
         Font = UI.FontBold,
         TextColor3 = L.white,
         Text = "",
         TextXAlignment = Enum.TextXAlignment.Left,
     }, { UI.worldStroke() })
     UI.scaledText(actionLabel, 20, 12)
+    local cost = makeCostRow()
+    local lockLabel = UI.create("TextLabel", {
+        Name = "LockText",
+        LayoutOrder = 4,
+        Size = UDim2.new(1, 0, 0, LOCK_ROW),
+        Font = UI.FontBold,
+        TextColor3 = L.orange,
+        Text = "",
+        TextWrapped = true,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        Visible = false,
+    }, { UI.worldStroke() })
+    UI.scaledText(lockLabel, 13, 9)
 
     local keyBox = UI.create("Frame", {
         Name = "KeyIcon",
@@ -271,10 +454,12 @@ local function show(prompt, inputType)
             }),
             objectLabel,
             actionLabel,
+            cost.row,
+            lockLabel,
         }),
     })
     local holdBar = UI.progressBar(L.mint, BAR_HEIGHT)
-    holdBar.root.Position = UDim2.fromOffset(0, PANEL_HEIGHT + 4)
+    holdBar.root.Position = UDim2.fromOffset(0, PANEL_HEIGHT + BAR_GAP)
     holdBar.root.Visible = prompt.HoldDuration > 0
 
     local scale = UI.create("UIScale", { Scale = 0.9 })
@@ -282,7 +467,7 @@ local function show(prompt, inputType)
         Name = "Group",
         AnchorPoint = Vector2.new(0.5, 0),
         Position = UDim2.new(0.5, 0, 0.5, ANCHOR_GAP),
-        Size = UDim2.fromOffset(PANEL_WIDTH, PANEL_HEIGHT + 4 + BAR_HEIGHT),
+        Size = UDim2.fromOffset(PANEL_WIDTH, PANEL_HEIGHT + BAR_GAP + BAR_HEIGHT),
         BackgroundTransparency = 1,
         GroupTransparency = 1,
     }, { scale, panel, holdBar.root })
@@ -295,7 +480,7 @@ local function show(prompt, inputType)
         ResetOnSpawn = false,
         Size = UDim2.fromOffset(
             PANEL_WIDTH + 20,
-            2 * (ANCHOR_GAP + (MAX_VISIBLE - 1) * STACK_STEP + PANEL_HEIGHT + 4 + BAR_HEIGHT + 20)
+            2 * (ANCHOR_GAP + MAX_VISIBLE * (MAX_PANEL_HEIGHT + BAR_GAP + BAR_HEIGHT) + 20)
         ),
         StudsOffsetWorldSpace = Vector3.new(0, extra, 0),
         Active = true,
@@ -308,6 +493,10 @@ local function show(prompt, inputType)
         scale = scale,
         object = objectLabel,
         action = actionLabel,
+        cost = cost,
+        lock = lockLabel,
+        panel = panel,
+        height = PANEL_HEIGHT,
         keyBox = keyBox,
         holdBar = holdBar,
         holdTween = nil,
@@ -324,6 +513,9 @@ local function show(prompt, inputType)
         refreshTexts(prompt, entry)
     end
     for _, name in ipairs({ "ActionKey", "ObjectKey", "ActionArgs", "ObjectArgs", "CooldownUntil" }) do
+        table.insert(entry.conns, prompt:GetAttributeChangedSignal(name):Connect(refresh))
+    end
+    for _, name in ipairs(COST_ATTRIBUTES) do
         table.insert(entry.conns, prompt:GetAttributeChangedSignal(name):Connect(refresh))
     end
     -- PromptHidden 없이 지워지는 프롬프트(재시작 때 기지 다시 놓기)도 정리한다
@@ -402,6 +594,18 @@ end
 function PromptUI.init(_ctx)
     ProximityPromptService.PromptShown:Connect(show)
 
+    -- 자원이 바뀌면 건설비 숫자 색을 다시 맞춘다
+    Session.changed:Connect(function(what)
+        if what ~= "state" then
+            return
+        end
+        for prompt, entry in pairs(active) do
+            if entry.alive and entry.cost.row.Visible then
+                refreshTexts(prompt, entry)
+            end
+        end
+    end)
+
     ProximityPromptService.PromptHidden:Connect(function(prompt)
         local entry = active[prompt]
         if entry then
@@ -436,6 +640,39 @@ function PromptUI.init(_ctx)
             resetHold(entry)
         end
     end)
+end
+
+-- 화면에 보이는 프롬프트 패널의 화면 사각형 { x0, y0, x1, y1 } (ScreenGui 좌표, 위쪽 inset 제외).
+-- 건물 안내 카드가 프롬프트를 가리지 않게 쓴다 (BuildingInfoUI)
+function PromptUI.screenRects()
+    local rects = {}
+    local camera = workspace.CurrentCamera
+    if not camera then
+        return rects
+    end
+    for _, entry in pairs(active) do
+        local gui = entry.gui
+        local adornee = gui and gui.Adornee
+        if entry.alive and entry.slot and gui.Enabled and adornee then
+            local base = if adornee:IsA("BasePart")
+                then adornee.Position
+                elseif adornee:IsA("Attachment") then adornee.WorldPosition
+                else nil
+            if base then
+                local point, onScreen = camera:WorldToScreenPoint(base + gui.StudsOffsetWorldSpace)
+                if onScreen then
+                    local top = point.Y + (entry.offsetY or ANCHOR_GAP)
+                    table.insert(rects, {
+                        x0 = point.X - PANEL_WIDTH / 2,
+                        y0 = top,
+                        x1 = point.X + PANEL_WIDTH / 2,
+                        y1 = top + stackHeight(entry),
+                    })
+                end
+            end
+        end
+    end
+    return rects
 end
 
 return PromptUI

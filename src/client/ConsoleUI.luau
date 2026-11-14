@@ -458,6 +458,43 @@ local function buildSide()
         Parent = siteSection,
     }, { UI.list(Enum.FillDirection.Vertical, 8) })
     side.pinBox = pinBox
+    -- 관제사 역할 미션(길잡이) 진행: 배지 이름 + n / goal 또는 완료 (C4, 멀티만)
+    side.guideBadge = UI.create("TextLabel", {
+        Name = "Badge",
+        LayoutOrder = 1,
+        Size = UDim2.fromOffset(0, 20),
+        AutomaticSize = Enum.AutomaticSize.X,
+        FontFace = UI.RoundHeavy,
+        TextSize = 15,
+        TextColor3 = L.gold,
+    })
+    UI.msg(side.guideBadge, "rolemission.guide.badge")
+    side.guideProgress = UI.create("TextLabel", {
+        Name = "Progress",
+        LayoutOrder = 2,
+        Size = UDim2.fromOffset(0, 20),
+        AutomaticSize = Enum.AutomaticSize.X,
+        FontFace = UI.MonoBold,
+        TextSize = 15,
+        TextColor3 = L.white,
+    })
+    side.guideRow = UI.create("Frame", {
+        Name = "Guide",
+        LayoutOrder = 0,
+        Size = UDim2.new(1, 0, 0, 20),
+        BackgroundTransparency = 1,
+        Visible = false,
+        Parent = pinBox,
+    }, {
+        UI.create("UIListLayout", {
+            FillDirection = Enum.FillDirection.Horizontal,
+            Padding = UDim.new(0, 8),
+            SortOrder = Enum.SortOrder.LayoutOrder,
+            VerticalAlignment = Enum.VerticalAlignment.Center,
+        }),
+        side.guideBadge,
+        side.guideProgress,
+    })
     side.pinHint = textLabel({ Name = "Hint", LayoutOrder = 1, TextColor3 = L.dim })
     UI.msg(side.pinHint, "map.pin.hint")
     side.pinHint.Parent = pinBox
@@ -558,7 +595,28 @@ local function buildSide()
     end)
 end
 
+-- 관제사 길잡이 미션 진행 (핀 상자 맨 위)
+local function refreshGuide(state)
+    local mission = ClientMath.roleMissionOf(state, Players.LocalPlayer.UserId)
+    local show = mission ~= nil and mission.id == "guide"
+    side.guideRow.Visible = show
+    if not show then
+        return
+    end
+    if mission.done then
+        UI.msg(side.guideProgress, "rolemission.done")
+        side.guideProgress.TextColor3 = L.mint
+    else
+        UI.msg(
+            side.guideProgress,
+            { key = "fmt.fraction", args = { value = mission.progress, max = mission.goal } }
+        )
+        side.guideProgress.TextColor3 = L.white
+    end
+end
+
 local function refreshSite(state)
+    refreshGuide(state)
     local site = selectedSite and iceEntry(state, selectedSite)
     local canMap = Session.canUseMap()
     local gst = Session.isGst()

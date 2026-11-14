@@ -395,9 +395,77 @@ local function refreshRestart()
     end
 end
 
+-- 역할 미션 배지 줄 (C4, 멀티만): 끝났으면 체크 + 배지 이름 + "완료!", 아니면 배지 이름 + "못 끝냄" + n / goal
+local MEMBER_HEIGHT = 40
+local BADGE_HEIGHT = 20
+
+local function badgeRow(parent, mission)
+    local row = UI.create("Frame", {
+        Name = "RoleMission",
+        Position = UDim2.fromOffset(6, MEMBER_HEIGHT - 2),
+        Size = UDim2.new(1, -12, 0, BADGE_HEIGHT),
+        BackgroundTransparency = 1,
+        Parent = parent,
+    }, {
+        UI.create("UIListLayout", {
+            FillDirection = Enum.FillDirection.Horizontal,
+            Padding = UDim.new(0, 6),
+            SortOrder = Enum.SortOrder.LayoutOrder,
+            VerticalAlignment = Enum.VerticalAlignment.Center,
+        }),
+    })
+    if mission.done then
+        UI.checkMark(L.mint, { LayoutOrder = 1 }).Parent = row
+    end
+    local badge = UI.create("TextLabel", {
+        Name = "Badge",
+        LayoutOrder = 2,
+        Size = UDim2.fromOffset(0, BADGE_HEIGHT),
+        AutomaticSize = Enum.AutomaticSize.X,
+        FontFace = UI.RoundHeavy,
+        TextSize = 14,
+        TextColor3 = if mission.done then L.mint else L.label,
+        Parent = row,
+    })
+    UI.msg(badge, ClientMath.ROLE_MISSION_KEYS[mission.id].badge)
+    local tag = UI.create("TextLabel", {
+        Name = "Tag",
+        LayoutOrder = 3,
+        Size = UDim2.fromOffset(0, BADGE_HEIGHT),
+        AutomaticSize = Enum.AutomaticSize.X,
+        Font = UI.FontBold,
+        TextSize = 13,
+        TextColor3 = if mission.done then L.mint else L.dim,
+        Parent = row,
+    })
+    UI.msg(tag, if mission.done then "rolemission.done" else "rolemission.result.not_done")
+    if not mission.done then
+        local progress = UI.create("TextLabel", {
+            Name = "Progress",
+            LayoutOrder = 4,
+            Size = UDim2.fromOffset(0, BADGE_HEIGHT),
+            AutomaticSize = Enum.AutomaticSize.X,
+            FontFace = UI.MonoBold,
+            TextSize = 13,
+            TextColor3 = L.dim,
+            Parent = row,
+        })
+        UI.msg(
+            progress,
+            { key = "fmt.fraction", args = { value = mission.progress, max = mission.goal } }
+        )
+    end
+end
+
 local function refreshCrew(crew)
     clearChildren(crewTable)
     UI.list(Enum.FillDirection.Vertical, 2).Parent = crewTable
+    local missions = {}
+    local anyMission = false
+    for index, member in ipairs(crew or {}) do
+        missions[index] = ClientMath.normalizeRoleMission(member.roleMission)
+        anyMission = anyMission or missions[index] ~= nil
+    end
     local headerRow = UI.create("Frame", {
         Name = "Header",
         LayoutOrder = 1,
@@ -423,7 +491,12 @@ local function refreshCrew(crew)
         local line = UI.create("Frame", {
             Name = "Member" .. index,
             LayoutOrder = 1 + index,
-            Size = UDim2.new(1, 0, 0, 40),
+            Size = UDim2.new(
+                1,
+                0,
+                0,
+                if anyMission then MEMBER_HEIGHT + BADGE_HEIGHT else MEMBER_HEIGHT
+            ),
             BackgroundColor3 = L.white,
             BackgroundTransparency = if index % 2 == 0 then 0.95 else 1,
             Parent = crewTable,
@@ -440,6 +513,9 @@ local function refreshCrew(crew)
             Parent = line,
         })
         UI.raw(nameLabel, tostring(member.name or "?"))
+        if member.userId ~= nil and member.userId == Players.LocalPlayer.UserId then
+            nameLabel.TextColor3 = L.mint -- 내 줄 (GameOver crew[i].userId)
+        end
         local roleLabel = UI.create("TextLabel", {
             Name = "Role",
             Position = UDim2.fromOffset(6, 21),
@@ -463,7 +539,27 @@ local function refreshCrew(crew)
                 Parent = line,
             })
             UI.raw(value, tostring(ClientMath.wholeNumber(member[column.field])))
+            value.Size = UDim2.new(colWidth, 0, 0, MEMBER_HEIGHT)
         end
+        if missions[index] then
+            badgeRow(line, missions[index])
+        end
+    end
+    -- 역할 미션은 점수와 무관하다는 안내 (멀티만)
+    if anyMission then
+        local note = UI.create("TextLabel", {
+            Name = "RoleMissionNote",
+            LayoutOrder = 2 + #(crew or {}),
+            Size = UDim2.fromScale(1, 0),
+            AutomaticSize = Enum.AutomaticSize.Y,
+            Font = UI.Font,
+            TextSize = 13,
+            TextColor3 = L.dim,
+            TextWrapped = true,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            Parent = crewTable,
+        }, { UI.padding({ 4, 0, 6, 6 }) })
+        UI.msg(note, "rolemission.note")
     end
 end
 

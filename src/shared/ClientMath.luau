@@ -13,6 +13,11 @@
 --   nextRisk, rushPreview: 서둘러 가기 미리보기 근사 (서버 값이 없을 때만)
 --   rankRows: 순위표 상위 N과 "내 순위" 한 줄
 --   normalizeRoles, roleCounts, roleCapacity: RoleUpdate 정리와 역할 자리 수 (서버 Roles와 같은 규칙)
+--   costShortfall: 프롬프트 건설비 줄에서 빨갛게 보일 자원 (Affordable, 지금 자원)
+--   roverChargeView, batteryMsg, chargeLabel: 로버 충전 표시 (HUD 칩, 로버 머리 위 표지, 안내 카드)
+--   rectDistance, pickNearest, buildingInfo: 건물 안내 카드 (가장 가까운 건물, 상태 줄, 하루 유지비)
+--   roleMissionOf, normalizeRoleMission, scoutTargets: 멀티 역할 미션 (HUD 카드, 정찰 표시, 결과 배지)
+-- 화면 문구는 Msg 모양 표({ key, args })로만 돌려준다. 키는 i18n/strings.csv에 있어야 한다(lint 검사).
 
 local ClientMath = {}
 
@@ -300,6 +305,519 @@ function ClientMath.roleCapacity(role: string, n: number): number
         return if n >= 3 then 1 else 0
     end
     return 0
+end
+
+-- 프롬프트 건설비 ------------------------------------------------------------------
+
+-- 비용과 유지비 숫자 글자. 소수 둘째 자리까지 반올림하고 끝의 0을 뗀다 (60, 3.6, 0.25). 잘못된 값은 "0"
+function ClientMath.formatAmount(value: any): string
+    if not isNumber(value) then
+        return "0"
+    end
+    local rounded = math.round(value * 100) / 100
+    if rounded == math.floor(rounded) then
+        return tostring(math.floor(rounded))
+    end
+    local text = string.format("%.2f", rounded)
+    return (string.gsub(text, "0+$", ""))
+end
+
+export type Shortfall = { energy: boolean, water: boolean }
+
+-- 건설비 줄에서 빨갛게 보일 자원. affordable: 서버 Attribute(true | false | nil), resources: 지금 자원(없으면 nil),
+-- locked: 잠김 사유(LockMsg)가 있는지. 서버가 살 수 있다고 하면 아무것도 빨갛지 않다(비상 패널처럼 규칙 예외가 있다).
+-- 살 수 없으면 모자란 자원만 빨갛게, 자원을 모르거나 모자란 것이 없으면 비용이 있는 자원 전부.
+-- 단, 잠김 때문에 못 사는 것이고 자원은 충분하면 빨갛게 하지 않는다(잠김 줄이 이유를 말한다).
+function ClientMath.costShortfall(
+    cost: { energy: any, water: any },
+    resources: any,
+    affordable: any,
+    locked: boolean?
+): Shortfall
+    local out = { energy = false, water = false }
+    if affordable == true then
+        return out
+    end
+    local e = if isNumber(cost.energy) then cost.energy else 0
+    local w = if isNumber(cost.water) then cost.water else 0
+    local known = type(resources) == "table"
+    if known then
+        out.energy = e > 0 and isNumber(resources.energy) and resources.energy + EPSILON < e
+        out.water = w > 0 and isNumber(resources.water) and resources.water + EPSILON < w
+    end
+    if affordable == false and not out.energy and not out.water and not (locked and known) then
+        out.energy = e > 0
+        out.water = w > 0
+    end
+    return out
+end
+
+-- 로버 충전 ------------------------------------------------------------------------
+
+export type ChargeView = {
+    mode: string, -- "hidden" | "driving" | "away" | "charging" | "full" | "blocked"
+    percent: number, -- 0..100 정수 (내림, 가득 찬 것만 100)
+    reason: string?, -- mode "blocked"일 때 "energy" | "pad" | "seat"
+}
+
+local CHARGE_REASONS = { energy = true, pad = true, seat = true }
+-- 서버가 보내는 막힌 이유 문구 키 -> 이유 (섀시 ChargeBlocked 문자열, StateUpdate rover.chargeBlocked Msg)
+local BLOCKED_KEYS = {
+    energy = "hud.rover.charge_blocked_energy",
+    pad = "hud.rover.charge_blocked_pad",
+    seat = "hud.rover.charge_blocked_seat",
+}
+local REASON_OF_KEY = {
+    [BLOCKED_KEYS.energy] = "energy",
+    [BLOCKED_KEYS.pad] = "pad",
+    [BLOCKED_KEYS.seat] = "seat",
+}
+
+-- 막힌 이유 값(이유 이름, 문구 키, 또는 { key } Msg)을 이유 이름으로. 모르면 nil
+function ClientMath.chargeReason(value: any): string?
+    if type(value) == "table" then
+        value = value.key
+    end
+    if type(value) ~= "string" then
+        return nil
+    end
+    if CHARGE_REASONS[value] then
+        return value
+    end
+    return REASON_OF_KEY[value]
+end
+
+-- 로버 충전 표시 상태. info:
+--   status(rover.state), atBase, charging, battery, batteryMax: StateUpdate rover
+--   percent(섀시 BatteryPercent), blocked(rover.chargeBlocked Msg 또는 섀시 ChargeBlocked 문구 키): 서버 값이 있으면 우선
+--   energy(기지 에너지), keep(MANUAL_DRIVE.chargeKeepEnergy), localDriving(내가 운전석)
+--   serverReasons: 서버가 충전판 위의 막힌 이유(energy, seat)를 보내는지 (rover.batteryPercent가 있으면 true)
+-- 서버가 이유를 보내는데 비어 있으면 충전판 밖(pad)이다. 서버가 이유를 모르는 옛 모양이면 짐작한다:
+-- 누가 타고 있으면 seat, 기지 에너지가 keep 이하면 energy, 아니면 pad
+function ClientMath.roverChargeView(info: { [string]: any }): ChargeView
+    local status = info.status
+    if status == "fsd" or status == "broken" then
+        return { mode = "hidden", percent = 0, reason = nil }
+    end
+    local percent
+    if isNumber(info.percent) then
+        percent = math.clamp(math.floor(info.percent + EPSILON), 0, 100)
+    else
+        percent = math.floor(ClientMath.ratio(info.battery, info.batteryMax) * 100 + EPSILON)
+    end
+    local full = percent >= 100
+        or (
+            isNumber(info.battery)
+            and isNumber(info.batteryMax)
+            and info.batteryMax > 0
+            and info.battery >= info.batteryMax - EPSILON
+        )
+    if full then
+        percent = 100
+    end
+    if info.localDriving == true then
+        return { mode = "driving", percent = percent, reason = nil }
+    end
+    if info.charging == true then
+        return { mode = "charging", percent = percent, reason = nil }
+    end
+    if info.atBase ~= true then
+        return { mode = "away", percent = percent, reason = nil }
+    end
+    if full then
+        return { mode = "full", percent = percent, reason = nil }
+    end
+    local reason = ClientMath.chargeReason(info.blocked) or "pad"
+    if reason == "pad" and info.serverReasons ~= true and info.blocked == nil then
+        -- 옛 모양: 서버가 이유를 보내지 않으니 짐작한다
+        if status == "driving" then
+            reason = "seat"
+        elseif
+            isNumber(info.energy)
+            and isNumber(info.keep)
+            and info.energy <= info.keep + EPSILON
+        then
+            reason = "energy"
+        end
+    end
+    return { mode = "blocked", percent = percent, reason = reason }
+end
+
+-- "Battery 72%" (hud.battery.value에 unit.percent를 넣는다)
+function ClientMath.batteryMsg(percent: number): { [string]: any }
+    return {
+        key = "hud.battery.value",
+        args = { n = { key = "unit.percent", args = { n = ClientMath.wholeNumber(percent) } } },
+    }
+end
+
+-- 충전 상태 한 줄 (없으면 nil). long이면 에너지 부족을 "기지 에너지가 keep 이하이면 멈춘다"로 풀어 쓴다
+function ClientMath.chargeLabel(view: ChargeView, keep: number?, long: boolean?): { [string]: any }?
+    if view.mode == "charging" then
+        return { key = "hud.battery.charging" }
+    elseif view.mode == "full" then
+        return { key = "hud.battery.full" }
+    elseif view.mode == "blocked" then
+        if view.reason == "energy" and long then
+            return {
+                key = "hud.battery.energy_hint",
+                args = { keep = ClientMath.wholeNumber(keep) },
+            }
+        end
+        if view.reason == "energy" then
+            return { key = BLOCKED_KEYS.energy, args = { keep = ClientMath.wholeNumber(keep) } }
+        end
+        return { key = BLOCKED_KEYS[view.reason or "pad"] or BLOCKED_KEYS.pad }
+    end
+    return nil
+end
+
+-- 건물 안내 카드 ----------------------------------------------------------------------
+
+-- 화면 사각형 { x0, y0, x1, y1 } 두 개가 겹치는지 (margin만큼 넓혀서 본다)
+function ClientMath.rectsOverlap(
+    a: { [string]: number },
+    b: { [string]: number },
+    margin: number?
+): boolean
+    local m = margin or 0
+    return a.x0 - m < b.x1 and b.x0 - m < a.x1 and a.y0 - m < b.y1 and b.y0 - m < a.y1
+end
+
+-- 가로세로 반폭 halfX, halfZ인 사각형(로컬 좌표, 중심 0)까지 수평 거리. 안이면 0
+function ClientMath.rectDistance(
+    localX: number,
+    localZ: number,
+    halfX: number,
+    halfZ: number
+): number
+    local dx = math.max(math.abs(localX) - math.max(halfX, 0), 0)
+    local dz = math.max(math.abs(localZ) - math.max(halfZ, 0), 0)
+    return math.sqrt(dx * dx + dz * dz)
+end
+
+-- 가장 가까운 건물 id. distances: { [id]: 거리 }. maxDistance 안의 가장 가까운 것.
+-- 지금 보이는 카드(currentId)는 maxDistance + hysteresis 안에 있고 1등보다 hysteresis 넘게 멀어지지 않으면 유지한다
+-- (두 건물 사이에서 카드가 깜빡이지 않게). 같은 거리면 id 순서로 정한다
+function ClientMath.pickNearest(
+    distances: { [string]: number },
+    maxDistance: number,
+    currentId: string?,
+    hysteresis: number?
+): (string?, number?)
+    local margin = hysteresis or 0
+    local bestId, bestDistance = nil, math.huge
+    for id, d in distances do
+        if
+            isNumber(d)
+            and (d < bestDistance or (d == bestDistance and bestId ~= nil and id < bestId))
+        then
+            bestId, bestDistance = id, d
+        end
+    end
+    local current = if currentId then distances[currentId] else nil
+    if currentId and isNumber(current) then
+        local d = current :: number
+        if d <= maxDistance + margin and d <= bestDistance + margin then
+            return currentId, d
+        end
+    end
+    if bestId and bestDistance <= maxDistance then
+        return bestId, bestDistance
+    end
+    return nil, nil
+end
+
+export type BuildingInfo = {
+    status: { [string]: any }?, -- 상태 줄 Msg
+    tone: string, -- 색: "neutral" | "locked" | "available" | "building" | "inspecting" | "idle" | "active" | "paused" | "stalled"
+    detail: { [string]: any }?, -- 덧붙이는 줄 Msg (잠김 사유, 수확, 정지 이유, 충전)
+    upkeep: { energy: number, water: number }?, -- 하루 유지비 (없거나 0이면 nil)
+}
+
+local FACILITY_STATUS_KEYS = {
+    locked = "map.fac.status.locked",
+    available = "map.fac.status.available",
+    active = "map.fac.status.active",
+    paused = "map.fac.status.paused",
+    idle = "map.fac.status.idle",
+}
+local FACILITY_COUNT_KEYS = {
+    building = "map.fac.status.building",
+    inspecting = "map.fac.status.inspecting",
+}
+local STALL_DETAIL_KEYS = { energy = "hud.stalled.energy", water = "hud.stalled.water" }
+local FACILITY_INFO_IDS = {
+    farm = true,
+    led = true,
+    nutrient = true,
+    hydroponics = true,
+    pipe = true,
+}
+local UPGRADE_INFO_IDS = { led = true, nutrient = true, hydroponics = true }
+
+local function isMsgTable(value: any): boolean
+    return type(value) == "table" and type(value.key) == "string" and value.key ~= ""
+end
+
+-- 시설 화면 상태 (정의 id로). 첫 인스턴스 id는 정의 id와 같고 둘째부터 pipe2처럼 숫자가 붙는다
+local function facilityView(state: any, defId: string): any
+    local list = if type(state.facilities) == "table" then state.facilities else {}
+    local direct = list[defId]
+    if type(direct) == "table" then
+        return direct
+    end
+    local bestId, best = nil, nil
+    for id, f in list do
+        if
+            type(id) == "string"
+            and type(f) == "table"
+            and string.match(id, "^" .. defId .. "%d+$")
+            and (bestId == nil or id < bestId)
+        then
+            bestId, best = id, f
+        end
+    end
+    return best
+end
+
+local function facilityStatusMsg(status: string, daysLeft: any): { [string]: any }
+    local countKey = FACILITY_COUNT_KEYS[status]
+    if countKey then
+        return { key = countKey, args = { count = ClientMath.wholeNumber(daysLeft) } }
+    end
+    return { key = FACILITY_STATUS_KEYS[status] or FACILITY_STATUS_KEYS.locked }
+end
+
+-- 하루 유지비. 멈춤이면 없다. 서버가 보낸 지금 유지비(LED 전력, 영양분 절약 반영)가 있으면 그것, 아니면 정의 값
+local function upkeepOf(view: any, def: any, status: string?): { energy: number, water: number }?
+    if status == "paused" then
+        return nil
+    end
+    local e, w = 0, 0
+    local live = if type(view) == "table" and type(view.upkeep) == "table" then view.upkeep else nil
+    local liveE = if live and isNumber(live.energy) then live.energy else 0
+    local liveW = if live and isNumber(live.water) then live.water else 0
+    if liveE > 0 or liveW > 0 then
+        e, w = liveE, liveW
+    elseif type(def) == "table" and type(def.upkeep) == "table" then
+        e = if isNumber(def.upkeep.energy) then def.upkeep.energy else 0
+        w = if isNumber(def.upkeep.water) then def.upkeep.water else 0
+    end
+    if e <= 0 and w <= 0 then
+        return nil
+    end
+    return { energy = e, water = w }
+end
+
+local function stallDetail(state: any): { [string]: any }
+    return { key = STALL_DETAIL_KEYS[state.stallReason] or "hud.stalled" }
+end
+
+-- 건물 안내 카드의 상태. id: "lander" | "airlock" | "solar" | "farm" | "led" | "nutrient" | "hydroponics" | "tank"
+-- | "pipe" | "roverpark" | "exit". state: 마지막 StateUpdate, missionDef: MissionConfig.MISSIONS[id],
+-- extra: { keep = MANUAL_DRIVE.chargeKeepEnergy, localDriving = 내가 운전석, percent?, blocked? } (로버 주차장)
+function ClientMath.buildingInfo(
+    id: string,
+    rawState: any,
+    missionDef: any,
+    extra: { [string]: any }?
+): BuildingInfo
+    local out: BuildingInfo = { status = nil, tone = "neutral", detail = nil, upkeep = nil }
+    local state = if type(rawState) == "table" then rawState else {}
+    local defs = if type(missionDef) == "table" and type(missionDef.facilities) == "table"
+        then missionDef.facilities
+        else {}
+    local opts = extra or {}
+
+    if id == "airlock" then
+        local airlock = if type(state.airlock) == "table" then state.airlock else {}
+        local status = if type(airlock.status) == "string" then airlock.status else "idle"
+        out.status = facilityStatusMsg(status, airlock.daysLeft)
+        out.tone = status
+        if airlock.stalled == true then
+            out.tone = "stalled"
+            out.detail = stallDetail(state)
+        end
+        out.upkeep = upkeepOf(nil, defs.airlock, status)
+    elseif FACILITY_INFO_IDS[id] then
+        local view = facilityView(state, id)
+        if view == nil then
+            out.upkeep = upkeepOf(nil, defs[id], nil)
+            return out
+        end
+        local status = if type(view.status) == "string" then view.status else "locked"
+        out.status = facilityStatusMsg(status, view.daysLeft)
+        out.tone = status
+        if status == "locked" and isMsgTable(view.unlockMsg) then
+            out.detail = view.unlockMsg
+        elseif status == "active" then
+            if id == "farm" and isNumber(view.nextHarvestIn) then
+                out.detail = {
+                    key = "map.fac.harvest",
+                    args = { count = ClientMath.wholeNumber(view.nextHarvestIn) },
+                }
+            elseif id == "pipe" and isNumber(view.nextDeliveryIn) then
+                out.detail = {
+                    key = "info.pipe.next",
+                    args = { count = ClientMath.wholeNumber(view.nextDeliveryIn) },
+                }
+            elseif UPGRADE_INFO_IDS[id] then
+                -- 업그레이드는 그린하우스가 돌아갈 때만 효과와 유지비가 있다
+                local farm = facilityView(state, "farm")
+                if type(farm) ~= "table" or farm.status ~= "active" or farm.stalled == true then
+                    out.tone = "paused"
+                    out.detail = { key = "info.status.farm_off" }
+                end
+            end
+        end
+        if view.stalled == true then
+            out.tone = "stalled"
+            out.detail = stallDetail(state)
+        end
+        out.upkeep = upkeepOf(view, defs[id], status)
+    elseif id == "solar" then
+        local panels = state.panels
+        if type(panels) == "table" and isNumber(panels.total) then
+            local installed = ClientMath.wholeNumber(panels.installed)
+            local total = ClientMath.wholeNumber(panels.total)
+            out.status =
+                { key = "info.solar_field.status", args = { installed = installed, total = total } }
+            out.tone = if installed >= total then "active" else "available"
+        end
+    elseif id == "tank" then
+        local pipe = facilityView(state, "pipe")
+        if type(pipe) == "table" and pipe.status == "locked" and isMsgTable(pipe.unlockMsg) then
+            out.detail = pipe.unlockMsg
+            out.tone = "locked"
+        end
+    elseif id == "roverpark" then
+        local rover = state.rover
+        if type(rover) == "table" then
+            if rover.state == "broken" then
+                out.status = { key = "hud.rover.broken" }
+                out.tone = "stalled"
+            elseif rover.state == "fsd" then
+                local fsd = if type(rover.fsd) == "table" then rover.fsd else {}
+                out.status = {
+                    key = if fsd.recovering
+                        then "hud.rover.recovering"
+                        elseif fsd.stoppedBy then "hud.rover.stopped"
+                        else "hud.rover.out",
+                }
+                out.tone = "building"
+            else
+                local resources = if type(state.resources) == "table" then state.resources else {}
+                local view = ClientMath.roverChargeView({
+                    status = rover.state,
+                    atBase = rover.atBase,
+                    charging = rover.charging,
+                    battery = rover.battery,
+                    batteryMax = rover.batteryMax,
+                    percent = if opts.percent ~= nil then opts.percent else rover.batteryPercent,
+                    blocked = if opts.blocked ~= nil then opts.blocked else rover.chargeBlocked,
+                    serverReasons = type(rover.batteryPercent) == "number",
+                    energy = resources.energy,
+                    keep = opts.keep,
+                    localDriving = opts.localDriving,
+                })
+                out.status = ClientMath.batteryMsg(view.percent)
+                out.detail = ClientMath.chargeLabel(view, opts.keep, true)
+                if view.mode == "away" then
+                    out.detail = { key = "map.rover.driving" }
+                end
+                out.tone = if view.mode == "charging"
+                    then "building"
+                    elseif view.mode == "full" then "active"
+                    elseif view.mode == "blocked" then (if view.reason == "energy"
+                        then "stalled"
+                        else "paused")
+                    else "neutral"
+            end
+        end
+    end
+    return out
+end
+
+-- 역할 미션 (멀티 전용, 점수와 무관) ------------------------------------------------
+
+-- 미션 id -> 문구 키 (리터럴 키 표, I18N_PLAN 4.2)
+ClientMath.ROLE_MISSION_KEYS = {
+    water = { badge = "rolemission.water.badge", desc = "rolemission.water.desc" },
+    panels = { badge = "rolemission.panels.badge", desc = "rolemission.panels.desc" },
+    guide = { badge = "rolemission.guide.badge", desc = "rolemission.guide.desc" },
+    scout = { badge = "rolemission.scout.badge", desc = "rolemission.scout.desc" },
+}
+
+export type RoleMission = {
+    id: string,
+    progress: number, -- 0..goal 정수
+    goal: number, -- 1 이상
+    done: boolean,
+    ratio: number, -- 0..1
+}
+
+-- 서버 역할 미션 한 줄을 화면용으로. 모르는 id나 잘못된 값이면 nil. 끝났으면 진행을 goal로 맞춘다
+function ClientMath.normalizeRoleMission(raw: any): RoleMission?
+    if
+        type(raw) ~= "table"
+        or type(raw.id) ~= "string"
+        or not ClientMath.ROLE_MISSION_KEYS[raw.id]
+    then
+        return nil
+    end
+    local goal = math.max(1, ClientMath.wholeNumber(raw.goal))
+    local progress = math.min(ClientMath.wholeNumber(raw.progress), goal)
+    local done = raw.done == true or progress >= goal
+    if done then
+        progress = goal
+    end
+    return { id = raw.id, progress = progress, goal = goal, done = done, ratio = progress / goal }
+end
+
+-- 그 플레이어의 역할 미션 (StateUpdate.roleMissions[tostring(userId)]). 솔로이거나 없으면 nil
+function ClientMath.roleMissionOf(state: any, userId: number?): RoleMission?
+    if type(state) ~= "table" or state.mode == "solo" or type(state.roleMissions) ~= "table" then
+        return nil
+    end
+    if userId == nil then
+        return nil
+    end
+    local list = state.roleMissions
+    local raw = list[tostring(userId)]
+    if raw == nil then
+        raw = list[userId]
+    end
+    return ClientMath.normalizeRoleMission(raw)
+end
+
+export type ScoutTarget = { x: number, z: number, key: string?, mark: string, radius: number? }
+
+-- 정찰 미션에서 아직 안 간 자리 (좌표가 있는 것만). 정찰이 아니거나 끝났으면 빈 목록.
+-- mark는 표시를 다시 만들지 않게 쓰는 이름 (좌표를 정수로 반올림), radius는 서버 방문 판정 거리(stud, 없으면 nil)
+function ClientMath.scoutTargets(raw: any): { ScoutTarget }
+    local out: { ScoutTarget } = {}
+    local mission = ClientMath.normalizeRoleMission(raw)
+    if not mission or mission.id ~= "scout" or mission.done or type(raw.targets) ~= "table" then
+        return out
+    end
+    for _, target in raw.targets do
+        if
+            type(target) == "table"
+            and target.visited ~= true
+            and isNumber(target.x)
+            and isNumber(target.z)
+        then
+            table.insert(out, {
+                x = target.x,
+                z = target.z,
+                key = if type(target.key) == "string" and target.key ~= "" then target.key else nil,
+                mark = string.format("%d,%d", math.round(target.x), math.round(target.z)),
+                radius = if isNumber(raw.radius) and raw.radius > 0 then raw.radius else nil,
+            })
+        end
+    end
+    return out
 end
 
 return ClientMath
