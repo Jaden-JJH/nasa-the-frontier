@@ -11,3 +11,6 @@ globalTypes.d.luau
 
 # oh-my-claudecode plugin state
 .omc/
+
+# local secrets (NASA API key etc.)
+.env
