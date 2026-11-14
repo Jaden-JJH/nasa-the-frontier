@@ -1,98 +1,88 @@
 --!nonstrict
--- 상황별 일회성 Tip 카드. 토스트(우상단, 사건 알림)와 미션 문구(상단 중앙, 목표)와 달리
--- 우측 하단에 뜬다(14차, 사용자 지시). 아래에서 올라오며 나타나고 여러 줄은 위로 자란다.
--- PC: 오른쪽 16, 아래 56(17차: 아래 12에 SettingsUI 체크 패널 높이 32가 있어 그 바로 위), 폭 360(가상 좌표, Layout 배율로 함께 커진다. 1080p는 1.25배).
--- 터치/낮은 화면(compact): 오른쪽 12px, 아래 230px(체크 패널은 아래 190px이라 그 바로 위, 부스터와 점프 버튼 위, 실제 px 기준).
--- 한 번에 하나, 대기열 순차 표시, 표시 사이 최소 3초 간격, 세션당 각 Tip 1회(재시작하면 초기화).
--- 문구는 Config.TIPS. 트리거는 전부 클라이언트 측(StateUpdate, OxygenUpdate, 탑승 이벤트).
--- 15차: 첫 폭풍 예고(state.event.kind == "solarStorm")에 storm, 첫 모듈 손상(modules.X.damaged)에 moduleDamage.
+-- 상황별 일회성 Tip 카드 (v2, 문구는 tip.* 키). 우측 하단에 아래에서 올라오며 뜬다(v1 14차 자리와 모양 유지).
+-- PC: 오른쪽 16, 아래 56(SettingsUI 패널 바로 위), 폭 360(가상 좌표). compact: 오른쪽 12px, 아래 230px(실제 px).
+-- 한 번에 하나, 대기열 순차 표시, 표시 사이 최소 3초, 판마다 각 Tip 1회(selecting이면 초기화).
+-- 트리거는 모두 클라이언트(StateUpdate, OxygenUpdate, 탑승, 우주 기상, 핀). 플레이 중에만 보인다.
+-- 언어가 바뀌면 지금 카드 글자도 다시 그린다(Localizer.bind).
 
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 
+local MissionConfig =
+    require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("MissionConfig"))
+
+local Layout = require(script.Parent.Layout)
 local RoverBoost = require(script.Parent.RoverBoost)
 local SoundFX = require(script.Parent.SoundFX)
-local Layout = require(script.Parent.Layout)
 local UI = require(script.Parent.UI)
 
 local TipUI = {}
 
 local CARD_WIDTH = 360 -- 가상 좌표(배율 적용 전)
-local BODY_TEXT_SIZE = 18 -- 본문. 1080p에서 22.5px
-local BADGE_TEXT_SIZE = 15
+local BODY_TEXT_SIZE = 17
+local BADGE_TEXT_SIZE = 14
 local FADE_IN = 0.3
-local HOLD = 6
+local HOLD = 7
 local FADE_OUT = 0.5
 local MIN_GAP = 3
-local RISE = 24 -- 등장 시 아래에서 올라오는 거리(px)
-local SINK = 12 -- 퇴장 시 아래로 가라앉는 거리(px)
-local PC_MARGIN = 16 -- PC: 오른쪽 여백(폭 계산에도 쓴다)
-local PC_BOTTOM = 56 -- PC: 아래 여백 = 체크 패널 아래 12 + 높이 32 + 간격 12
-local COMPACT_RIGHT = 12 -- 실제 px (부스터 버튼은 배율을 안 쓰므로 px로 맞춘다)
-local COMPACT_BOTTOM = 230 -- 실제 px. 체크 패널(아래 190, 높이 32) 바로 위. 부스터 버튼(하단 110~174)과 점프 버튼도 그 아래에 있다
-local COMPACT_SIDE_PAD = 24 -- 실제 px. compact 폭 = min(360, 뷰포트 폭 - 24)
+local RISE = 24
+local SINK = 12
+local PC_MARGIN = 16
+local PC_BOTTOM = 60 -- 설정 패널(아래 12, 높이 44) 바로 위
+local COMPACT_RIGHT = 12 -- 실제 px
+local COMPACT_BOTTOM = 240 -- 실제 px. 설정 패널(아래 190) 위
+local COMPACT_SIDE_PAD = 24
 local FALLBACK_VIEWPORT = Vector2.new(1280, 720)
 local TIP_SOUND_VOLUME = 0.3
+local PANELS_TIP_DELAY = 20 -- 첫 Tip(에어록) 뒤 패널 Tip까지
+local OXYGEN_TIP_BELOW = 50
+local LOW_THRESHOLD = MissionConfig.SCORE.lowThreshold
 
 local CREAM = Color3.fromRGB(245, 240, 225)
 local INK = Color3.fromRGB(40, 36, 28)
 local AMBER = Color3.fromRGB(255, 200, 40)
 local BASE_GRAY = Color3.fromRGB(120, 110, 90)
 
-local config
+-- 리터럴 키 표 (I18N_PLAN 4.2)
+local TIP_KEYS = {
+    airlock = "tip.airlock",
+    oxygen = "tip.oxygen",
+    console = "tip.console",
+    console_team = "tip.console_team",
+    pin = "tip.pin",
+    pause = "tip.pause",
+    rover_damage = "tip.rover_damage",
+    pipe = "tip.pipe",
+    boost = "tip.boost",
+    low_food = "tip.low_food",
+    low_water = "tip.low_water",
+    low_water_team = "tip.low_water_team",
+    sep = "tip.sep",
+    panels = "tip.panels",
+}
+
 local gui
 local tipRoot
 local group
 local textLabel
-local card
 
-local shown = {} -- { [key] = true } 큐에 넣은 Tip
+local shown = {} -- { [id] = true } 큐에 넣은 Tip
 local queue = {}
 local suppressed = true
-local enabled = true -- 체크 패널 설정(SettingsUI). 꺼도 큐와 본 기록은 유지
-local generation = 0 -- reset이나 억제 때 현재 카드를 끊기 위한 값
+local enabled = true
+local generation = 0
 local lastEnd = -math.huge
 
-local prevPhase = nil
-local prevPanels = nil
-local atBoard = false
+local mode = "solo"
+local role = nil
+local prev = {}
 
-local function tipText(key)
-    local template = config.TIPS and config.TIPS[key]
-    if not template then
-        return nil
-    end
-    local roverConfig = config.ROVER or {}
-    if key == "boost" then
-        return string.format(template, roverConfig.boostDrainMultiplier or 3)
-    elseif key == "panelLimit" then
-        return string.format(template, config.PANELS_PER_DAY or 3)
-    elseif key == "damage" then
-        local damageConfig = config.ROVER_DAMAGE or {}
-        return string.format(
-            template,
-            damageConfig.repairKey or "R",
-            damageConfig.repairHold or 4,
-            damageConfig.repairEnergy or 10
-        )
-    elseif key == "moduleDamage" then
-        local meteor = config.EVENTS and config.EVENTS.micrometeoroid or {}
-        return string.format(template, meteor.repairKey or "R")
-    elseif key == "waterTripNow" then
-        return string.format(template, config.WATER_TRIP_TIP_DAYS or 15)
-    end
-    return template
-end
-
-function TipUI.push(key)
-    if suppressed or shown[key] then
+function TipUI.push(id)
+    if suppressed or shown[id] or not TIP_KEYS[id] then
         return
     end
-    local text = tipText(key)
-    if not text then
-        return
-    end
-    shown[key] = true
-    table.insert(queue, text)
+    shown[id] = true
+    table.insert(queue, id)
 end
 
 local function clearQueue()
@@ -102,12 +92,10 @@ end
 
 function TipUI.reset()
     shown = {}
-    prevPanels = nil
-    atBoard = false
+    prev = {}
     clearQueue()
 end
 
--- 결과, 선택, 착륙 화면에서는 표시하지 않고 큐만 비운다
 function TipUI.setSuppressed(value)
     if value == suppressed then
         return
@@ -118,7 +106,6 @@ function TipUI.setSuppressed(value)
     end
 end
 
--- Tip 표시 켜고 끄기. 끄면 지금 카드를 즉시 접고(세대 끊기) 큐는 둔 채 표시하지 않는다. 켜면 큐부터 재개
 function TipUI.setEnabled(value)
     if value == enabled then
         return
@@ -129,7 +116,12 @@ function TipUI.setEnabled(value)
     end
 end
 
--- 대기 단계 포함 취소 가능한 대기
+-- 솔로/멀티와 내 역할 (Main.client가 RoleUpdate와 StateUpdate에서 알려 준다)
+function TipUI.setContext(newMode, newRole)
+    mode = newMode or "solo"
+    role = newRole
+end
+
 local function waitFor(seconds, myGeneration)
     local deadline = os.clock() + seconds
     while os.clock() < deadline do
@@ -141,8 +133,6 @@ local function waitFor(seconds, myGeneration)
     return generation == myGeneration
 end
 
--- 카드 폭과 우하단 여백(가상 좌표). 카드는 Layout 루트 안에 있어 배율만큼 커지므로
--- 실제 px로 정한 compact 여백은 배율로 나눠 넣는다. compact 여부는 표시할 때마다 읽는다.
 local function cardLayout()
     local viewport = gui.AbsoluteSize
     if viewport.X <= 0 or viewport.Y <= 0 then
@@ -162,8 +152,8 @@ local function cardPosition(right, bottom, dy)
     return UDim2.new(1, -right, 1, -bottom + dy)
 end
 
-local function showCard(text, myGeneration)
-    textLabel.Text = text
+local function showCard(id, myGeneration)
+    UI.msg(textLabel, TIP_KEYS[id])
     local width, right, bottom = cardLayout()
     group.Size = UDim2.fromOffset(width, 0)
     group.GroupTransparency = 1
@@ -176,9 +166,8 @@ local function showCard(text, myGeneration)
     local completed = waitFor(FADE_IN + HOLD, myGeneration)
     local fade = if completed then FADE_OUT else 0.2
     local outInfo = TweenInfo.new(fade, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
-    local out = TweenService:Create(group, outInfo, { GroupTransparency = 1 })
+    TweenService:Create(group, outInfo, { GroupTransparency = 1 }):Play()
     TweenService:Create(group, outInfo, { Position = cardPosition(right, bottom, SINK) }):Play()
-    out:Play()
     task.wait(fade)
     if generation == myGeneration or not completed then
         group.Visible = false
@@ -189,10 +178,10 @@ local function worker()
     while true do
         task.wait(0.25)
         if not suppressed and enabled and #queue > 0 and os.clock() - lastEnd >= MIN_GAP then
-            local text = table.remove(queue, 1)
+            local id = table.remove(queue, 1)
             local myGeneration = generation
             SoundFX.playVolume("mission_advance", TIP_SOUND_VOLUME)
-            showCard(text, myGeneration)
+            showCard(id, myGeneration)
             lastEnd = os.clock()
         end
     end
@@ -229,8 +218,7 @@ local function makeBulb()
     })
 end
 
-function TipUI.init(ctx)
-    config = ctx.Config
+function TipUI.init(_ctx)
     gui = UI.gui("Tip", 14)
     tipRoot = Layout.root(gui)
 
@@ -241,7 +229,7 @@ function TipUI.init(ctx)
         AutomaticSize = Enum.AutomaticSize.Y,
         Text = "",
         TextColor3 = INK,
-        Preset = "body",
+        Font = UI.Font,
         TextSize = BODY_TEXT_SIZE,
         TextWrapped = true,
         TextXAlignment = Enum.TextXAlignment.Left,
@@ -249,17 +237,17 @@ function TipUI.init(ctx)
     local badge = UI.create("TextLabel", {
         Name = "TipBadge",
         LayoutOrder = 1,
-        Size = UDim2.fromOffset(46, 22),
+        Size = UDim2.fromOffset(0, 22),
+        AutomaticSize = Enum.AutomaticSize.X,
         BackgroundTransparency = 0,
         BackgroundColor3 = AMBER,
-        Text = "TIP",
         TextColor3 = INK,
-        Preset = "caption",
         TextSize = BADGE_TEXT_SIZE,
         Font = UI.FontBold,
-    }, { UI.roundCorner() })
+    }, { UI.roundCorner(), UI.padding({ 0, 0, 10, 10 }) })
+    UI.msg(badge, "tip.badge")
 
-    card = UI.create("Frame", {
+    local card = UI.create("Frame", {
         Name = "Card",
         Size = UDim2.fromScale(1, 0),
         AutomaticSize = Enum.AutomaticSize.Y,
@@ -282,11 +270,7 @@ function TipUI.init(ctx)
             AutomaticSize = Enum.AutomaticSize.Y,
             BackgroundTransparency = 1,
         }, {
-            UI.create("UIListLayout", {
-                FillDirection = Enum.FillDirection.Vertical,
-                Padding = UDim.new(0, 4),
-                SortOrder = Enum.SortOrder.LayoutOrder,
-            }),
+            UI.list(Enum.FillDirection.Vertical, 4),
             badge,
             textLabel,
         }),
@@ -294,7 +278,6 @@ function TipUI.init(ctx)
 
     group = UI.create("CanvasGroup", {
         Name = "Group",
-        -- 아래 끝 기준: 문구가 여러 줄이 되어도 위로만 자란다
         AnchorPoint = Vector2.new(1, 1),
         Position = cardPosition(PC_MARGIN, PC_BOTTOM, 0),
         Size = UDim2.fromOffset(CARD_WIDTH, 0),
@@ -303,22 +286,24 @@ function TipUI.init(ctx)
         GroupTransparency = 1,
         Visible = false,
         Parent = tipRoot,
-    }, {
-        card,
-    })
+    }, { card })
 
-    -- 처음 DriverSeat에 앉으면 레이더 Tip을 먼저, 3초 뒤 부스터 Tip
     RoverBoost.drivingChanged:Connect(function(driving)
-        if driving and not atBoard and not suppressed then
-            atBoard = true
-            TipUI.push("radar")
-            task.delay(3, function()
-                TipUI.push("boost")
-            end)
+        if driving then
+            TipUI.push("boost")
         end
     end)
 
     task.spawn(worker)
+end
+
+local function anyFacilityRunning(state)
+    for _, f in pairs(state.facilities or {}) do
+        if type(f) == "table" and f.status == "active" then
+            return true
+        end
+    end
+    return type(state.airlock) == "table" and state.airlock.status == "active"
 end
 
 function TipUI.onState(state)
@@ -327,76 +312,76 @@ function TipUI.onState(state)
         TipUI.reset()
     end
     TipUI.setSuppressed(phase ~= "playing")
-
-    if phase == "playing" and prevPhase ~= "playing" then
-        task.delay(2, function()
-            TipUI.push("start")
-        end)
-    end
-    prevPhase = phase
     if phase ~= "playing" then
         return
     end
+    mode = state.mode or mode
 
-    local panels = state.panelsInstalled
-    if type(panels) == "number" then
-        if prevPanels == 0 and panels >= 1 then
-            TipUI.push("panelLimit")
+    -- 시작: 에어록 점검, 조금 뒤 패널
+    local airlock = state.airlock or {}
+    if not prev.started then
+        prev.started = true
+        if airlock.status == "idle" then
+            TipUI.push("airlock")
         end
-        prevPanels = panels
+        task.delay(PANELS_TIP_DELAY, function()
+            TipUI.push("panels")
+        end)
     end
-
-    local moduleB = state.modules and state.modules.B
-    local waterDays = state.daysLeft and state.daysLeft.water
-    if type(waterDays) ~= "number" and type(state.water) == "number" then
-        -- daysLeft가 없으면 물 / 하루 순소비 (순소비가 없으면 줄지 않는 것으로 본다)
-        local use = -(state.netWater or 0)
-        waterDays = if use > 0 then math.floor(state.water / use) else 999
-    end
-
-    -- 20차: 아직 물을 한 번도 하역하지 않았는데 물이 WATER_TRIP_TIP_DAYS일분 이하로 내려오면 첫 원정 안내 (1회)
-    if
-        type(waterDays) == "number"
-        and waterDays <= (config.WATER_TRIP_TIP_DAYS or 15)
-        and (state.waterTrips or 0) == 0
-    then
-        TipUI.push("waterTripNow")
-    end
-    if
-        moduleB
-        and moduleB.status == "active"
-        and type(waterDays) == "number"
-        and waterDays <= 5
-    then
-        TipUI.push("farmWater")
-    end
-
-    local rover = state.rover
-    if rover and type(rover.damage) == "number" and rover.damage >= 1 then
-        TipUI.push("damage")
-    end
-
-    local cap = state.energyCap
-    if type(cap) == "number" and cap > 0 and state.energy >= cap * 0.95 then
-        TipUI.push("energyCap")
-    end
-
-    -- 랜덤 이벤트 (2026-10-18 15차): 첫 폭풍 예고, 첫 모듈 손상
-    local event = state.event
-    if type(event) == "table" and event.kind == "solarStorm" then
-        TipUI.push("storm")
-    end
-    for _, moduleState in pairs(state.modules or {}) do
-        if type(moduleState) == "table" and moduleState.damaged == true then
-            TipUI.push("moduleDamage")
-            break
+    -- 에어록 점검을 시작하면 콘솔 안내 (솔로: 로버 파견, 멀티: 관제사 핀)
+    if airlock.status ~= nil and airlock.status ~= "idle" then
+        if mode == "solo" then
+            TipUI.push("console")
+        elseif role == "controller" then
+            TipUI.push("console_team")
         end
+    end
+
+    local resources = state.resources or {}
+    local lowWarn = state.lowWarn or {}
+    if
+        (lowWarn.energy or (resources.energy or 100) < LOW_THRESHOLD) and anyFacilityRunning(state)
+    then
+        TipUI.push("pause")
+    end
+    local farm = (state.facilities or {}).farm
+    local farmBuilt = type(farm) == "table"
+        and (farm.status == "active" or farm.status == "building")
+    if (lowWarn.food or (resources.food or 100) < LOW_THRESHOLD) and not farmBuilt then
+        TipUI.push("low_food")
+    end
+    if lowWarn.water or (resources.water or 100) < LOW_THRESHOLD then
+        TipUI.push(if mode == "solo" then "low_water" else "low_water_team")
+    end
+
+    local rover = state.rover or {}
+    local damage = rover.damage or 0
+    if prev.damage ~= nil and damage > prev.damage then
+        TipUI.push("rover_damage")
+    end
+    prev.damage = damage
+
+    local pipe = (state.facilities or {}).pipe
+    if type(pipe) == "table" and pipe.status == "available" then
+        TipUI.push("pipe")
+    end
+
+    local weather = state.weather
+    if type(weather) == "table" and weather.kind == "SEP" then
+        TipUI.push("sep")
     end
 end
 
-function TipUI.onOxygen(oxygen, _max, inside)
-    if not inside and oxygen < 50 then
-        TipUI.push("airlock")
+function TipUI.onOxygen(oxygen, _max, zone)
+    if zone == "outside" and type(oxygen) == "number" and oxygen < OXYGEN_TIP_BELOW then
+        TipUI.push("oxygen")
+    end
+end
+
+-- 핀이 찍히면 탐사대원에게 화살표 안내
+function TipUI.onPin(siteIndex)
+    if siteIndex ~= nil and mode == "multi" and role ~= "controller" then
+        TipUI.push("pin")
     end
 end
 

@@ -1,5 +1,5 @@
 --!nonstrict
--- 클라이언트 2D 효과음. 카탈로그는 Shared.SoundIds이고 id가 0이면 Sound를 만들지 않는다.
+-- 클라이언트 2D 효과음 (v2 페이로드에 맞춤). 카탈로그는 Shared.SoundIds이고 id가 0이면 Sound를 만들지 않는다.
 -- SoundService 전체 볼륨은 건드리지 않고, 기본 캐릭터 발소리와 점프 소리도 그대로 둔다.
 
 local Players = game:GetService("Players")
@@ -160,10 +160,11 @@ function SoundFX.init(_ctx)
     player.CharacterAdded:Connect(watchCharacter)
 end
 
--- StateUpdate: 미션 전진음과 호흡 루프의 playing 여부
+-- StateUpdate(v2): 미션 문구(Msg 키)가 바뀌면 전진음, 호흡 루프의 playing 여부
 function SoundFX.onState(state)
     playing = state.phase == "playing"
-    local stage = state.missionStage
+    local mission = state.mission
+    local stage = if type(mission) == "table" then mission.key else nil
     if stage ~= nil and lastStage ~= nil and stage ~= lastStage then
         SoundFX.play("mission_advance")
     end
@@ -176,20 +177,22 @@ function SoundFX.onState(state)
     applyBreath()
 end
 
-function SoundFX.onOxygen(value, max, isInside)
+-- OxygenUpdate(v2): zone "outside" | "shelter" | "refill" (v1 호환으로 boolean이면 실내 여부)
+function SoundFX.onOxygen(value, max, zone)
+    local isInside = if type(zone) == "boolean" then zone else zone ~= "outside"
     oxygen, oxygenMax, inside = value, max, isInside
-    if value <= LOW_OXYGEN then
+    if value <= LOW_OXYGEN and not isInside then
         if not lowFired then
             lowFired = true
             SoundFX.play("oxygen_low_beep")
         end
-    else
+    elseif value > LOW_OXYGEN then
         lowFired = false
     end
     applyBreath()
 end
 
-function SoundFX.onNotify(_text, kind)
+function SoundFX.onNotify(_msg, kind)
     if kind == "warn" then
         SoundFX.play("notify_warn")
     elseif kind == "good" then
@@ -200,7 +203,7 @@ end
 function SoundFX.onGameOver(result)
     playing = false
     applyBreath()
-    SoundFX.play(if result.won then "win" else "lose")
+    SoundFX.play(if type(result) == "table" and result.won then "win" else "lose")
 end
 
 return SoundFX

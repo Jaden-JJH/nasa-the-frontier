@@ -1,6 +1,6 @@
 --!nonstrict
 -- 로버 부스터 입력. DriverSeat에 앉아 있을 때만 동작한다.
--- 키보드 LeftShift, 게임패드 ButtonX, 터치는 "부스터" 홀드 버튼. 누름과 뗌에 RoverBoost(true/false)를 보낸다.
+-- 키보드 LeftShift, 게임패드 ButtonX, 터치는 key.touch.boost 홀드 버튼(v2 Localizer). 누름과 뗌에 RoverBoost(true/false)를 보낸다.
 -- RoverBoost Remote는 서버가 만들기 전일 수 있으므로 늦게 찾고, 없으면 조용히 아무것도 보내지 않는다.
 
 local Players = game:GetService("Players")
@@ -97,11 +97,12 @@ function RoverBoost.init(_ctx)
             Size = UDim2.fromOffset(96, 64),
             BackgroundColor3 = Colors.panelLight,
             TextColor3 = Colors.text,
-            Text = "부스터",
+            Text = "",
             Preset = "heading",
             Visible = false,
             Parent = gui,
         }, { UI.corner(10), UI.stroke(Colors.energy, 2) })
+        UI.msg(touchButton, "key.touch.boost")
         -- 누르는 동안 눌린 상태(주황)
         local function setPressed(pressed)
             touchButton.BackgroundColor3 = if pressed then Colors.oxygen else Colors.panelLight

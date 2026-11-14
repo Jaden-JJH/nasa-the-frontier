@@ -1,5 +1,6 @@
 --!nonstrict
 -- 착륙 연출: 착륙선 상공 200 studs에서 뒤쪽 25 studs, 위 10 studs 지점으로 내려온다.
+-- v2: LandingSequence(missionId, landerCFrame, seconds?). seconds가 없으면 DEFAULT_SECONDS.
 
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
@@ -14,9 +15,10 @@ local END_BACK = 25
 local END_HEIGHT = 10
 local BAR_HEIGHT_SCALE = 0.08
 local INTRO_IMAGE_SECONDS = 1
+local DEFAULT_SECONDS = 5 -- 서버가 연출 길이를 보내지 않을 때 (v1 Config.LANDING_SECONDS와 같은 값)
 
 local player = Players.LocalPlayer
-local config
+local introImageId = "" -- 조종석 정지 이미지 (지원 이미지가 오면 넣는다, 글자 없는 이미지)
 local barsGui
 local introImage -- 조종석 정지 이미지 (INTRO_IMAGE_ID가 있을 때만 사용)
 local introGui
@@ -78,11 +80,12 @@ function LandingCamera.stop()
     restoreCamera()
 end
 
-function LandingCamera.play(_siteId, landerCFrame)
+function LandingCamera.play(_missionId, landerCFrame, seconds)
     local camera = workspace.CurrentCamera
-    if not camera then
+    if not camera or typeof(landerCFrame) ~= "CFrame" then
         return
     end
+    local duration = if type(seconds) == "number" and seconds > 0 then seconds else DEFAULT_SECONDS
     if running then
         activeToken += 1
         cleanup()
@@ -121,7 +124,7 @@ function LandingCamera.play(_siteId, landerCFrame)
 
     local tween = TweenService:Create(
         value,
-        TweenInfo.new(config.LANDING_SECONDS, Enum.EasingStyle.Sine, Enum.EasingDirection.Out),
+        TweenInfo.new(duration, Enum.EasingStyle.Sine, Enum.EasingDirection.Out),
         { Value = endCFrame }
     )
     activeTween = tween
@@ -136,8 +139,7 @@ function LandingCamera.play(_siteId, landerCFrame)
     tween:Play()
 end
 
-function LandingCamera.init(ctx)
-    config = ctx.Config
+function LandingCamera.init(_ctx)
     -- 이미지는 검은 바보다 아래 순서
     introGui = UI.gui("LandingIntroImage", 89)
     introGui.Enabled = false
@@ -147,16 +149,9 @@ function LandingCamera.init(ctx)
         BackgroundColor3 = Color3.new(0, 0, 0),
         BorderSizePixel = 0,
         ScaleType = Enum.ScaleType.Crop,
-        Image = "",
+        Image = introImageId,
         Parent = introGui,
     })
-    local imageId = (config :: any).INTRO_IMAGE_ID or ""
-    if type(imageId) == "number" and imageId > 0 then
-        imageId = "rbxassetid://" .. imageId
-    end
-    if type(imageId) == "string" and imageId ~= "" then
-        introImage.Image = imageId
-    end
 
     barsGui = UI.gui("LandingBars", 90)
     barsGui.Enabled = false
@@ -170,10 +165,6 @@ function LandingCamera.init(ctx)
             Parent = barsGui,
         })
     end
-
-    ctx.remotes.LandingSequence.OnClientEvent:Connect(function(siteId, landerCFrame)
-        LandingCamera.play(siteId, landerCFrame)
-    end)
 end
 
 return LandingCamera

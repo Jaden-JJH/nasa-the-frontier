@@ -40,6 +40,7 @@ UI.TextStyles = {
 }
 
 -- 클래스별 기본 속성. props로 덮어쓴다.
+-- v2: 모든 글자 요소는 AutoLocalize = false (Roblox 자동 번역 금지, CONTRACT_V2 1절, Q38)
 local DEFAULTS = {
     Frame = { BorderSizePixel = 0 },
     CanvasGroup = { BorderSizePixel = 0 },
@@ -49,13 +50,19 @@ local DEFAULTS = {
         Font = UI.Font,
         TextColor3 = UI.Colors.text,
         TextSize = 16,
+        AutoLocalize = false,
     },
     TextButton = {
         BorderSizePixel = 0,
         Font = UI.FontBold,
         TextColor3 = UI.Colors.text,
         TextSize = 18,
+        AutoLocalize = false,
     },
+    TextBox = { AutoLocalize = false },
+    ScreenGui = { AutoLocalize = false },
+    BillboardGui = { AutoLocalize = false },
+    SurfaceGui = { AutoLocalize = false },
 }
 
 -- Instance.new 래퍼. Parent는 자식 부착 뒤 마지막에 설정한다.
@@ -302,6 +309,71 @@ end
 function UI.topInset(unit)
     local inset = game:GetService("GuiService"):GetGuiInset()
     return inset.Y / (unit or 1)
+end
+
+-- v2 다국어 도우미 ---------------------------------------------------------
+-- 글자는 Localizer로만 그린다. msg는 키 문자열 또는 Msg. 언어가 바뀌면 다시 그린다.
+-- 숫자처럼 번역하지 않는 글자는 raw로 쓴다(등록을 풀고 Text를 직접 쓴다).
+local Localizer = require(script.Parent.Localizer)
+
+function UI.msg(label, msg)
+    if msg == nil then
+        Localizer.unbind(label)
+        label.Text = ""
+        return label
+    end
+    return Localizer.bind(label, msg)
+end
+
+function UI.raw(label, text)
+    Localizer.unbind(label)
+    label.AutoLocalize = false
+    label.Text = text
+    return label
+end
+
+-- TextScaled 글자에 크기 상한과 하한 (영어가 길어도 넘치지 않게)
+function UI.scaledText(label, maxSize, minSize)
+    label.TextScaled = true
+    UI.create("UITextSizeConstraint", {
+        MaxTextSize = maxSize,
+        MinTextSize = minSize or 10,
+        Parent = label,
+    })
+    return label
+end
+
+-- 루나 알약 버튼 (민트 주 버튼 또는 반투명 보조 버튼). 글자는 AutomaticSize X로 늘어난다
+function UI.lunaButton(props, primary)
+    local merged = table.clone(props or {})
+    merged.AutoButtonColor = false
+    merged.BackgroundColor3 = merged.BackgroundColor3
+        or (if primary then UI.Luna.mint else UI.Luna.white)
+    if merged.BackgroundTransparency == nil then
+        merged.BackgroundTransparency = if primary then 0 else 0.86
+    end
+    merged.TextColor3 = merged.TextColor3 or (if primary then UI.Luna.ink else UI.Luna.white)
+    merged.FontFace = merged.FontFace or UI.RoundBold
+    merged.TextSize = merged.TextSize or 18
+    merged.Text = merged.Text or ""
+    local button =
+        UI.create("TextButton", merged, { UI.roundCorner(), UI.padding({ 0, 0, 16, 16 }) })
+    return button
+end
+
+-- 버튼 사용 가능 모양 (주 버튼 민트, 꺼지면 흐린 회색)
+function UI.setButtonEnabled(button, enabled, primary)
+    button.Active = enabled
+    button.AutoButtonColor = false
+    if enabled then
+        button.BackgroundColor3 = if primary then UI.Luna.mint else UI.Luna.white
+        button.BackgroundTransparency = if primary then 0 else 0.86
+        button.TextColor3 = if primary then UI.Luna.ink else UI.Luna.white
+    else
+        button.BackgroundColor3 = UI.Luna.white
+        button.BackgroundTransparency = 0.92
+        button.TextColor3 = UI.Luna.dim
+    end
 end
 
 return UI
