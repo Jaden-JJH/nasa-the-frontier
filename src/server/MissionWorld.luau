@@ -211,7 +211,11 @@ local CFG = {
         role = "IceDeposit",
         fill = 0.45, -- 덩어리 무리가 차지하는 표시 바닥 넓이 비율
         maxHeight = 2.4, -- 덩어리 무리 전체 높이 상한 (묻기 전)
-        buryRatio = 0.45, -- 그중 땅속에 묻는 비율 (보이는 높이 약 1.3. 0.55면 30 stud에서도 거의 안 보였다)
+        buryRatio = 0.45, -- 지형을 못 잴 때만 쓰는 묻힘 비율 (아래 exposure가 기본)
+        -- [2026-11-15 Studio] 덩어리마다 자기 자리 지형 위로 이만큼 드러낸다. 하나의 기준 높이(표시 바닥 넓이의 가장 낮은 지면)로
+        -- 놓았더니 경사진 크레이터에서 덩어리 6개가 모두 지형보다 0.5 ~ 1.4 낮게 묻혀 35 stud에서도 안 보였다
+        exposure = 1.3,
+        minBuryRatio = 0.3, -- 작은 덩어리도 높이의 이 비율은 땅속에 (떠 보이지 않게)
         revealDistance = 40,
         glintSize = 0.5, -- 반짝임 점 크기 (studs)
         glintTransparency = 0.45,
@@ -2241,6 +2245,36 @@ local function addIceReveal(point: BasePart, markerName: string)
     corner.Parent = dot
 end
 
+-- 덩어리를 자기 자리 지형 위로 노출 높이(exposure, 작은 덩어리는 높이 x (1 - minBuryRatio))만큼 드러낸다.
+-- 대체 도형(Chunk 파트들)은 파트마다, 디자이너 에셋은 모델 전체를 가운데 지형 기준으로. 지형을 못 재면 그대로 둔다
+local function settleDeposit(deposit: Model, nearY: number)
+    local i = CFG.ice
+    local function lift(root: Instance, x: number, z: number, move: (number) -> ())
+        local lo, hi = boundsIn(root)
+        local ground = terrainHeight(x, z, nearY)
+        if ground == nil then
+            return
+        end
+        local exposed = math.min(i.exposure, (hi.Y - lo.Y) * (1 - i.minBuryRatio))
+        move(ground + exposed - hi.Y)
+    end
+    if deposit:GetAttribute("AssetSource") == "placeholder" then
+        for _, part in deposit:GetChildren() do
+            if part:IsA("BasePart") then
+                local p = part.CFrame.Position
+                lift(part, p.X, p.Z, function(dy: number)
+                    part.CFrame += Vector3.new(0, dy, 0)
+                end)
+            end
+        end
+    else
+        local lo, hi = boundsIn(deposit)
+        lift(deposit, (lo.X + hi.X) / 2, (lo.Z + hi.Z) / 2, function(dy: number)
+            translate(deposit, Vector3.new(0, dy, 0))
+        end)
+    end
+end
+
 local function buildIceSites(parent: Instance)
     local i = CFG.ice
     local folder = childFolder(parent, "IceSites")
@@ -2257,6 +2291,7 @@ local function buildIceSites(parent: Instance)
         fitIntoFrame(deposit, frame, { X = foot.X * i.fill, Z = foot.Z * i.fill, Y = i.maxHeight })
         local dlo, dhi = boundsIn(deposit)
         translate(deposit, Vector3.new(0, -(dhi.Y - dlo.Y) * i.buryRatio, 0))
+        settleDeposit(deposit, frame.Position.Y)
         setStatic(deposit, false)
         quietIceVisual(deposit, i.revealDistance)
         deposit.Parent = model

@@ -169,18 +169,32 @@ local GROUND_SAMPLES = {
     { 328.0, -232.0, -28.8 }, -- Ice4
     { -296.1, -375.9, -15.4 }, -- Ice5
 }
+-- 얼음 후보지 둘레 ICE_SLOPE_RADIUS 안은 크레이터 경사처럼 기울인다 (S12: Studio Ice5에서 덩어리 자리마다 지면이 0.6쯤 달랐다).
+-- 표시 중심에서는 0이라 실측 높이 그대로
+local ICE_SLOPE = { x = 0.06, z = -0.04 }
+local ICE_SLOPE_RADIUS = 30
 local function groundAt(x: number, z: number): number
     local sum, weight = 0, 0
+    local base: number? = nil
     for _, s in GROUND_SAMPLES do
         local d2 = (x - s[1]) ^ 2 + (z - s[2]) ^ 2
         if d2 < 1e-6 then
-            return s[3]
+            base = s[3]
+            break
         end
         local w = 1 / d2
         sum += w * s[3]
         weight += w
     end
-    return sum / weight
+    local g = base or sum / weight
+    for i = 9, #GROUND_SAMPLES do -- 얼음 5곳 (표 끝)
+        local s = GROUND_SAMPLES[i]
+        local dx, dz = x - s[1], z - s[2]
+        if dx * dx + dz * dz <= ICE_SLOPE_RADIUS * ICE_SLOPE_RADIUS then
+            g += ICE_SLOPE.x * dx + ICE_SLOPE.z * dz
+        end
+    end
+    return g
 end
 
 local terrainInstance = Instance.new("Terrain")
@@ -1380,17 +1394,34 @@ do
         end
         if deposit then
             local info = MissionWorld.getMarker(site.Name)
-            local dlo, dhi = H.bounds(deposit)
-            local gx, gz = (dlo.X + dhi.X) / 2, (dlo.Z + dhi.Z) / 2
-            local ground = groundAt(gx, gz)
-            if dhi.Y - ground > 1.5 then
-                lowOk = false
+            -- S12: 덩어리마다 자기 자리 지면 기준으로 노출 높이 (exposure, 작은 덩어리는 높이 x (1 - minBuryRatio))
+            local cfgIce = MissionWorld.CONFIG.ice
+            local grounds = {}
+            for _, chunk in deposit:GetChildren() do
+                if chunk:IsA("BasePart") then
+                    local clo, chi = H.bounds(chunk)
+                    local p = chunk.CFrame.Position
+                    local ground = groundAt(p.X, p.Z)
+                    grounds[string.format("%.2f", ground)] = true
+                    local want =
+                        math.min(cfgIce.exposure, (chi.Y - clo.Y) * (1 - cfgIce.minBuryRatio))
+                    if
+                        math.abs(chi.Y - ground - want) > 0.02
+                        or chi.Y - ground > cfgIce.exposure + 0.02
+                    then
+                        lowOk = false
+                    end
+                    if clo.Y > ground - 0.05 then
+                        buriedOk = false
+                    end
+                end
             end
-            if dlo.Y > ground - 0.5 then
-                buriedOk = false
+            local distinct = 0
+            for _ in grounds do
+                distinct += 1
             end
-            if dhi.Y - dlo.Y > MissionWorld.CONFIG.ice.maxHeight + 1e-3 then
-                lowOk = false
+            if distinct < 3 then
+                lowOk = false -- 경사 검사가 의미 있으려면 덩어리 자리 지면이 서로 달라야 한다
             end
             for _, item in deposit:GetDescendants() do
                 if item:IsA("BasePart") then
@@ -1461,8 +1492,11 @@ do
     check(neonFree, "얼음: 네온, 유리, 얼음 재질, 반사 없음")
     check(colorsOk, "얼음: 어두운 표토 색, 아주 약한 푸른 기")
     check(collideFree, "얼음: 덩어리는 충돌 없음 (로버가 지나간다)")
-    check(lowOk, "얼음: 지면 위로 낮다 (1.5 이하)")
-    check(buriedOk, "얼음: 대부분 땅속에 묻힌다")
+    check(
+        lowOk,
+        "얼음: 덩어리마다 자기 자리 지면 위로 노출 높이만큼 (exposure 1.3, 작은 덩어리는 70%), 경사진 지면"
+    )
+    check(buriedOk, "얼음: 덩어리 밑은 모두 땅속 (떠 보이지 않는다)")
     check(noLights, "얼음: 빛, 파티클, 반짝이 효과 없음")
     check(
         guisNear,
@@ -1514,6 +1548,17 @@ do
         part ~= nil and part.Material ~= Enum.Material.Neon,
         "얼음 에셋: 네온은 표토 재질로"
     )
+    do
+        local alo, ahi = H.bounds(deposit)
+        local ground = groundAt((alo.X + ahi.X) / 2, (alo.Z + ahi.Z) / 2)
+        check(
+            H.near(ahi.Y - ground, MissionWorld.CONFIG.ice.exposure, 0.02),
+            string.format(
+                "얼음 에셋: 모델 전체를 가운데 지면 위로 노출 높이만큼 (%.2f)",
+                ahi.Y - ground
+            )
+        )
+    end
     local pl = part and part:FindFirstChildOfClass("PointLight")
     local sp = part and part:FindFirstChildOfClass("Sparkles")
     local fg = part and part:FindFirstChild("FarLabel")
