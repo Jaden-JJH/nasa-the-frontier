@@ -5,6 +5,7 @@
 --    - tests/server_smoke_v2.luau v2 서버 흐름 스모크 (rojo build -> build/server_smoke_v2.rbxl)
 --    - tools/i18n/build.luau --check  CSV와 생성물(Strings.luau, strings.json) 일치
 --    - tools/i18n/lint.luau           서버, shared 한글 리터럴과 코드의 문구 키
+--    - tools/rules/export.luau --check  MissionConfig와 data/rules_v2.json(웹판 공유) 일치
 --    v1 server_smoke.luau는 v1 부팅이 없어져 돌리지 않는다(파일은 남겨 둔다).
 --    rojo가 없거나 저장소 루트가 아니면 스모크는 건너뛰고 그 사실을 출력한다.
 -- 실패가 하나라도 있으면 종료 코드 1
@@ -119,6 +120,10 @@ if atRoot() then
         or smokeFailed
     smokeFailed = runProcess("I18n lint", { "run", "tools/i18n/lint.luau" }, "[i18n lint] 통과")
         or smokeFailed
+    smokeFailed = runProcess(
+        "Rules export --check",
+        { "run", "tools/rules/export.luau", "--check" }
+    ) or smokeFailed
 end
 
 if failed > 0 or smokeFailed then

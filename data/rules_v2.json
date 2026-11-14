@@ -1,0 +1,506 @@
+{
+  "schemaVersion": 1,
+  "generatedFrom": "src/shared/MissionConfig.luau",
+  "generatedBy": "tools/rules/export.luau",
+  "DAY_SECONDS": 30,
+  "MANUAL_DRIVE": {
+    "batteryDrainPerSecond": 0.15,
+    "batteryMax": 50,
+    "boostDrainMultiplier": 2,
+    "chargeKeepEnergy": 20,
+    "detourFactor": 1.25,
+    "fillSeconds": 3,
+    "repairEnergy": 10,
+    "repairSeconds": 4,
+    "unloadSeconds": 3,
+    "v1BoostCooldownSeconds": 6,
+    "v1BoostMultiplier": 1.6,
+    "v1BoostOnSeconds": 4,
+    "v1MaxSpeed": 18
+  },
+  "MISSIONS": {
+    "B": {
+      "cap": 100,
+      "crew": {
+        "energy": 12,
+        "food": 3,
+        "water": 3
+      },
+      "facilities": {
+        "airlock": {
+          "buildDays": 2,
+          "buildFrom": "outdoor",
+          "canPause": true,
+          "cost": {
+            "energy": 0,
+            "water": 0
+          },
+          "kind": "airlock",
+          "requires": [],
+          "upkeep": {
+            "energy": 2,
+            "water": 1
+          }
+        },
+        "farm": {
+          "buildDays": 3,
+          "buildFrom": "outdoor",
+          "canPause": true,
+          "cost": {
+            "energy": 6,
+            "water": 4
+          },
+          "harvestAmount": 30,
+          "harvestEveryDays": 5,
+          "kind": "farm",
+          "requires": [],
+          "upkeep": {
+            "energy": 3,
+            "water": 0
+          }
+        },
+        "powerline": {
+          "buildDays": 2,
+          "buildFrom": "outdoor",
+          "canPause": true,
+          "cost": {
+            "energy": 8,
+            "water": 2
+          },
+          "kind": "powerline",
+          "maxCount": 3,
+          "multi": true,
+          "requires": ["tower"],
+          "upkeep": {
+            "energy": 2,
+            "water": 0
+          }
+        },
+        "tower": {
+          "buildDays": 3,
+          "buildFrom": "outdoor",
+          "canPause": true,
+          "cost": {
+            "energy": 10,
+            "water": 6
+          },
+          "kind": "tower",
+          "maxCount": 3,
+          "multi": true,
+          "requires": [],
+          "upkeep": {
+            "energy": 3,
+            "water": 1
+          }
+        }
+      },
+      "facilityOrder": ["airlock", "farm", "tower", "powerline"],
+      "ice": {
+        "amountPerTrip": 30,
+        "cooldownDays": 3
+      },
+      "iceSites": [],
+      "id": "B",
+      "medalOrder": ["gold", "silver", "bronze"],
+      "medalTowers": {
+        "bronze": 1,
+        "gold": 3,
+        "silver": 2
+      },
+      "panels": {
+        "cost": 4,
+        "installSeconds": 3,
+        "output": 4,
+        "perDay": 1,
+        "total": 5
+      },
+      "playable": false,
+      "rover": {
+        "damageChanceMultiplier": 2,
+        "roverCount": 2
+      },
+      "start": {
+        "energy": 70,
+        "food": 70,
+        "water": 70
+      },
+      "towerSites": [
+        {
+          "id": "Tower1",
+          "output": 15
+        },
+        {
+          "id": "Tower2",
+          "output": 25
+        },
+        {
+          "id": "Tower3",
+          "output": 30
+        }
+      ]
+    },
+    "C": {
+      "cap": 100,
+      "crew": {
+        "energy": 12,
+        "food": 3,
+        "water": 3
+      },
+      "crewEnergyLast": true,
+      "crewPerExtraPlayer": {
+        "energy": 0,
+        "food": 1,
+        "water": 1
+      },
+      "crewScaling": false,
+      "facilities": {
+        "airlock": {
+          "buildDays": 2,
+          "buildFrom": "outdoor",
+          "canPause": true,
+          "cost": {
+            "energy": 0,
+            "water": 0
+          },
+          "kind": "airlock",
+          "requires": [],
+          "upkeep": {
+            "energy": 2,
+            "water": 1
+          }
+        },
+        "farm": {
+          "buildDays": 3,
+          "buildFrom": "outdoor",
+          "canPause": true,
+          "cost": {
+            "energy": 10,
+            "water": 5
+          },
+          "harvestAmount": 26,
+          "harvestEveryDays": 5,
+          "kind": "farm",
+          "requires": [],
+          "upkeep": {
+            "energy": 3,
+            "water": 2
+          }
+        },
+        "hydroponics": {
+          "buildDays": 1,
+          "buildFrom": "outdoor",
+          "canPause": true,
+          "cost": {
+            "energy": 60,
+            "water": 40
+          },
+          "harvestAmount": 34,
+          "kind": "upgrade",
+          "requires": ["farm", "pipe"],
+          "upkeep": {
+            "energy": 2,
+            "water": 2
+          }
+        },
+        "led": {
+          "buildDays": 1,
+          "buildFrom": "outdoor",
+          "canPause": true,
+          "cost": {
+            "energy": 35,
+            "water": 20
+          },
+          "farmEnergyUpkeepMultiplier": 1.2,
+          "harvestEveryDays": 4,
+          "kind": "upgrade",
+          "requires": ["farm"],
+          "upkeep": {
+            "energy": 5,
+            "water": 1
+          }
+        },
+        "nutrient": {
+          "buildDays": 1,
+          "buildFrom": "outdoor",
+          "canPause": true,
+          "cost": {
+            "energy": 35,
+            "water": 20
+          },
+          "farmWaterUpkeepMultiplier": 0.5,
+          "kind": "upgrade",
+          "requires": ["farm"],
+          "upkeep": {
+            "energy": 2,
+            "water": 0
+          }
+        },
+        "pipe": {
+          "buildDays": 5,
+          "buildFrom": "map",
+          "canPause": true,
+          "cost": {
+            "energy": 60,
+            "water": 40
+          },
+          "deliverAmount": 30,
+          "deliverEveryDays": 3,
+          "kind": "pipe",
+          "maxCount": 1,
+          "multi": true,
+          "requires": [],
+          "unlockDeliveries": 5,
+          "upkeep": {
+            "energy": 2,
+            "water": 1
+          }
+        }
+      },
+      "facilityOrder": ["airlock", "farm", "led", "nutrient", "pipe", "hydroponics"],
+      "ice": {
+        "amountPerTrip": 30,
+        "cooldownDays": 3
+      },
+      "iceSites": [
+        {
+          "distance": 647,
+          "id": "Ice1"
+        },
+        {
+          "distance": 937,
+          "id": "Ice2"
+        },
+        {
+          "distance": 810,
+          "id": "Ice3"
+        },
+        {
+          "distance": 412,
+          "id": "Ice4"
+        },
+        {
+          "distance": 421,
+          "id": "Ice5"
+        }
+      ],
+      "id": "C",
+      "manualDriveDistances": {
+        "Ice1": 750,
+        "Ice2": 1037,
+        "Ice3": 910,
+        "Ice4": 515,
+        "Ice5": 412
+      },
+      "medalOrder": ["gold", "silver", "bronze"],
+      "medals": {
+        "bronze": ["farm"],
+        "gold": ["farm", "led", "nutrient", "hydroponics"],
+        "silver": ["farm", "led", "nutrient"]
+      },
+      "panels": {
+        "cost": 4,
+        "emergencyInstall": true,
+        "installSeconds": 3,
+        "output": 2,
+        "perDay": 2,
+        "total": 13
+      },
+      "playable": true,
+      "rover": {
+        "damageChanceMultiplier": 1,
+        "energyPerTravelDay": 9,
+        "fsdStudsPerDay": 700,
+        "maxDamage": 3,
+        "remoteRecoverDays": 1,
+        "remoteRecoverEnergy": 0,
+        "repairEnergy": 10,
+        "risk": {
+          "extreme": {
+            "damageChance": 0.25,
+            "speedFactor": 1
+          },
+          "high": {
+            "damageChance": 0.15,
+            "speedFactor": 1
+          },
+          "low": {
+            "damageChance": 0.05,
+            "maxDistance": 530,
+            "speedFactor": 1
+          },
+          "mid": {
+            "damageChance": 0.1,
+            "maxDistance": 875,
+            "speedFactor": 1
+          }
+        },
+        "riskOrder": ["low", "mid", "high", "extreme"],
+        "rushEnergyFactor": 1.5,
+        "rushTimeFactor": 0.65,
+        "slowdownPerDamage": 0.1
+      },
+      "shedOrder": ["led", "nutrient", "hydroponics", "pipe", "airlock", "farm"],
+      "stallMode": "priority",
+      "start": {
+        "energy": 40,
+        "food": 37,
+        "water": 50
+      }
+    }
+  },
+  "OXYGEN": {
+    "airlockRefillPerSecond": 2,
+    "max": 100,
+    "outdoorSeconds": 60,
+    "roverSeatRefillPerSecond": 2
+  },
+  "RESOURCES": ["energy", "water", "food"],
+  "RESOURCE_DECIMALS": 2,
+  "SCORE": {
+    "lowPenalty": 10,
+    "lowThreshold": 20,
+    "minScore": 0,
+    "oxygenRescuePenalty": 100,
+    "start": 1000,
+    "zeroPenalty": 30
+  },
+  "SHORTAGE_DAYS_TO_LOSE": 4,
+  "TOTAL_DAYS": 60,
+  "WALK_REPAIR": {
+    "oxygenSafetyRatio": 0.8,
+    "repairHoldSeconds": 4,
+    "startOffset": 149,
+    "walkSpeed": 16
+  },
+  "WEATHER": {
+    "GST": {
+      "blocksMap": true,
+      "minKp": 6,
+      "pausesRover": true
+    },
+    "SEP": {
+      "blocksOutdoor": true,
+      "pausesRover": true
+    }
+  },
+  "derived": {
+    "missions": {
+      "C": {
+        "sites": [
+          {
+            "distance": 412,
+            "id": "Ice4",
+            "risk": "low",
+            "rushTrip": {
+              "damageChance": 0.1,
+              "days": 1,
+              "energy": 16,
+              "rawDays": 0.77,
+              "risk": "mid",
+              "rushHelps": false
+            },
+            "siteIndex": 1,
+            "trip": {
+              "damageChance": 0.05,
+              "days": 1,
+              "energy": 11,
+              "rawDays": 1.18,
+              "risk": "low",
+              "rushHelps": false
+            }
+          },
+          {
+            "distance": 421,
+            "id": "Ice5",
+            "risk": "low",
+            "rushTrip": {
+              "damageChance": 0.1,
+              "days": 1,
+              "energy": 17,
+              "rawDays": 0.78,
+              "risk": "mid",
+              "rushHelps": false
+            },
+            "siteIndex": 2,
+            "trip": {
+              "damageChance": 0.05,
+              "days": 1,
+              "energy": 11,
+              "rawDays": 1.2,
+              "risk": "low",
+              "rushHelps": false
+            }
+          },
+          {
+            "distance": 647,
+            "id": "Ice1",
+            "risk": "mid",
+            "rushTrip": {
+              "damageChance": 0.15,
+              "days": 1,
+              "energy": 25,
+              "rawDays": 1.2,
+              "risk": "high",
+              "rushHelps": true
+            },
+            "siteIndex": 3,
+            "trip": {
+              "damageChance": 0.1,
+              "days": 2,
+              "energy": 17,
+              "rawDays": 1.85,
+              "risk": "mid",
+              "rushHelps": true
+            }
+          },
+          {
+            "distance": 810,
+            "id": "Ice3",
+            "risk": "mid",
+            "rushTrip": {
+              "damageChance": 0.15,
+              "days": 2,
+              "energy": 32,
+              "rawDays": 1.5,
+              "risk": "high",
+              "rushHelps": false
+            },
+            "siteIndex": 4,
+            "trip": {
+              "damageChance": 0.1,
+              "days": 2,
+              "energy": 21,
+              "rawDays": 2.31,
+              "risk": "mid",
+              "rushHelps": false
+            }
+          },
+          {
+            "distance": 937,
+            "id": "Ice2",
+            "risk": "high",
+            "rushTrip": {
+              "damageChance": 0.25,
+              "days": 2,
+              "energy": 37,
+              "rawDays": 1.74,
+              "risk": "extreme",
+              "rushHelps": true
+            },
+            "siteIndex": 5,
+            "trip": {
+              "damageChance": 0.15,
+              "days": 3,
+              "energy": 25,
+              "rawDays": 2.68,
+              "risk": "high",
+              "rushHelps": true
+            }
+          }
+        ]
+      }
+    },
+    "walkRepairLimit": 704
+  },
+  "metersPerStud": 1.2524461839530332
+}
