@@ -33,7 +33,7 @@
 
 ### 4.2 키 이름
 - 형식 `domain.area.name`, 소문자, 숫자, 밑줄, 점. 위치가 아니라 의미로 짓는다(`hud.water.label`).
-- 도메인: `hud`, `mission`, `toast`, `banner`, `prompt.obj`, `prompt.act`, `panel`, `sign`, `map`, `role`, `tip`, `fact`, `result`, `score`, `medal`, `record`, `title`, `settings`, `mission_select`, `event`, `end`, `facility`, 공용 `res.*`(자원 용어), `unit.*`, `key.*`, `date.*`, `fmt.*`.
+- 도메인: `hud`, `mission`, `toast`, `banner`, `prompt.obj`, `prompt.act`, `panel`, `sign`, `map`, `role`, `tip`, `fact`, `result`, `score`, `medal`, `record`, `title`, `settings`, `mission_select`, `event`, `end`, `facility`, `info`(건물 안내 카드, 2026-11-15), `rolemission`(멀티 역할별 미션, 2026-11-15), 공용 `res.*`(자원 용어), `unit.*`, `key.*`, `date.*`, `fmt.*`.
 - 의미가 바뀌면 키를 새로 만든다. 동적 키는 리터럴 키 테이블 조회만 허용한다.
 
 ### 4.3 CSV와 빌드

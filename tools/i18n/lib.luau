@@ -61,6 +61,8 @@ Lib.KNOWN_DOMAINS = {
     date = true,
     fmt = true,
     world = true, -- 3D 표지와 이름표 (MissionWorld TextKey)
+    info = true, -- 건물 가까이 가면 뜨는 안내 카드 (info.<id>.desc, 2026-11-15 플레이테스트)
+    rolemission = true, -- 역할별 미션, 멀티 전용, 점수와 무관 (rolemission.<id>.*, 2026-11-15)
 }
 
 -- 자리표시자 바로 뒤에 오면 받침에 따라 모양이 바뀌는 조사의 첫 글자 (경고용)
