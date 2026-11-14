@@ -1,7 +1,8 @@
 --!strict
--- RemoteEvent 이름 목록과 생성, 조회 (CONTRACT 2절)
+-- RemoteEvent 이름 목록과 생성, 조회 (docs/CONTRACT_V2.md 4절)
 -- 서버: Remotes.init()으로 ReplicatedStorage.Remotes 아래에 전부 생성한다.
 -- 클라이언트: Remotes.get(name)이 WaitForChild로 생성될 때까지 기다린 뒤 반환한다.
+-- v1 이름(SiteSelectionOpen, SelectSite, SetSpeed)은 v1 클라이언트 파일을 지울 때까지 남겨 둔다(v2 서버는 쓰지 않는다).
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
@@ -12,19 +13,32 @@ local Remotes = {}
 
 -- 서버 -> 클라이언트, 클라이언트 -> 서버 이벤트 전체 목록
 Remotes.NAMES = {
-    -- 서버 -> 클라이언트
-    "StateUpdate",
-    "OxygenUpdate",
-    "Notify",
+    -- 서버 -> 클라이언트 (CONTRACT_V2 4.1)
+    "StateUpdate", -- (state: MissionState)
+    "Notify", -- (msg: Msg, kind: "info" | "warn" | "good")
+    "MissionSelectOpen", -- (payload) 미션 선택 진입, 늦은 입장자
+    "LandingSequence", -- (missionId, landerCFrame) landing 진입 1회
+    "SpaceWeather", -- (payload) 경보 15초 전, 시작, 끝
+    "RoleUpdate", -- (roles, selecting, deadline?) 멀티 역할
+    "PinUpdate", -- ({ siteIndex?, byUserId? }) 관제사 핀
+    "OxygenUpdate", -- (oxygen, max, zone: "outside" | "shelter" | "refill")
+    "GameOver", -- (result: MissionResult)
+    "Records", -- (payload) 미션 순위와 전체 리더보드
+    -- 클라이언트 -> 서버 (CONTRACT_V2 4.2)
+    "SelectMission", -- (missionId)
+    "ChooseRole", -- (role)
+    "SetPin", -- (siteIndex?)
+    "DispatchRover", -- (siteIndex, rush)
+    "RemoteRecoverRover", -- ()
+    "SetFacilityPaused", -- (facilityId, paused)
+    "SetPipeSite", -- (siteIndex)
+    "RequestRestart", -- ()
+    "SetLanguage", -- (code: string) 플레이어 언어 변경 en/ko, 서버 PlayerPrefs가 처리
+    "RoverBoost", -- (on: boolean) 운전자 부스터
+    -- v1 (v2 서버는 쓰지 않는다. v1 클라이언트를 지울 때 함께 지운다)
     "SiteSelectionOpen",
-    "LandingSequence",
-    "GameOver",
-    "Records", -- (payload: RecordsPayload) 승리 기록 상위 목록과 이번 순위 (2026-10-19 16차)
-    -- 클라이언트 -> 서버
     "SelectSite",
     "SetSpeed",
-    "RequestRestart",
-    "RoverBoost", -- (on: boolean) 운전자 부스터 켜기/끄기 (2026-10-18)
 }
 
 local known: { [string]: boolean } = {}
