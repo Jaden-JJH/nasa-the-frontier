@@ -362,8 +362,47 @@ end
 local Workspace = dm:GetService("Workspace")
 local terrainInstance = Instance.new("Terrain")
 terrainInstance.Parent = Workspace
+-- 충돌 판정 시험용 (S13): Exclude 광선은 아래로 쏘면 fakeImpact.floor(없으면 지형)를, 옆으로 쏘면 fakeImpact.walls 면을 맞힌다
+local fakeImpact = { floor = nil, walls = {} }
 roblox.implementMethod("Workspace", "Raycast", function(_, origin, direction, params)
     local filter = params and params.FilterDescendantsInstances
+    if params and params.FilterType == Enum.RaycastFilterType.Exclude then
+        if math.abs(direction.X) + math.abs(direction.Z) < 1e-6 and direction.Y < 0 then
+            local g = fakeImpact.floor or groundAt(origin.X, origin.Z)
+            if origin.Y >= g and origin.Y + direction.Y <= g then
+                return {
+                    Position = Vector3.new(origin.X, g, origin.Z),
+                    Instance = terrainInstance,
+                    Normal = Vector3.yAxis,
+                }
+            end
+            return nil
+        end
+        local best = nil
+        for _, wall in fakeImpact.walls do
+            local denom = direction:Dot(wall.normal)
+            if denom < -1e-6 then
+                local t = (wall.point - origin):Dot(wall.normal) / denom
+                if t >= 0 and t <= 1 then
+                    local at = origin + direction * t
+                    local lateral = (at - wall.point) * Vector3.new(1, 0, 1)
+                    if
+                        lateral.Magnitude <= (wall.halfWidth or 20) and (best == nil or t < best.t)
+                    then
+                        best = {
+                            t = t,
+                            result = {
+                                Position = at,
+                                Instance = terrainInstance,
+                                Normal = wall.normal,
+                            },
+                        }
+                    end
+                end
+            end
+        end
+        return best and best.result
+    end
     if
         not params
         or params.FilterType ~= Enum.RaycastFilterType.Include
@@ -2006,7 +2045,8 @@ do
     )
     advance(0.3)
     check(H.state().rover.state == "driving", "rover.state driving")
-    -- 급정거 충돌: Terrain처럼 태그 없는 것에 세게 부딪혀 수평 속도가 0.25초 안에 절반 아래로 떨어지면 1회
+    -- [S13] 충돌 판정 (리드 결정 2026-11-15): 수평 급정거(18 이상에서 65% 넘게 감소) + 앞 광선이 벽 같은 면(법선 Y < 0.5)을
+    -- 정면으로 맞힐 때만 1회. 완만한 경사, 약한 급감속, 착지 직후는 0회. RoverHazard(패널, 바위)는 정면 접촉이면 12 이상 1회
     do
         local chassis = rover.PrimaryPart
         local heartbeat = signalFor(dm:GetService("RunService"), "Heartbeat")
@@ -2016,61 +2056,137 @@ do
             end)
             chassis:SetAttribute("__alv", v)
         end
-        local function sample(v)
-            setVelocity(v)
+        local function sample(x)
+            setVelocity(Vector3.new(x, 0, 0))
             heartbeat:Fire(1 / 60)
             advance(0.05)
         end
+        local function hitsSince(since)
+            local n = 0
+            for i = since + 1, #sent do
+                local item = sent[i]
+                if
+                    item.name == "Notify"
+                    and (
+                        item.args[1].key == "toast.rover.damaged"
+                        or item.args[1].key == "toast.rover.broken_manual"
+                    )
+                then
+                    n += 1
+                end
+            end
+            return n
+        end
+        local pos = chassis.CFrame.Position
+        fakeImpact.floor = pos.Y - 1 -- 바퀴 아래 지면 (땅에 있음)
         advance(1.2)
         local damage0 = H.rules().rover.damage
-        local hitMark = R.mark()
-        sample(Vector3.new(15, 0, 0))
-        sample(Vector3.new(16, 0, 2))
+        mark = R.mark()
         signalFor(chassis, "Touched"):Fire(terrainInstance)
         advance(0)
         check(
             H.rules().rover.damage == damage0,
             "Terrain Touched만으로는 세지 않는다 (태그 없음)"
         )
-        sample(Vector3.new(3, 0, 0))
-        sample(Vector3.new(0.5, 0, 0))
-        sample(Vector3.new(0, 0, 0))
-        local hits = 0
-        for i = hitMark + 1, #sent do
-            if sent[i].name == "Notify" and sent[i].args[1].key == "toast.rover.damaged" then
-                hits += 1
-            end
-        end
+        -- 1) 완만한 경사(약 30도, 법선 Y 0.87) 앞 20 -> 3 급정거
+        fakeImpact.walls = {
+            {
+                point = pos + Vector3.new(5, 0, 0),
+                normal = Vector3.new(-0.5, 0.866, 0).Unit,
+                halfWidth = 20,
+            },
+        }
+        sample(20)
+        sample(19)
+        sample(3)
         check(
-            H.rules().rover.damage == damage0 + 1 and hits == 1,
-            "급정거(16 -> 3, 0.05초): 파손 1회, 알림 1회"
+            H.rules().rover.damage == damage0 and hitsSince(mark) == 0,
+            "충돌: 완만한 경사 급감속은 0회"
         )
-        local rock = Instance.new("Part")
-        rock.Name = "Rock"
-        rock:AddTag("RoverHazard")
-        rock.Parent = Workspace
-        setVelocity(Vector3.new(14, 0, 0))
-        signalFor(chassis, "Touched"):Fire(rock)
-        advance(0)
+        -- 2) 벽 앞이어도 약한 급감속(16 -> 3, 기준 18 미만)과 덜 준 급감속(20 -> 8, 60% 감소)은 0회
+        fakeImpact.walls = {
+            { point = pos + Vector3.new(5, 0, 0), normal = Vector3.new(-1, 0, 0), halfWidth = 20 },
+        }
+        sample(16)
+        sample(3)
+        advance(0.3)
+        sample(20)
+        sample(8)
+        check(
+            H.rules().rover.damage == damage0,
+            "충돌: 기준 미달 급감속은 벽 앞이어도 0회 (18 미만, 65% 미만)"
+        )
+        -- 3) 벽 정면 20 -> 3: 1회. 같은 충돌의 연속 신호는 2초 안이면 한 번
+        advance(0.3)
+        mark = R.mark()
+        sample(20)
+        sample(19)
+        sample(3)
+        check(
+            H.rules().rover.damage == damage0 + 1 and hitsSince(mark) == 1,
+            "충돌: 벽 정면 급정거 1회"
+        )
+        advance(0.3)
+        sample(20)
+        sample(3)
         check(
             H.rules().rover.damage == damage0 + 1,
-            "같은 충돌의 태그 바위 신호는 1초 안이면 한 번으로"
+            "충돌: 2초 안 연속 신호는 한 번 (쿨다운 2초)"
         )
-        advance(1.2)
-        sample(Vector3.new(8, 0, 0))
-        sample(Vector3.new(1, 0, 0))
-        check(H.rules().rover.damage == damage0 + 1, "느리게(8) 서면 충돌 아님")
-        sample(Vector3.new(14, 0, 0))
-        sample(Vector3.new(10, 0, 0))
-        check(H.rules().rover.damage == damage0 + 1, "절반 위로 줄면(14 -> 10) 충돌 아님")
+        -- 4) 옆으로 지나가는 벽(법선이 진행 방향과 수직)은 정면이 아니다
+        advance(2.1)
+        fakeImpact.walls = {
+            { point = pos + Vector3.new(0, 0, 4), normal = Vector3.new(0, 0, -1), halfWidth = 20 },
+        }
+        sample(20)
+        sample(3)
+        check(H.rules().rover.damage == damage0 + 1, "충돌: 옆 벽은 0회")
+        -- 5) 착지 충격: 공중(바퀴 아래 지면 없음)에서 내려앉은 직후 급감속은 벽 앞이어도 0회
+        advance(0.3)
+        fakeImpact.walls = {
+            { point = pos + Vector3.new(5, 0, 0), normal = Vector3.new(-1, 0, 0), halfWidth = 20 },
+        }
+        fakeImpact.floor = pos.Y - 100
+        sample(20)
+        sample(20)
+        fakeImpact.floor = pos.Y - 1
+        sample(20)
+        sample(19)
+        sample(3)
+        check(
+            H.rules().rover.damage == damage0 + 1,
+            "충돌: 착지 직후 급감속은 0회 (0.5초 쉼)"
+        )
+        -- 6) RoverHazard(설치한 패널처럼 태그가 모델에): 정면 14면 1회, 뒤쪽이나 느리면(10) 0회
+        advance(2.1)
+        fakeImpact.walls = {}
+        local panelModel = Instance.new("Model")
+        panelModel.Name = "TestPanel"
+        panelModel:AddTag("RoverHazard")
+        local panelPart = Instance.new("Part")
+        panelPart.Name = "Glass"
+        panelPart.CFrame = CFrame.new(pos + Vector3.new(6, 0, 0))
+        panelPart.Parent = panelModel
+        panelModel.Parent = Workspace
+        setVelocity(Vector3.new(-14, 0, 0))
+        signalFor(chassis, "Touched"):Fire(panelPart)
+        advance(0)
+        check(H.rules().rover.damage == damage0 + 1, "충돌: 뒤쪽 패널 접촉은 0회")
+        setVelocity(Vector3.new(10, 0, 0))
+        signalFor(chassis, "Touched"):Fire(panelPart)
+        advance(0)
+        check(H.rules().rover.damage == damage0 + 1, "충돌: 느린(10) 패널 접촉은 0회")
+        mark = R.mark()
         setVelocity(Vector3.new(14, 0, 0))
-        signalFor(chassis, "Touched"):Fire(rock)
+        signalFor(chassis, "Touched"):Fire(panelPart)
         advance(0)
         check(
-            H.rules().rover.damage == damage0 + 2,
-            "RoverHazard 태그 파트에 세게 부딪히면 따로 센다"
+            H.rules().rover.damage == damage0 + 2 and hitsSince(mark) == 1,
+            "충돌: 패널(RoverHazard) 정면 14 접촉 1회"
         )
-        rock:Destroy()
+        panelModel:Destroy()
+        fakeImpact.walls = {}
+        fakeImpact.floor = nil
         setVelocity(Vector3.zero)
         local fixed = M.Rules.copy(H.rules())
         fixed.rover.damage = 0
@@ -2220,7 +2336,7 @@ do
     local spot = rover.PrimaryPart.CFrame.Position
     mark = R.mark()
     for _ = 1, 3 do
-        advance(1.1)
+        advance(2.1) -- 충돌 쿨다운 2초
         M.RoverFleet.registerHit(20)
     end
     local broken = H.rules().rover

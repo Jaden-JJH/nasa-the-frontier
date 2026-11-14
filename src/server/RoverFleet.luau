@@ -5,8 +5,8 @@
 --     탑승 프롬프트, 바퀴 구동(속도 배율 = 파손 x 배터리 x 부스터 x 우주 기상), 배터리(운전석에 사람이 있고 수평으로 움직일
 --     때만 소모, 주차판과 귀환 자리 바닥 넓이 위에서 기지 에너지로 충전, MANUAL_DRIVE.chargeKeepEnergy는 남긴다. 못 채우면
 --     섀시 Attribute ChargeBlocked = energy | seat | pad 이유 키), 주차 브레이크(빈 로버가 잠깐 서 있으면 고정, 타면 풀림),
---     부스터(과열), 충돌 파손(운전 중 급정거 감지 +
---     RoverHazard 태그 파트, Rules 파손 수를 같이 쓴다), 뒤집힘과 추락 자동 복구, 탱크(얼음 채취 30, 물탱크 하역).
+--     부스터(과열), 충돌 파손(운전 중 수평 급정거 + 앞 광선으로 벽 같은 면 정면 확인, 공중과 착지 직후 제외, 또는
+--     RoverHazard 태그 파트 정면 접촉. Rules 파손 수를 같이 쓴다), 뒤집힘과 추락 자동 복구, 탱크(얼음 채취 30, 물탱크 하역).
 --   자율주행(솔로, Q8): DispatchRover가 Rules.dispatchRover에 성공하면 로버가 기지 출구까지 짧게 달려가 사라진다(Parent = nil).
 --     돌아오면(Rules 상태 parked) 물탱크 옆 귀환 자리에 다시 선다. 고장(broken)이면 출구에서 얼음 후보지 쪽으로
 --     brokenDistance만큼 간 자리에 멈춰 보이고, 걸어가서 R로 고치면(Rules.walkRepairRover) 자율주행을 끝내고 고친 대원이
@@ -14,6 +14,7 @@
 --     원격 회수(Rules.remoteRecoverRover)는 콘솔에서. Rules가 일수, 에너지, 파손 확률, 물을 모두 계산한다.
 -- 수동 충돌 파손은 Rules.applyRoverHit, 그 자리 R 수리는 Rules.repairRover(수동 고장 = status "broken" + 왕복 없음).
 
+local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
@@ -67,15 +68,26 @@ RoverFleet.CONFIG = {
 local CFG = RoverFleet.CONFIG
 
 -- 충돌 감지 수치 (서버 소유. MissionConfig.MANUAL_DRIVE에 같은 이름이 생기면 그 값을 쓴다)
--- 새 맵은 디자이너 Terrain이라 바위 파트가 없다. 그래서 무엇에 부딪히든(Terrain, 파트) "운전 중 수평 속도가 짧은 시간에
--- 크게 떨어짐"을 충돌로 본다: impactWindowSeconds 안의 최고 속도가 impactSpeed 이상이었고 지금 속도가 그 impactDropRatio
--- 미만이면 1회. 같은 충돌의 연속 신호는 impactCooldownSeconds 안에서 한 번으로 센다
+-- [2026-11-15 리드 결정, Studio 직접 운전에서 작은 턱과 경사에도 너무 자주 파손] 지형과 일반 파트는 "벽 같은 면에 정면으로
+-- 박음"만 센다: 운전 중 수평 속도가 impactWindowSeconds 안 최고 impactSpeed 이상에서 그 impactDropRatio 미만으로 떨어지면,
+-- 진행 방향으로 짧은 광선(가운데 + 양옆 wallProbeSide)을 쏴서 맞은 면 법선 Y가 wallNormalMaxY 미만(경사 약 60도 이상)이고
+-- 정면(법선과 진행 반대 방향 내적 wallFacingMinDot 이상)일 때만 1회. 수직 속도는 보지 않는다(착지, 턱 넘기).
+-- 바퀴 아래 광선으로 공중을 알아내고, 공중에서 내려앉으면 landingIgnoreSeconds 동안 보지 않는다.
+-- RoverHazard 태그 파트(패널, 바위)는 정면 접촉이면 약한 기준(hazardImpactSpeed)으로 센다. 연속 신호는 impactCooldownSeconds에 한 번
 RoverFleet.MANUAL_DRIVE = {
-    impactSpeed = 12, -- studs/s (v1 ROVER_DAMAGE.speedThreshold)
-    impactDropRatio = 0.5,
+    impactSpeed = 18, -- studs/s, 수평 (이전 12)
+    impactDropRatio = 0.35, -- 속도가 65% 넘게 줄어야 (이전 0.5)
     impactWindowSeconds = 0.25,
-    impactCooldownSeconds = 1, -- v1 ROVER_DAMAGE.hitCooldown
+    impactCooldownSeconds = 2, -- 이전 1 (v1 ROVER_DAMAGE.hitCooldown)
     impactSettleSeconds = 1, -- 구동 배율이 바뀐 직후(SEP 정지, 방전, 고장)와 순간이동 직후는 이 시간 동안 보지 않는다
+    wallProbeDistance = 8, -- 섀시 가운데에서 진행 방향 광선 길이 (섀시 반 길이 5 + 3)
+    wallProbeSide = 2, -- 양옆 광선 간격 (섀시 반 폭 3 안쪽)
+    wallNormalMaxY = 0.5, -- 맞은 면 법선 Y가 이보다 작아야 벽 (경사 약 60도 이상)
+    wallFacingMinDot = 0.5, -- 맞은 면이 진행 방향을 마주 보는 정도 (60도 안)
+    hazardImpactSpeed = 12, -- RoverHazard 정면 접촉 기준 수평 속도
+    hazardFacingMinDot = 0.3, -- 섀시에서 부딪힌 파트 가운데 방향과 진행 방향 내적
+    groundProbeExtra = 1.5, -- 바퀴 아래 광선 길이 = 주행 높이 + 이 값. 못 맞히면 공중
+    landingIgnoreSeconds = 0.5, -- 공중에서 내려앉은 뒤 보지 않는 시간
 }
 
 local function impact(name: string): number
@@ -115,7 +127,9 @@ local emptyNotified = false
 local lastPosition: Vector3? = nil
 local lastPublish = -math.huge
 local lastHitAt = -math.huge
-local speedHistory: { { t: number, speed: number } } = {} -- 최근 impactWindowSeconds 동안 운전 중 수평 속도
+-- 최근 impactWindowSeconds 동안 운전 중 수평 속도와 그 방향
+local speedHistory: { { t: number, speed: number, dir: Vector3 } } = {}
+local airborne = false -- 바퀴 아래 지면을 못 찾음 (내려앉으면 landingIgnoreSeconds 쉼)
 local settleUntil = 0 -- 이 시각 전에는 급정거 감지를 하지 않는다
 local lastMultiplier = -1
 local flippedSince: number? = nil
@@ -417,9 +431,9 @@ local function isHazard(hit: Instance): boolean
     return false
 end
 
--- 바위 충돌 한 번 (Touched와 테스트가 같은 경로). 파손을 셌으면 true
-function RoverFleet.registerHit(speed: number): boolean
-    if not flow or flow.phase() ~= "playing" or speed < impact("impactSpeed") then
+-- 충돌 한 번 (벽 판정, RoverHazard 접촉, 테스트가 같은 경로). threshold가 없으면 impactSpeed. 파손을 셌으면 true
+function RoverFleet.registerHit(speed: number, threshold: number?): boolean
+    if not flow or flow.phase() ~= "playing" or speed < (threshold or impact("impactSpeed")) then
         return false
     end
     local state = rulesState()
@@ -449,12 +463,104 @@ local function resetImpact(seconds: number?)
     settleUntil = math.max(settleUntil, os.clock() + (seconds or impact("impactSettleSeconds")))
 end
 
+-- 로버와 캐릭터를 빼고 충돌하는 것만 맞히는 광선 설정
+local function probeParams(): RaycastParams
+    local params = RaycastParams.new()
+    params.FilterType = Enum.RaycastFilterType.Exclude
+    local ignore: { Instance } = {}
+    local model = rover
+    if model then
+        table.insert(ignore, model)
+    end
+    for _, player in Players:GetPlayers() do
+        local character = player.Character
+        if character then
+            table.insert(ignore, character)
+        end
+    end
+    params.FilterDescendantsInstances = ignore
+    pcall(function()
+        params.RespectCanCollide = true
+    end)
+    return params
+end
+
+-- 바퀴 아래 지면이 있는지 (주행 높이 + groundProbeExtra 안). 광선이 실패하면 땅에 있다고 본다
+local function groundedNow(body: BasePart): boolean
+    local ok, hit = pcall(function()
+        return workspace:Raycast(
+            body.CFrame.Position,
+            Vector3.new(0, -(rideHeight + impact("groundProbeExtra")), 0),
+            probeParams()
+        )
+    end)
+    return not ok or hit ~= nil
+end
+
+-- 진행 방향 앞에 벽 같은 면이 있는지 (가운데와 양옆 광선). RoverHazard를 맞히면 그것도 정면 충돌
+local function wallAhead(body: BasePart, dir: Vector3): boolean
+    local flatDir = Vector3.new(dir.X, 0, dir.Z)
+    if flatDir.Magnitude < 1e-3 then
+        return false
+    end
+    flatDir = flatDir.Unit
+    local side = Vector3.new(-flatDir.Z, 0, flatDir.X)
+    local params = probeParams()
+    local reach = flatDir * impact("wallProbeDistance")
+    for _, offset in { 0, -impact("wallProbeSide"), impact("wallProbeSide") } do
+        local origin = body.CFrame.Position + side * offset
+        local ok, hit = pcall(function()
+            return workspace:Raycast(origin, reach, params)
+        end)
+        if ok and hit then
+            if hit.Instance and isHazard(hit.Instance) then
+                return true
+            end
+            local normal = hit.Normal
+            local flatNormal = Vector3.new(normal.X, 0, normal.Z)
+            if
+                normal.Y < impact("wallNormalMaxY")
+                and flatNormal.Magnitude > 1e-3
+                and (-flatDir):Dot(flatNormal.Unit) >= impact("wallFacingMinDot")
+            then
+                return true
+            end
+        end
+    end
+    return false
+end
+
+-- RoverHazard 파트가 진행 방향 앞쪽인지 (섀시에서 파트 가운데 방향)
+local function hazardInFront(body: BasePart, hit: BasePart, dir: Vector3): boolean
+    local flatDir = Vector3.new(dir.X, 0, dir.Z)
+    if flatDir.Magnitude < 1e-3 then
+        return false
+    end
+    local offset = hit.CFrame.Position - body.CFrame.Position
+    local flatOffset = Vector3.new(offset.X, 0, offset.Z)
+    if flatOffset.Magnitude < 1e-3 then
+        return true
+    end
+    return flatOffset.Unit:Dot(flatDir.Unit) >= impact("hazardFacingMinDot")
+end
+
 -- 급정거 감지 (Heartbeat마다, 테스트도 같은 경로). 충돌로 셌으면 true
 function RoverFleet.sampleImpact(now: number, velocity: Vector3): boolean
     local s = seat
     local body = chassis
     if not s or not body or s.Occupant == nil or hidden or inField or exiting or body.Anchored then
         table.clear(speedHistory)
+        airborne = false
+        return false
+    end
+    -- 공중이면 보지 않고, 내려앉은 직후 landingIgnoreSeconds도 보지 않는다 (착지 충격은 충돌이 아니다)
+    if not groundedNow(body) then
+        airborne = true
+        table.clear(speedHistory)
+        return false
+    elseif airborne then
+        airborne = false
+        resetImpact(impact("landingIgnoreSeconds"))
         return false
     end
     if now < settleUntil or s.ThrottleFloat < 0 then
@@ -462,21 +568,29 @@ function RoverFleet.sampleImpact(now: number, velocity: Vector3): boolean
         table.clear(speedHistory)
         return false
     end
-    local speed = Vector3.new(velocity.X, 0, velocity.Z).Magnitude
+    local flatVelocity = Vector3.new(velocity.X, 0, velocity.Z)
+    local speed = flatVelocity.Magnitude
     local window = impact("impactWindowSeconds")
     local peak = 0
+    local peakDir = flatVelocity
     local keep = {}
     for _, sample in speedHistory do
         if now - sample.t <= window then
             table.insert(keep, sample)
-            peak = math.max(peak, sample.speed)
+            if sample.speed > peak then
+                peak = sample.speed
+                peakDir = sample.dir
+            end
         end
     end
     speedHistory = keep
-    table.insert(speedHistory, { t = now, speed = speed })
+    table.insert(speedHistory, { t = now, speed = speed, dir = flatVelocity })
     if peak >= impact("impactSpeed") and speed < peak * impact("impactDropRatio") then
         table.clear(speedHistory)
-        return RoverFleet.registerHit(peak)
+        -- 급감속만으로는 세지 않는다: 앞에 벽 같은 면이 있어야 (완만한 경사, 턱, 착지는 0회)
+        if wallAhead(body, peakDir) then
+            return RoverFleet.registerHit(peak)
+        end
     end
     return false
 end
@@ -1081,14 +1195,20 @@ buildRover = function()
             table.insert(
                 connections,
                 d.Touched:Connect(function(hit: BasePart)
-                    if isHazard(hit) then
-                        local peak = 0
-                        for _, sample in speedHistory do
-                            peak = math.max(peak, sample.speed)
+                    -- RoverHazard(패널, 바위): 정면 접촉이면 약한 기준(hazardImpactSpeed). 공중, 착지 직후는 보지 않는다
+                    if not isHazard(hit) or airborne or os.clock() < settleUntil then
+                        return
+                    end
+                    local v = body.AssemblyLinearVelocity
+                    local flatVelocity = Vector3.new(v.X, 0, v.Z)
+                    local peak, dir = flatVelocity.Magnitude, flatVelocity
+                    for _, sample in speedHistory do
+                        if sample.speed > peak then
+                            peak, dir = sample.speed, sample.dir
                         end
-                        RoverFleet.registerHit(
-                            math.max(peak, body.AssemblyLinearVelocity.Magnitude)
-                        )
+                    end
+                    if hazardInFront(body, hit, dir) then
+                        RoverFleet.registerHit(peak, impact("hazardImpactSpeed"))
                     end
                 end)
             )
@@ -1178,6 +1298,7 @@ function RoverFleet.reset()
     lastHitAt = -math.huge
     table.clear(speedHistory)
     settleUntil = 0
+    airborne = false
     lastMultiplier = -1
     stopBoostLoop()
     RoverFleet.refresh()
