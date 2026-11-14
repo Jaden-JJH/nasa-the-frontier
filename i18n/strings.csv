@@ -1,0 +1,482 @@
+key,en,ko,args,note,max_len
+res.energy.name,"Energy","에너지",,"age 7+; glossary, resource name next to the icon. One word for power everywhere (Q35)",12
+res.water.name,"Water","물",,"age 7+; glossary, resource name next to the icon (no W abbreviation, Q35)",12
+res.food.name,"Food","식량",,"age 7+; glossary, resource name next to the icon",12
+res.oxygen.name,"Oxygen","산소",,"age 7+; glossary, spacesuit air",12
+res.battery.name,"Battery","배터리",,"age 7+; glossary, rover battery",12
+unit.day.one,"{count} day",,"{count}","age 7+; game day count, en singular (ko always uses .other)",
+unit.day.other,"{count} days","{count}일","{count}","age 7+; game day count",
+unit.second.one,"{count} second",,"{count}","age 7+; seconds, en singular",
+unit.second.other,"{count} seconds","{count}초","{count}","age 7+; seconds",
+unit.minute.one,"{count} minute",,"{count}","age 7+; minutes, en singular",
+unit.minute.other,"{count} minutes","{count}분","{count}","age 7+; minutes",
+unit.point.one,"{count} point",,"{count}","age 7+; score points, en singular",
+unit.point.other,"{count} points","{count}점","{count}","age 7+; score points",
+unit.percent,"{n}%","{n}%","{n}","percent, n is a number",6
+key.hold,"Hold {key}","{key} 키를 길게 누르기","{key}","age 7+; prompt hint for keyboard or gamepad. key is a device label like E (client fills it). ko keeps the fixed noun 키를 so no particle problem",20
+key.press,"Press {key}","{key} 키 누르기","{key}","age 7+; prompt hint for keyboard or gamepad, key is a device label",20
+key.hold_touch,"Press and hold","길게 누르기",,"age 7+; prompt hint on touch screens (no key name)",16
+key.touch.tap,"Tap","탭",,"age 7+; touch input label shown where a key name would be",8
+key.touch.boost,"Boost","부스터",,"age 7+; label on the touch boost button",10
+prompt.act.inspect,"Start check","점검 시작",,"age 7+; 3D prompt action label (ActionKey, PromptUI 138 px), airlock control panel, 2 day check (Q28)",24
+prompt.act.install_panel,"Build panel","패널 설치",,"age 7+; 3D prompt action label (ActionKey, PromptUI 138 px), solar field slot, 3 s hold",24
+prompt.act.build,"Build {facility}","{facility} 짓기","{facility}","age 7+; 3D prompt action label (ActionKey, PromptUI 138 px), greenhouse, upgrade and pipe spots. facility is nested facility.*.name",24
+prompt.act.pick_pipe_site,"Pick site at console","콘솔에서 지점 고르기",,"age 7+; 3D prompt action label (ActionKey, PromptUI 138 px), pipe spot before an ice candidate site is picked at the lander console",24
+prompt.act.collect_ice,"Dig ice","얼음 캐기",,"age 7+; 3D prompt action label (ActionKey, PromptUI 138 px), ice candidate site, from the rover seat",24
+prompt.act.ice_wait.one,"Ready in {count} day",,"{count}","age 7+; 3D prompt action label (ActionKey, PromptUI 138 px), ice candidate site cooldown (Q9)",24
+prompt.act.ice_wait.other,"Ready in {count} days","{count}일 뒤 가능","{count}","age 7+; 3D prompt action label (ActionKey, PromptUI 138 px), ice candidate site cooldown (Q9)",24
+prompt.act.ice_piped,"Water pipe connected","물 파이프 연결됨",,"age 7+; 3D prompt action label (ActionKey, PromptUI 138 px), ice candidate site that has a pipe",24
+prompt.act.unload_water,"Unload water","물 내리기",,"age 7+; 3D prompt action label (ActionKey, PromptUI 138 px), water tank unload spot",24
+prompt.act.repair_rover,"Fix rover","로버 수리",,"age 7+; 3D prompt action label (ActionKey, PromptUI 138 px), rover chassis, also used for walk repair",24
+prompt.act.pause,"Pause","멈추기",,"age 7+; 3D prompt action label (ActionKey, PromptUI 138 px), facility wall panel (Q33)",24
+prompt.act.resume,"Turn on","다시 켜기",,"age 7+; 3D prompt action label (ActionKey, PromptUI 138 px), facility wall panel (Q33). Same words as map.fac.resume",24
+prompt.act.open_console,"Open console","콘솔 열기",,"age 7+; 3D prompt action label (ActionKey, PromptUI 138 px), console inside the lander",24
+prompt.act.board,"Get in","타기",,"age 7+; 3D prompt action label (ActionKey, PromptUI 138 px), rover seat",24
+prompt.act.open_door,"Open","열기",,"age 7+; 3D prompt action label (ActionKey, PromptUI 138 px), lander and airlock doors",24
+prompt.act.door_locked,"Locked (solar storm)","잠김 (태양 폭풍)",,"age 7+; 3D prompt action label (ActionKey, PromptUI 138 px), door during SEP (Q15)",24
+prompt.wait,"Ready in {count}s","{count}초 뒤 가능","{count}","age 7+; prompt cooldown from CooldownUntil, seconds",16
+date.month.1,"January","1월",,"month name for fmt.date.long (ko includes 월)",
+date.month.2,"February","2월",,"month name for fmt.date.long (ko includes 월)",
+date.month.3,"March","3월",,"month name for fmt.date.long (ko includes 월)",
+date.month.4,"April","4월",,"month name for fmt.date.long (ko includes 월)",
+date.month.5,"May","5월",,"month name for fmt.date.long (ko includes 월)",
+date.month.6,"June","6월",,"month name for fmt.date.long (ko includes 월)",
+date.month.7,"July","7월",,"month name for fmt.date.long (ko includes 월)",
+date.month.8,"August","8월",,"month name for fmt.date.long (ko includes 월)",
+date.month.9,"September","9월",,"month name for fmt.date.long (ko includes 월)",
+date.month.10,"October","10월",,"month name for fmt.date.long (ko includes 월)",
+date.month.11,"November","11월",,"month name for fmt.date.long (ko includes 월)",
+date.month.12,"December","12월",,"month name for fmt.date.long (ko includes 월)",
+date.month_short.1,"Jan","1월",,"short month for fmt.date.short (ko includes 월)",
+date.month_short.2,"Feb","2월",,"short month for fmt.date.short (ko includes 월)",
+date.month_short.3,"Mar","3월",,"short month for fmt.date.short (ko includes 월)",
+date.month_short.4,"Apr","4월",,"short month for fmt.date.short (ko includes 월)",
+date.month_short.5,"May","5월",,"short month for fmt.date.short (ko includes 월)",
+date.month_short.6,"Jun","6월",,"short month for fmt.date.short (ko includes 월)",
+date.month_short.7,"Jul","7월",,"short month for fmt.date.short (ko includes 월)",
+date.month_short.8,"Aug","8월",,"short month for fmt.date.short (ko includes 월)",
+date.month_short.9,"Sep","9월",,"short month for fmt.date.short (ko includes 월)",
+date.month_short.10,"Oct","10월",,"short month for fmt.date.short (ko includes 월)",
+date.month_short.11,"Nov","11월",,"short month for fmt.date.short (ko includes 월)",
+date.month_short.12,"Dec","12월",,"short month for fmt.date.short (ko includes 월)",
+fmt.date.short,"{month_short} {day}","{month_short} {day}일","{month_short} {day}","short date without year, e.g. Aug 12 / 8월 12일. Loc.formatDate also passes year, month, month_name. UTC",
+fmt.date.long,"{month_name} {day}, {year}","{year}년 {month_name} {day}일","{month_name} {day} {year}","full date for NASA DONKI source lines, e.g. August 12, 2024 / 2024년 8월 12일. UTC",
+fmt.list.two,"{a} and {b}","{a}, {b}","{a} {b}","list of two, e.g. crew names. ko avoids 와/과 particles",
+fmt.list.start,"{a}, {b}","{a}, {b}","{a} {b}","first join in a list of three or more",
+fmt.list.middle,"{a}, {b}","{a}, {b}","{a} {b}","middle join in a list of four or more",
+fmt.list.end,"{a}, and {b}","{a}, {b}","{a} {b}","last join in a list of three or more",
+fmt.per_day,"{n}/day","{n}/일","{n}","age 7+; HUD rate next to a resource, n may be a nested fmt.plus",10
+fmt.plus,"+{n}","+{n}","{n}","plus sign for a positive change",
+fmt.fraction,"{value} / {max}","{value} / {max}","{value} {max}","amount out of a maximum, e.g. 70 / 100",
+settings.language.title,"Language","언어",,"age 7+; settings and title screen row label",12
+settings.language.hint,"Choose your language","언어 선택",,"age 7+; tooltip or accessibility label for the language toggle",24
+settings.language.en_short,"EN","EN",,"segment on the EN | KR toggle, same text in every language",3
+settings.language.ko_short,"KR","KR",,"segment on the EN | KR toggle, same text in every language",3
+settings.language.en_name,"English","English",,"autonym, always shown in its own language",
+settings.language.ko_name,"한국어","한국어",,"autonym, always shown in its own language",
+settings.show_tips,"Tips","팁",,"age 7+; settings checkbox",10
+settings.show_facts,"Facts","사실 카드",,"age 7+; settings checkbox",12
+hud.day,"Day {day} of {total}","{day}일째 / {total}일","{day} {total}","age 7+; HUD top",20
+hud.days_left.one,"{count} day left",,"{count}","age 7+; HUD top, second line",16
+hud.days_left.other,"{count} days left","{count}일 남음","{count}","age 7+; HUD top, second line",16
+hud.mission.title,"Mission","미션",,"age 7+; HUD mission line header",10
+hud.low,"Low!","부족!",,"age 7+; HUD tag when a resource is under 20",6
+hud.stalled,"Facilities stopped!","시설이 멈췄어요!",,"age 7+; HUD stall tag. Only facilities stop, not the whole base (Q3)",24
+hud.stalled.energy,"Facilities stopped: no Energy","시설 멈춤: 에너지 없음",,"age 7+; HUD stall detail",32
+hud.stalled.water,"Facilities stopped: low Water","시설 멈춤: 물 부족",,"age 7+; HUD stall detail",32
+hud.oxygen.value,"Oxygen {n}","산소 {n}","{n}","age 7+; HUD oxygen bar",12
+hud.oxygen.shelter,"Safe","안전",,"age 7+; HUD oxygen bar tag inside the lander (oxygen kept, Q28)",10
+hud.oxygen.refill,"Refilling","채우는 중",,"age 7+; HUD oxygen bar tag in a working airlock or rover seat (Q28)",10
+hud.rover.out,"Rover out for ice","로버 얼음 채취 중",,"age 7+; HUD rover chip",20
+hud.rover.broken,"Rover broken!","로버 고장!",,"age 7+; HUD rover chip",16
+hud.rover.recovering,"Rover coming back","로버 회수 중",,"age 7+; HUD rover chip",20
+hud.rover.stopped,"Rover waiting (storm)","로버 대기 중 (폭풍)",,"age 7+; HUD rover chip during SEP or GST",22
+hud.battery.value,"Battery {n}","배터리 {n}","{n}","age 7+; HUD rover battery while driving",12
+mission.a.name,"Communication Base","통신 기지",,"age 7+; mission A title on the mission map (locked in v2)",20
+mission.a.site,"Malapert Massif","Malapert Massif",,"proper noun, one of the 9 candidate landing regions NASA announced in Oct 2024 (originally for Artemis III). Keep English in ko (Q35)",
+mission.a.desc,"A tall mountain. Some high spots near the pole can see Earth most of the time, good for talking to home.","높은 산이에요. 남극 근처의 높은 곳 중에는 지구가 자주 보이는 곳이 있어 지구와 연락하기 좋아요.",,"age 8+; one line on the locked card (Q23). General fact only: some south pole spots see Earth almost always. Region specific claim is unconfirmed (FACTS_V2 6.1)",
+mission.b.name,"Power Base","발전 기지",,"age 7+; mission B title on the mission map",20
+mission.b.site,"Mons Mouton Plateau","Mons Mouton Plateau",,"proper noun, one of the 9 candidate landing regions NASA announced in Oct 2024 (originally for Artemis III). Keep English in ko (Q35)",
+mission.b.desc,"A high, flat plateau. Some spots near the pole get sunlight most of the year, good for making energy.","높고 평평한 고원이에요. 남극 근처에는 한 해 대부분 햇빛이 드는 곳이 있어 에너지를 만들기 좋아요.",,"age 8+; one line on the mission card. General fact only: some south pole spots get near constant sunlight. Region specific claim is unconfirmed (FACTS_V2 6.1)",
+mission.c.name,"Food Base","식량 생산 기지",,"age 7+; mission C title on the mission map (playable first)",20
+mission.c.site,"Nobile Rim 1","Nobile Rim 1",,"proper noun, one of the 9 candidate landing regions NASA announced in Oct 2024 (originally for Artemis III). Keep English in ko (Q35)",
+mission.c.desc,"A crater rim next to dark, shadowed spots where we search for ice. Ice can give water to grow food.","얼음을 찾아볼 어두운 그늘 지역 옆의 크레이터 가장자리예요. 얼음에서 물을 얻으면 식량을 키울 수 있어요.",,"age 8+; one line on the mission card. Ice spots are ice search candidates in permanent shadow, not confirmed ice (brief 3.7)",
+mission.d.name,"Exploration Base","탐사 기지",,"age 7+; mission D title on the mission map (locked in v2)",20
+mission.d.site,"Peak near Cabeus B","Peak near Cabeus B",,"proper noun, one of the 9 candidate landing regions NASA announced in Oct 2024 (originally for Artemis III). Keep English in ko (Q35)",
+mission.d.desc,"Its name includes Cabeus. In 2009, NASA's LCROSS found water at Cabeus crater.","이름에 Cabeus가 들어가요. 2009년 NASA의 LCROSS가 Cabeus 크레이터에서 물을 찾았어요.",,"age 8+; one line on the locked card (Q23). Two separate facts on purpose: do not say near, do not say hydrogen (FACTS_V2 6.1)",
+mission.step.landing,"Landing on the Moon...","달에 착륙하는 중...",,"age 7+; HUD top mission line (StateUpdate.mission), one line",60
+mission.step.airlock,"Check the airlock so it can refill your oxygen.","에어록을 점검하면 산소를 다시 채울 수 있어요.",,"age 7+; HUD top mission line (StateUpdate.mission), one line, first goal (Q28)",60
+mission.step.panels,"Build solar panels to make Energy.","태양광 패널을 설치해 에너지를 만드세요.",,"age 7+; HUD top mission line (StateUpdate.mission), one line",60
+mission.step.water_solo,"Send the rover to an ice site from the lander console.","착륙선 콘솔에서 로버를 얼음 후보지로 보내세요.",,"age 7+; HUD top mission line (StateUpdate.mission), one line, solo self-driving rover (Q7). Ice site = candidate site",60
+mission.step.water_multi,"Drive the rover to an ice site and bring water back.","로버를 몰고 얼음 후보지에 가서 물을 가져오세요.",,"age 7+; HUD top mission line (StateUpdate.mission), one line, team game, people drive. Ice site = candidate site",60
+mission.step.farm,"Build the greenhouse to grow Food.","그린하우스를 지어 식량을 키우세요.",,"age 7+; HUD top mission line (StateUpdate.mission), one line, bronze medal goal in C",60
+mission.step.upgrades,"Add LED Grow Lights and the Nutrient System.","그린하우스에 LED 조명과 영양분 관리를 더하세요.",,"age 7+; HUD top mission line (StateUpdate.mission), one line, silver medal goal in C. Names match facility.*.name",60
+mission.step.pipe_unlock,"Unload water {need} times to unlock the water pipe ({done} / {need}).","물을 {need}번 내리면 물 파이프가 열려요 ({done} / {need}).","{need} {done}","age 7+; HUD top mission line (StateUpdate.mission), one line, same wording as toast.pipe.locked (Q10)",72
+mission.step.pipe,"Build a water pipe to an ice site.","물 파이프를 얼음 후보지에 연결하세요.",,"age 7+; HUD top mission line (StateUpdate.mission), one line",60
+mission.step.hydroponics,"Build Hydroponics for the gold medal!","수경 재배를 지으면 금메달이에요!",,"age 7+; HUD top mission line (StateUpdate.mission), one line, gold medal goal in C",60
+mission.step.finish,"Keep the base running!","기지를 계속 잘 지켜요!",,"age 7+; HUD top mission line (StateUpdate.mission), one line, after gold or while waiting for day 60",60
+mission_select.title,"Pick a Mission","미션 선택",,"age 7+; mission map screen title",20
+mission_select.status.play,"Play","시작",,"age 7+; button on a playable mission card",10
+mission_select.status.coming_soon,"Coming soon","곧 열려요",,"age 7+; badge on mission B before it is built (Q23)",14
+mission_select.status.locked,"Not ready yet","준비 중",,"age 7+; badge on dimmed missions A and D (Q23)",14
+mission_select.best_medal,"Best: {medal}","최고 기록: {medal}","{medal}","age 7+; badge next to a base pin, medal is a nested medal name (Q24)",22
+mission_select.chooser,"{name} is picking a mission","{name} 님이 미션을 고르는 중","{name}","age 7+; shown to other players, name is a raw player name. ko uses 님이 so no particle problem",40
+mission_select.auto_pick.one,"Starting {mission} in {count} second",,"{mission} {count}","age 7+; auto pick countdown (30 s, then C). mission is a nested mission name",
+mission_select.auto_pick.other,"Starting {mission} in {count} seconds","{count}초 뒤 {mission} 시작","{mission} {count}","age 7+; auto pick countdown (30 s, then C). mission is a nested mission name",
+mission_select.subtitle,"Pick where to land. Each base has its own job.","착륙할 곳을 골라요. 기지마다 맡은 일이 달라요.",,"age 7+; mission select map (Q23) subtitle. Base jobs are our game design, not NASA roles",60
+mission_select.map_title,"Moon south pole","달 남극",,"age 7+; mission select map (Q23) panel title",20
+mission_select.earth,"Toward Earth","지구 쪽",,"age 7+; mission select map (Q23) direction marker",14
+mission_select.latitude,"{lat}°S","{lat}°S","{lat}","age 7+; mission select map (Q23) latitude ring label, lat is a number",6
+mission_select.pole,"South Pole","남극점",,"age 7+; mission select map (Q23) map center",12
+mission_select.confirm,"Start mission","미션 시작",,"age 7+; mission select map (Q23) confirm button for the chooser",18
+mission_select.wait,"Waiting...","기다리는 중...",,"age 7+; mission select map (Q23) button for other players",16
+mission_select.chosen,"Mission picked!","미션 확정!",,"age 7+; mission select map (Q23) button after confirm",18
+mission_select.you_pick,"You pick the mission","내가 미션을 골라요",,"age 7+; mission select map (Q23) header line for the chooser",30
+mission_select.recommended,"Start here","여기서 시작",,"age 7+; mission select map (Q23) badge on mission C",12
+mission_select.locked_hint,"This base is not ready yet, but you can read about it.","아직 준비 중인 기지예요. 설명은 읽을 수 있어요.",,"age 7+; mission select map (Q23) detail for A and D",60
+mission_select.soon_hint,"This base opens in a future update.","이 기지는 다음 업데이트에서 열려요.",,"age 7+; mission select map (Q23) detail for B",50
+mission_select.map_note,"This map is simplified. Places and distances are not exact.","단순하게 그린 지도라 위치와 거리는 실제와 달라요.",,"age 8+; note under the mission select map. B and C are really very close, so they are drawn apart to read easily",60
+medal.gold.name,"Gold Medal","금메달",,"age 7+; medal name",14
+medal.silver.name,"Silver Medal","은메달",,"age 7+; medal name",14
+medal.bronze.name,"Bronze Medal","동메달",,"age 7+; medal name",14
+medal.none.name,"No Medal","메달 없음",,"age 7+; result when no medal was earned (kind tone)",14
+facility.airlock.name,"Airlock","에어록",,"age 7+; facility name (C, B). Shared by Rules toasts, HUD, lander console and 3D wall panels",16
+facility.farm.name,"Greenhouse","그린하우스",,"age 7+; food growing facility, the model is a greenhouse (bronze medal in C). Shared by Rules toasts, HUD, lander console and 3D wall panels",16
+facility.led.name,"LED Grow Lights","LED 조명",,"age 7+; greenhouse upgrade, faster harvest. Shared by Rules toasts, HUD, lander console and 3D wall panels",16
+facility.nutrient.name,"Nutrient System","영양분 관리",,"age 7+; greenhouse upgrade, uses less water. Shared by Rules toasts, HUD, lander console and 3D wall panels",16
+facility.pipe.name,"Water Pipe","물 파이프",,"age 7+; brings water from one ice candidate site by itself. Shared by Rules toasts, HUD, lander console and 3D wall panels",16
+facility.hydroponics.name,"Hydroponics","수경 재배",,"age 8+; greenhouse upgrade, bigger harvest. Real term kept on purpose. Shared by Rules toasts, HUD, lander console and 3D wall panels",16
+facility.tower.name,"Solar Tower","태양 전지 타워",,"age 7+; mission B facility. Shared by Rules toasts, HUD, lander console and 3D wall panels",16
+facility.powerline.name,"Power Line","전력 수송망",,"age 7+; mission B facility, links a tower to the base. Shared by Rules toasts, HUD, lander console and 3D wall panels",16
+result.medal.earned,"You got the {medal}!","{medal} 획득!","{medal}","age 7+; result screen headline, medal is a nested medal name",30
+score.title,"Score","점수",,"age 7+; result screen section title",12
+score.total,"Score: {points}","점수: {points}점","{points}","age 7+; hidden score shown at the end (starts at 1000)",20
+score.lost.title,"Points lost","깎인 점수",,"age 7+; title above the deduction list (Q4)",16
+score.lost.none,"You lost no points. Amazing!","깎인 점수가 없어요. 대단해요!",,"age 7+; shown when there are no deductions",36
+score.deduct.water_low.one,"Water was low for {count} day: -{points}",,"{count} {points}","age 7+; deduction line, water under 20 on a day (Q4)",44
+score.deduct.water_low.other,"Water was low for {count} days: -{points}","물이 부족했던 날 {count}일: -{points}점","{count} {points}","age 7+; deduction line, water under 20 on a day (Q4)",44
+score.deduct.water_zero.one,"Water ran out for {count} day: -{points}",,"{count} {points}","age 7+; deduction line, water at 0 on a day (Q4)",44
+score.deduct.water_zero.other,"Water ran out for {count} days: -{points}","물이 바닥난 날 {count}일: -{points}점","{count} {points}","age 7+; deduction line, water at 0 on a day (Q4)",44
+score.deduct.food_low.one,"Food was low for {count} day: -{points}",,"{count} {points}","age 7+; deduction line, food under 20 on a day (Q4)",44
+score.deduct.food_low.other,"Food was low for {count} days: -{points}","식량이 부족했던 날 {count}일: -{points}점","{count} {points}","age 7+; deduction line, food under 20 on a day (Q4)",44
+score.deduct.food_zero.one,"Food ran out for {count} day: -{points}",,"{count} {points}","age 7+; deduction line, food at 0 on a day (Q4)",44
+score.deduct.food_zero.other,"Food ran out for {count} days: -{points}","식량이 바닥난 날 {count}일: -{points}점","{count} {points}","age 7+; deduction line, food at 0 on a day (Q4)",44
+score.deduct.energy_low.one,"Energy was low for {count} day: -{points}",,"{count} {points}","age 7+; deduction line, energy under 20 on a day (Q4)",44
+score.deduct.energy_low.other,"Energy was low for {count} days: -{points}","에너지가 부족했던 날 {count}일: -{points}점","{count} {points}","age 7+; deduction line, energy under 20 on a day (Q4)",44
+score.deduct.energy_zero.one,"Energy ran out for {count} day: -{points}",,"{count} {points}","age 7+; deduction line, energy at 0 on a day (Q4)",44
+score.deduct.energy_zero.other,"Energy ran out for {count} days: -{points}","에너지가 바닥난 날 {count}일: -{points}점","{count} {points}","age 7+; deduction line, energy at 0 on a day (Q4)",44
+score.deduct.oxygen_rescue.one,"Needed an oxygen rescue {count} time: -{points}",,"{count} {points}","age 7+; deduction line, rescued to the airlock after oxygen ran out (Q3, Q4)",44
+score.deduct.oxygen_rescue.other,"Needed an oxygen rescue {count} times: -{points}","산소 구조 {count}번: -{points}점","{count} {points}","age 7+; deduction line, rescued to the airlock after oxygen ran out (Q3, Q4)",44
+role.controller.name,"Mission Control","관제사",,"age 7+; role name (Q25). Not Controller, kids read that as a gamepad",16
+role.controller.duty,"Watch the big map and guide your team to each goal.","전체 지도를 보고 팀이 목표까지 가도록 안내해요.",,"age 7+; one line role duty on the role picker",60
+role.explorer.name,"Explorer","탐사대원",,"age 7+; role name (Q25)",16
+role.explorer.duty,"Drive the rover out to get ice and build things.","로버를 타고 나가 얼음을 캐고 시설을 지어요.",,"age 7+; one line role duty on the role picker",60
+role.engineer.name,"Engineer","엔지니어",,"age 7+; role name (Q25)",16
+role.engineer.duty,"Fix rovers and keep the base running.","로버를 고치고 기지가 잘 돌아가게 지켜요.",,"age 7+; one line role duty on the role picker",60
+role.solo.name,"Solo","솔로",,"age 7+; one player does every role (Q25)",16
+role.solo.duty,"You do every job yourself.","혼자서 모든 일을 맡아요.",,"age 7+; one line duty for solo play",60
+role.pick.title,"Pick your job","역할을 골라요",,"age 7+; role picker title (10 s at start)",24
+role.pick.auto.one,"Auto pick in {count} second",,"{count}","age 7+; role picker countdown",
+role.pick.auto.other,"Auto pick in {count} seconds","{count}초 뒤 자동으로 정해져요","{count}","age 7+; role picker countdown",
+role.pick.mine,"Your job: {role}","내 역할: {role}","{role}","age 7+; role picker (Q25), role is nested role.*.name",30
+role.pick.choose,"Choose","고르기",,"age 7+; role picker (Q25) button",10
+role.full,"Full","자리 없음",,"age 7+; role picker (Q25) tag when a role has no free slot",10
+event.sep.name,"Solar Radiation Storm","태양 방사선 폭풍",,"age 8+; NASA DONKI SEP (solar energetic particle) event name",24
+event.sep.edu,"The Sun can shoot out tiny, super fast particles. The Moon has no thick air and no big magnetic shield to stop them, so astronauts take cover inside.","태양은 아주 작고 빠른 입자를 내뿜기도 해요. 달에는 이를 막아 줄 두꺼운 공기도, 달 전체를 감싸는 자기장도 없어서 우주비행사는 안으로 대피해요.",,"age 9+; education line under the SEP alert. Fact checked: SEP radiation, no thick atmosphere and no global magnetic field on the Moon",
+event.gst.name,"Geomagnetic Storm","지자기 폭풍",,"age 8+; NASA DONKI GST event name (Kp 6 or more)",24
+event.gst.edu,"A geomagnetic storm shakes Earth's magnetic field. On Earth, GPS and radio can have trouble. In this game, that cuts off the map and location help from Earth for a while.","지자기 폭풍은 지구의 자기장을 크게 흔들어요. 지구에서는 GPS와 무선 통신에 문제가 생길 수 있어요. 이 게임에서는 그래서 지구에서 오는 지도와 위치 안내가 한동안 끊겨요.",,"age 9+; education line under the GST alert. Effect is on Earth side support (GPS, radio, mission control link). Never say the Moon to Earth link is cut (brief 3.5, FACTS_V2)",
+event.source,"NASA DONKI record, {date}","NASA DONKI 기록, {date}","{date}","age 8+; source line under every event alert, date is a nested fmt.date.long (Q36). Never say live",40
+banner.sep.warning,"Solar storm coming! Get inside or into a rover.","태양 폭풍이 와요! 기지나 로버 안으로 들어가세요.",,"age 7+; red banner 15 s before SEP starts (Q15)",52
+banner.sep.active,"Solar storm! Stay inside.","태양 폭풍! 밖에 나가면 안 돼요.",,"age 7+; banner while SEP is active, doors locked (Q15)",52
+banner.sep.days_left.one,"Solar storm: {count} day left",,"{count}","age 7+; banner countdown during SEP",40
+banner.sep.days_left.other,"Solar storm: {count} days left","태양 폭풍: {count}일 남음","{count}","age 7+; banner countdown during SEP",40
+banner.sep.end,"The solar storm is over. You can go outside.","태양 폭풍이 끝났어요. 이제 밖에 나가도 돼요.",,"age 7+; banner when SEP ends",52
+banner.gst.active,"Geomagnetic storm! Earth support is down: no map or GPS.","지자기 폭풍! 지구 쪽 지원이 멈춰 지도와 GPS를 쓸 수 없어요.",,"age 7+; banner while GST is active (Q14). Earth side support systems, not a Moon effect (brief 3.5)",64
+banner.gst.days_left.one,"Map back in {count} day",,"{count}","age 7+; banner countdown during GST",40
+banner.gst.days_left.other,"Map back in {count} days","{count}일 뒤 지도 복구","{count}","age 7+; banner countdown during GST",40
+banner.gst.end,"Earth support is back. The map works again.","지구 쪽 지원이 돌아왔어요. 지도가 다시 작동해요.",,"age 7+; banner when GST ends",52
+banner.gst.rover_stopped,"Your rover lost its location data and stopped.","로버가 위치 정보를 잃어 멈췄어요.",,"age 7+; solo self-driving rover halts during GST because Earth location data is down (Q8)",52
+banner.shortage.water.one,"Water is out! Refill it within {count} day or the mission ends.",,"{count}","age 7+; banner, water at 0, count is days left before fail (Q3)",68
+banner.shortage.water.other,"Water is out! Refill it within {count} days or the mission ends.","물이 바닥났어요! {count}일 안에 채우지 않으면 임무가 끝나요.","{count}","age 7+; banner, water at 0, count is days left before fail (Q3)",68
+banner.shortage.food.one,"Food is out! Refill it within {count} day or the mission ends.",,"{count}","age 7+; banner, food at 0, count is days left before fail (Q3)",68
+banner.shortage.food.other,"Food is out! Refill it within {count} days or the mission ends.","식량이 바닥났어요! {count}일 안에 채우지 않으면 임무가 끝나요.","{count}","age 7+; banner, food at 0, count is days left before fail (Q3)",68
+banner.shortage.both.one,"Water and Food are out! Fix it within {count} day or the mission ends.",,"{count}","age 7+; banner, both at 0, count is days left before fail (Q3)",72
+banner.shortage.both.other,"Water and Food are out! Fix it within {count} days or the mission ends.","물과 식량이 바닥났어요! {count}일 안에 채우지 않으면 임무가 끝나요.","{count}","age 7+; banner, both at 0, count is days left before fail (Q3)",72
+banner.energy.crew_unpaid,"Energy ran out! The crew was {amount} Energy short today. Add solar panels.","에너지가 바닥났어요! 오늘 대원 몫이 {amount} 모자라요. 태양광 패널을 더 지어요.","{amount}","age 7+; banner when the crew's daily energy could not be paid. Not a fail (Q3). Counts as an energy-zero day in the hidden score, so do not mention points here (Q4)",76
+map.signal_lost,"Offline","연결 끊김",,"age 7+; label on the map and rover icon during GST, Earth support link is down (Q8)",14
+map.console.title,"Lander Console","착륙선 콘솔",,"age 7+; lander console title",20
+map.close,"Close","닫기",,"age 7+; lander console close button",10
+map.tab.map,"Map","지도",,"age 7+; lander console tab",10
+map.tab.base,"Base","기지",,"age 7+; lander console facility tab",10
+map.tab.crew,"Crew","대원",,"age 7+; lander console role tab",10
+map.legend.base,"Base","기지",,"age 7+; lander console map legend",10
+map.legend.rover,"Rover","로버",,"age 7+; lander console map legend",10
+map.legend.crew,"Crew","대원",,"age 7+; lander console map legend",10
+map.legend.pin,"Pin","핀",,"age 7+; lander console map legend",10
+map.ice.label,"Ice Site {n}","얼음 후보지 {n}","{n}","age 7+; lander console map site name. Must read as an ice search candidate (brief 3.7)",12
+map.ice.ready,"Ready","채취 가능",,"age 7+; lander console site status",12
+map.ice.cooldown.one,"Ready in {count} day",,"{count}","age 7+; lander console site cooldown (Q9)",20
+map.ice.cooldown.other,"Ready in {count} days","{count}일 뒤 가능","{count}","age 7+; lander console site cooldown (Q9)",20
+map.ice.piped,"Water pipe","물 파이프",,"age 7+; lander console site with a pipe",10
+map.ice.distance,"{n} m away","{n} m 거리","{n}","age 7+; lander console distance. Whole meters, the client converts with MissionConfig metersPerStud (lead decision: meters in all UI text)",14
+map.trip.title,"Send the rover","로버 보내기",,"age 7+; lander console trip panel title",20
+map.trip.days.one,"Round trip: about {count} day",,"{count}","age 7+; lander console trip time (Q7)",30
+map.trip.days.other,"Round trip: about {count} days","왕복 약 {count}일","{count}","age 7+; lander console trip time (Q7)",30
+map.trip.cost,"Energy cost","에너지 비용",,"age 7+; lander console trip row label",14
+map.trip.water,"Brings back","가져오는 물",,"age 7+; lander console trip row label",14
+map.trip.risk,"Risk","위험도",,"age 7+; lander console trip row label (Q30)",10
+map.risk.low,"Low","낮음",,"age 7+; lander console risk level (Q30)",10
+map.risk.mid,"Medium","중간",,"age 7+; lander console risk level (Q30)",10
+map.risk.high,"High","높음",,"age 7+; lander console risk level (Q30)",10
+map.risk.extreme,"Very high","매우 높음",,"age 7+; lander console risk level, high plus hurry (Q30)",12
+map.trip.rush,"Hurry","서둘러 가기",,"age 7+; lander console toggle (Q30)",14
+map.trip.rush_hint,"Faster, but riskier and uses more energy.","더 빨리 가지만 더 위험하고 에너지를 더 써요.",,"age 7+; lander console hurry hint (Q30)",50
+map.trip.send,"Send rover","로버 보내기",,"age 7+; lander console button",16
+map.trip.blocked.broken,"Fix the rover or bring it back first.","먼저 로버를 고치거나 불러오세요.",,"age 7+; lander console send disabled reason, rover broken in the field",40
+map.rover.parked,"At the base","기지에 있음",,"age 7+; lander console rover status",16
+map.rover.out,"Going to get ice","얼음을 가지러 가는 중",,"age 7+; lander console rover status",24
+map.rover.back,"Coming back","돌아오는 중",,"age 7+; lander console rover status",16
+map.rover.broken,"Broken down","고장 남",,"age 7+; lander console rover status",16
+map.rover.recovering,"Being brought back","회수하는 중",,"age 7+; lander console rover status",20
+map.rover.driving,"Someone is driving it","누군가 운전 중",,"age 7+; lander console rover status",24
+map.rover.stopped,"Stopped by the storm","폭풍 때문에 멈춤",,"age 7+; lander console rover status during SEP or GST",24
+map.rover.damage,"Damage {n} / {max}","파손 {n} / {max}","{n} {max}","age 7+; lander console rover damage (Q30)",16
+map.recover.walk_hint,"It is close. Walk there and fix it to keep the water.","가까워요. 걸어가서 고치면 물을 지킬 수 있어요.",,"age 7+; lander console recovery choice (Q30, Q37)",60
+map.recover.far_hint,"Too far to walk. Bring it back from here.","걸어가기엔 너무 멀어요. 여기서 회수해요.",,"age 7+; lander console recovery choice (Q37)",50
+map.recover.button.one,"Bring it back ({count} day, water is lost)",,"{count}","age 7+; lander console remote recovery button (Q30)",44
+map.recover.button.other,"Bring it back ({count} days, water is lost)","회수하기 ({count}일, 물은 잃어요)","{count}","age 7+; lander console remote recovery button (Q30)",44
+map.pin.set,"Pin this site","여기에 핀 찍기",,"age 7+; lander console Mission Control pin button (Q25)",18
+map.pin.clear,"Remove pin","핀 지우기",,"age 7+; lander console pin button",14
+map.pin.hint,"Pin an ice site to guide your team.","얼음 후보지에 핀을 찍어 팀을 안내해요.",,"age 7+; lander console pin hint for Mission Control",44
+map.pin.label,"{site}  {meters} m","{site}  {meters} m","{site} {meters}","age 7+; on screen pin arrow label. site is nested map.ice.label, meters is a number. Whole meters, the client converts with MissionConfig metersPerStud (lead decision: meters in all UI text)",20
+map.pipe.connect,"Connect water pipe","여기에 물 파이프 연결",,"age 7+; lander console pipe site button",24
+map.fac.status.locked,"Locked","잠김",,"age 7+; lander console facility status",12
+map.fac.status.available,"Ready to build","지을 수 있음",,"age 7+; lander console facility status",16
+map.fac.status.building.one,"Building: {count} day left",,"{count}","age 7+; lander console facility status",26
+map.fac.status.building.other,"Building: {count} days left","짓는 중: {count}일 남음","{count}","age 7+; lander console facility status",26
+map.fac.status.active,"Running","가동 중",,"age 7+; lander console facility status",12
+map.fac.status.paused,"Paused","멈춤",,"age 7+; lander console facility status (Q33)",12
+map.fac.status.idle,"Needs a check","점검 필요",,"age 7+; lander console airlock before its check (Q28)",16
+map.fac.status.inspecting.one,"Checking: {count} day left",,"{count}","age 7+; lander console airlock check in progress (Q28)",26
+map.fac.status.inspecting.other,"Checking: {count} days left","점검 중: {count}일 남음","{count}","age 7+; lander console airlock check in progress (Q28)",26
+map.fac.upkeep,"Daily cost","하루 유지비",,"age 7+; lander console facility row label",14
+map.fac.free,"Free","없음",,"age 7+; lander console upkeep is 0",8
+map.fac.pause,"Pause","멈추기",,"age 7+; lander console facility button (Q33). Same words as prompt.act.pause",10
+map.fac.resume,"Turn on","다시 켜기",,"age 7+; lander console facility button (Q33). Same words as prompt.act.resume",10
+map.fac.harvest.one,"Next harvest in {count} day",,"{count}","age 7+; lander console greenhouse timer (Q12)",28
+map.fac.harvest.other,"Next harvest in {count} days","{count}일 뒤 수확","{count}","age 7+; lander console greenhouse timer (Q12)",28
+map.fac.pause_hint,"Pausing saves energy and water, but the facility stops working.","멈추면 에너지와 물을 아끼지만 시설도 일을 멈춰요.",,"age 7+; lander console pause hint (Q33)",70
+map.fac.panels,"Solar panels","태양광 패널",,"age 7+; lander console facility row",16
+map.crew.title,"Crew jobs","대원 역할",,"age 7+; lander console crew tab title (Q25)",16
+map.crew.change,"Switch to this job","이 역할로 바꾸기",,"age 7+; lander console crew tab button (Q25)",20
+map.crew.you,"(you)","(나)",,"age 7+; lander console marks your own row",6
+map.crew.slot,"{role} {value}/{max}","{role} {value}/{max}","{role} {value} {max}","age 7+; lander console crew tab button, e.g. Explorer 1/2 (Q25). role is nested role.*.name, value and max are numbers",24
+toast.game.not_playing,"The mission isn't running right now.","지금은 미션 중이 아니에요.",,"age 7+; toast, action tried outside play",
+toast.outdoor.locked_sep,"Solar storm! You can't go outside now.","태양 폭풍 중이라 밖에 나갈 수 없어요.",,"age 7+; toast, outdoor action blocked during SEP (Q15)",
+toast.map.offline_gst,"The map is off during the geomagnetic storm.","지자기 폭풍 동안에는 지도를 쓸 수 없어요.",,"age 7+; toast, map action blocked during GST (Earth support down)",
+toast.panel.full,"All {total} solar panels are built.","태양광 패널 {total}장을 모두 설치했어요.","{total}","age 7+; toast, panel limit for the whole mission",
+toast.panel.limit_today,"No more panels today ({perDay} per day). Try again tomorrow.","오늘은 패널을 더 설치할 수 없어요 (하루 {perDay}장). 내일 다시 해요.","{perDay}","age 7+; toast, daily panel limit. perDay can be 1, wording avoids plural",
+toast.panel.need_energy,"You need {energy} Energy to build a panel.","패널을 설치하려면 에너지가 {energy} 필요해요.","{energy}","age 7+; toast, not enough energy for a panel",
+toast.panel.installed,"Solar panel built! ({installed} / {total})","태양광 패널 설치! ({installed} / {total})","{installed} {total}","age 7+; toast, panel placed",
+toast.panel.installed_emergency,"Emergency panel built with your last Energy! ({installed} / {total})","남은 에너지를 모두 써서 비상 패널을 설치했어요! ({installed} / {total})","{installed} {total}","age 7+; toast, rescue rule: panel bought with all remaining energy when energy could never refill",
+toast.build.unknown,"That can't be built here.","여기에는 지을 수 없어요.",,"age 7+; toast, unknown facility id",
+toast.build.max_count,"{facility}: you can build up to {max}.","{facility}: 최대 {max}개까지 지을 수 있어요.","{facility} {max}","age 7+; toast, facility is nested facility.*.name",
+toast.build.already_built,"{facility} is already built.","{facility}: 이미 지었어요.","{facility}","age 7+; toast, facility is nested facility.*.name",
+toast.build.already_building,"{facility} is already being built.","{facility}: 이미 짓는 중이에요.","{facility}","age 7+; toast, facility is nested facility.*.name",
+toast.build.need_prereq,"Build {facility} first.","먼저 {facility}부터 지어야 해요.","{facility}","age 7+; toast, missing prerequisite, facility is nested facility.*.name",
+toast.build.need_resources,"You need more: Energy {energy}, Water {water}.","더 필요해요: 에너지 {energy}, 물 {water}","{energy} {water}","age 7+; toast, shortfall amounts, either can be 0",
+toast.build.started.one,"Work started on {facility}! Ready in {count} day.",,"{facility} {count}","age 7+; toast, build or airlock check started. id is also passed (not shown)",
+toast.build.started.other,"Work started on {facility}! Ready in {count} days.","{facility} 작업 시작! {count}일 뒤 완성","{facility} {count}","age 7+; toast, build or airlock check started. id is also passed (not shown)",
+toast.build.done,"{facility} is ready!","{facility} 완성!","{facility}","age 7+; toast, build finished. id is also passed (not shown)",
+toast.pipe.unlocked,"Water pipe unlocked! It can bring water from an ice candidate site by itself.","물 파이프가 열렸어요! 얼음 후보지에서 물을 저절로 가져와요.",,"age 7+; toast, after enough water deliveries (Q10)",
+toast.pipe.locked,"Unload water {need} times to unlock the water pipe ({done} / {need}).","물을 {need}번 내리면 물 파이프가 열려요 ({done} / {need}).","{need} {done}","age 7+; toast, pipe not unlocked yet (Q10)",
+toast.pipe.pick_site,"Pick an ice candidate site for the water pipe.","물 파이프를 연결할 얼음 후보지를 고르세요.",,"age 7+; toast, pipe needs a site",
+toast.pipe.site_taken,"{site} already has a water pipe.","{site}에는 이미 물 파이프가 있어요.","{site}","age 7+; toast. site is nested map.ice.label { n } (Ice Site 2 / 얼음 후보지 2). ko uses only particles that do not change with the last sound (에, 에서, 에는, 까지)",
+toast.pipe.delivered,"The water pipe brought in {amount} water.","물 파이프로 물이 들어왔어요! 물 +{amount}","{amount}","age 7+; toast, automatic pipe delivery",
+toast.pause.no_facility,"That facility isn't there.","그 시설이 없어요.",,"age 7+; toast, pause target missing",
+toast.pause.not_allowed,"{facility} can't be paused.","{facility}: 멈출 수 없는 시설이에요.","{facility}","age 7+; toast, facility is nested facility.*.name (Q33)",
+toast.pause.not_active,"{facility} isn't running yet.","{facility}: 아직 가동 전이에요.","{facility}","age 7+; toast, facility is nested facility.*.name (Q33)",
+toast.pause.already_paused,"{facility} is already paused.","{facility}: 이미 멈춰 있어요.","{facility}","age 7+; toast, facility is nested facility.*.name (Q33)",
+toast.pause.already_running,"{facility} is already running.","{facility}: 이미 가동 중이에요.","{facility}","age 7+; toast, facility is nested facility.*.name (Q33)",
+toast.pause.on,"{facility} paused: no upkeep, no effect.","{facility} 일시 정지: 유지비도 효과도 멈춰요.","{facility}","age 7+; toast, sent to everyone (Q33). id is also passed (not shown)",
+toast.pause.off,"{facility} is running again.","{facility} 다시 가동!","{facility}","age 7+; toast, sent to everyone (Q33). id is also passed (not shown)",
+toast.rover.busy,"The rover is busy right now.","로버가 지금 다른 일을 하고 있어요.",,"age 7+; toast",
+toast.rover.need_repair,"Fix the rover first.","먼저 로버를 고쳐야 해요.",,"age 7+; toast",
+toast.rover.sep_hold,"Rovers can't move during the solar storm.","태양 폭풍 동안에는 로버가 움직일 수 없어요.",,"age 7+; toast, SEP (Q15)",
+toast.rover.pick_site,"Pick an ice candidate site on the map.","지도에서 얼음 후보지를 고르세요.",,"age 7+; toast",
+toast.rover.site_piped,"A water pipe already takes water from {site}.","{site}에는 이미 물 파이프가 연결되어 있어요.","{site}","age 7+; toast. site is nested map.ice.label { n } (Ice Site 2 / 얼음 후보지 2). ko uses only particles that do not change with the last sound (에, 에서, 에는, 까지)",
+toast.rover.site_cooldown.one,"{site} needs {count} more day before you can dig again.",,"{site} {count}","age 7+; toast, site cooldown (Q9). site is nested map.ice.label { n } (Ice Site 2 / 얼음 후보지 2). ko uses only particles that do not change with the last sound (에, 에서, 에는, 까지)",
+toast.rover.site_cooldown.other,"{site} needs {count} more days before you can dig again.","{site}에서는 {count}일 뒤에 다시 캘 수 있어요.","{site} {count}","age 7+; toast, site cooldown (Q9). site is nested map.ice.label { n } (Ice Site 2 / 얼음 후보지 2). ko uses only particles that do not change with the last sound (에, 에서, 에는, 까지)",
+toast.rover.need_energy,"You need {energy} Energy for this.","에너지가 {energy} 필요해요.","{energy}","age 7+; toast, rover trip, repair or recovery cost",
+toast.rover.dispatched.one,"Rover sent to {site}! Back in about {count} day. Energy -{energy}",,"{site} {count} {energy}","age 7+; toast, solo self-driving trip (Q7). energy is a positive cost. site is nested map.ice.label { n } (Ice Site 2 / 얼음 후보지 2). ko uses only particles that do not change with the last sound (에, 에서, 에는, 까지)",
+toast.rover.dispatched.other,"Rover sent to {site}! Back in about {count} days. Energy -{energy}","로버 출발! {site}까지 왕복 약 {count}일, 에너지 -{energy}","{site} {count} {energy}","age 7+; toast, solo self-driving trip (Q7). energy is a positive cost. site is nested map.ice.label { n } (Ice Site 2 / 얼음 후보지 2). ko uses only particles that do not change with the last sound (에, 에서, 에는, 까지)",
+toast.rover.not_home,"Park the rover at the base first.","먼저 로버를 기지에 세워 주세요.",,"age 7+; toast, repair needs the rover parked",
+toast.rover.no_damage,"The rover has nothing to fix.","로버에 고칠 곳이 없어요.",,"age 7+; toast",
+toast.rover.repaired,"Rover fixed!","로버 수리 완료!",,"age 7+; toast",
+toast.rover.not_broken,"The rover isn't broken down.","로버가 고장 나지 않았어요.",,"age 7+; toast",
+toast.rover.too_far_walk,"Too far to walk ({distance} m, limit {limit} m). Call the rover back from the lander console.","걸어가기엔 너무 멀어요 ({distance} m, 최대 {limit} m). 착륙선 콘솔에서 로버를 불러오세요.","{distance} {limit}","age 7+; toast, walk repair is only allowed within oxygen range (Q37). Distances are whole meters, converted by the sender with MissionConfig metersPerStud (lead decision: meters in all UI text)",
+toast.rover.recovering.one,"Calling the rover back: {count} day. Water lost: {lost}",,"{count} {lost}","age 7+; toast, remote recovery from the lander console (Q30)",
+toast.rover.recovering.other,"Calling the rover back: {count} days. Water lost: {lost}","로버를 원격으로 불러와요: {count}일. 잃은 물: {lost}","{count} {lost}","age 7+; toast, remote recovery from the lander console (Q30)",
+toast.rover.recovered,"The rover is back at the base (damage {damage}). Fix it at the rover park.","로버가 기지로 돌아왔어요 (파손 {damage}). 로버 주차장에서 고치세요.","{damage}","age 7+; toast, remote recovery finished",
+toast.rover.repaired_drive_back,"Rover fixed! Drive it back to the base. The rover seat refills your oxygen.","로버를 고쳤어요! 로버를 몰고 기지로 돌아가요. 로버 좌석에서 산소가 다시 차요.",,"age 7+; toast to that player only. After a walk repair the player sits in the rover, self-driving ends, so they drive it home. Water on board stays in the rover tank (RoverFleet, Q28 seat refill)",80
+toast.rover.broken_walkable,"The rover broke down on the way to {site}, {distance} m away. Walk there to fix it, or call it back from the lander console.","로버가 {site}에 가다가 고장 났어요 ({distance} m). 걸어가서 고치거나 착륙선 콘솔에서 불러오세요.","{site} {distance}","age 7+; toast, breakdown within walking range (Q30, Q37). Distances are whole meters, converted by the sender with MissionConfig metersPerStud (lead decision: meters in all UI text). site is nested map.ice.label { n } (Ice Site 2 / 얼음 후보지 2). ko uses only particles that do not change with the last sound (에, 에서, 에는, 까지)",
+toast.rover.broken_far,"The rover broke down on the way to {site}, {distance} m away. It's too far to walk, so call it back from the lander console.","로버가 {site}에 가다가 고장 났어요 ({distance} m). 걸어가기엔 멀어서 착륙선 콘솔에서 불러와야 해요.","{site} {distance}","age 7+; toast, breakdown beyond walking range (Q30, Q37). Distances are whole meters, converted by the sender with MissionConfig metersPerStud (lead decision: meters in all UI text). site is nested map.ice.label { n } (Ice Site 2 / 얼음 후보지 2). ko uses only particles that do not change with the last sound (에, 에서, 에는, 까지)",
+toast.rover.damaged,"The rover got bumped! Damage: {damage}. It will be a bit slower.","로버가 부딪혔어요! 파손 {damage}. 조금 느려져요.","{damage}","age 7+; toast, damage 1 or 2 slows later trips (Q30)",
+toast.rover.returned,"The rover is back from {site} with {amount} water!","로버가 {site}에서 돌아왔어요! 물 +{amount}","{site} {amount}","age 7+; toast, self-driving trip finished, water goes into the tank. site is nested map.ice.label { n } (Ice Site 2 / 얼음 후보지 2). ko uses only particles that do not change with the last sound (에, 에서, 에는, 까지)",
+toast.ice.collected,"Got ice at {site}! The rover carries {amount} water.","{site}에서 얼음을 캤어요! 로버에 물 +{amount}","{site} {amount}","age 7+; toast, manual collect in multiplayer (rover tank, not base yet). site is nested map.ice.label { n } (Ice Site 2 / 얼음 후보지 2). ko uses only particles that do not change with the last sound (에, 에서, 에는, 까지)",
+toast.water.nothing,"The rover has no water to unload.","로버에 내릴 물이 없어요.",,"age 7+; toast",
+toast.water.delivered,"Put {amount} water in the tank.","물탱크에 물 {amount} 넣었어요.","{amount}","age 7+; toast, manual unload. Overflow is sent separately as toast.water.overflow",
+toast.water.overflow,"The water tank is full. {amount} water spilled.","물탱크가 가득 차서 물이 {amount}만큼 넘쳤어요.","{amount}","age 7+; toast, daily inflow above the cap of 100",
+toast.food.overflow,"Food storage is full. {amount} Food went to waste.","식량이 가득 차서 {amount}만큼 버려졌어요.","{amount}","age 7+; toast, harvest above the cap of 100",
+toast.harvest,"Harvest time! +{amount} Food","수확했어요! 식량 +{amount}","{amount}","age 7+; toast, farm harvest (Q12)",
+toast.stall.cleared,"Facilities are running again.","시설이 다시 돌아가요.",,"age 7+; toast",
+toast.stall.stopped_water,"Not enough Water! Stopped: {facilities}","물이 부족해서 멈췄어요: {facilities}","{facilities}","age 7+; toast, Rules turns off facilities one by one when upkeep water runs short. facilities is a nested Msg.list of facility.*.name (fmt.list.*, ko joins with commas so no particle problem)",
+toast.stall.stopped_energy,"Not enough Energy! Stopped: {facilities}","에너지가 부족해서 멈췄어요: {facilities}","{facilities}","age 7+; toast, Rules turns off facilities one by one when upkeep energy runs short. facilities is a nested Msg.list of facility.*.name (fmt.list.*, ko joins with commas so no particle problem)",
+toast.stall.resumed,"Running again: {facilities}","다시 돌아가요: {facilities}","{facilities}","age 7+; toast, some stopped facilities run again (all of them uses toast.stall.cleared). facilities is a nested Msg.list of facility.*.name (fmt.list.*, ko joins with commas so no particle problem)",
+toast.oxygen.rescued,"Out of oxygen! You were brought back to the airlock.","산소가 떨어져 에어록으로 구조됐어요.",,"age 7+; toast, oxygen rescue (Q3). points is passed but not shown, the score stays hidden during play (Q4)",
+toast.role.changed,"{name}'s job: {role}","{name} 님의 역할: {role}","{name} {role}","age 7+; toast, role swap or auto handover of Mission Control (Q25). name is a raw player name, role is nested role.*.name",
+toast.role.full,"{role} is already taken.","{role} 역할은 이미 찼어요.","{role}","age 7+; toast, role slots full (Q25), role is nested role.*.name",
+toast.role.need_console,"Swap jobs at the lander console.","역할은 착륙선 콘솔에서 바꿀 수 있어요.",,"age 7+; toast (Q25)",
+toast.map.controller_only,"Only Mission Control can use the big map.","전체 지도는 관제사만 쓸 수 있어요.",,"age 7+; toast, map and pins are locked to the controller (Q25)",
+toast.console.too_far,"Go to the lander console first.","먼저 착륙선 콘솔로 가세요.",,"age 7+; toast",
+toast.rover.solo_only,"In a team game, drive the rover yourselves!","여럿이 할 때는 로버를 직접 운전해요!",,"age 7+; toast, self-driving is solo only",
+toast.rover.occupied,"Someone is already in the rover.","누군가 로버에 타고 있어요.",,"age 7+; toast",
+toast.rover.battery_low,"Rover battery is low ({percent}%)!","로버 배터리가 부족해요 ({percent}%)!","{percent}","age 7+; toast, percent is a number",
+toast.rover.battery_empty,"The rover battery is empty, so it stopped. Bring it back from the lander console.","로버 배터리가 다 떨어져 멈췄어요. 착륙선 콘솔에서 불러오세요.",,"age 7+; toast",
+toast.rover.charged,"The rover battery is full.","로버 배터리가 가득 찼어요.",,"age 7+; toast",
+toast.rover.broken_manual,"The rover is broken! Go to it and fix it ({key_repair}).","로버가 고장 났어요! 가까이 가서 고치세요 ({key_repair}).","{key_repair}","age 7+; toast, hand driving, third crash. key_repair is filled by the client Localizer (device label), not by the server",
+toast.rover.brought_back,"The rover was brought back to the base.","로버를 기지로 다시 가져왔어요.",,"age 7+; toast, flipped, fell, or pulled back from the console",
+toast.rover.tank_lost,"The rover lost the water it carried: {amount}","로버에 실은 물을 잃었어요: {amount}","{amount}","age 7+; toast",
+toast.rover.tank_full,"The rover tank is full. Unload it at the water tank.","로버 물탱크가 가득 찼어요. 기지 물탱크에 내리세요.",,"age 7+; toast",
+toast.rover.need_driver,"Drive the rover here to dig ice.","얼음을 캐려면 로버를 몰고 오세요.",,"age 7+; toast, at an ice candidate site without the rover",
+toast.rover.not_here,"Park the rover next to the water tank first.","먼저 로버를 물탱크 옆에 세우세요.",,"age 7+; toast, unload needs the rover at the tank",
+toast.rover.recover_wait.one,"You can bring the rover back again in {count} second.",,"{count}","age 7+; toast, console pull back cooldown",
+toast.rover.recover_wait.other,"You can bring the rover back again in {count} seconds.","{count}초 뒤에 다시 불러올 수 있어요.","{count}","age 7+; toast, console pull back cooldown",
+toast.rover.first_board,"You're driving! Hold {key_boost} to go faster.","운전 시작! 더 빨리 가려면: {key_boost} 길게 누르기","{key_boost}","age 7+; toast, first time in the rover. key_boost is filled by the client Localizer (device label)",
+toast.restart.too_soon.one,"You can play again in {count} second.",,"{count}","age 7+; toast, restart cooldown",
+toast.restart.too_soon.other,"You can play again in {count} seconds.","{count}초 뒤에 다시 할 수 있어요.","{count}","age 7+; toast, restart cooldown",
+toast.restart.not_chooser,"{name} can start the next game.","{name} 님이 다음 판을 시작할 수 있어요.","{name}","age 7+; toast, name is a raw player name. ko uses 님이 so no particle problem",
+toast.sep.shelter_rover,"Solar storm! You hopped into the rover to stay safe.","태양 폭풍! 안전하게 로버에 탔어요.",,"age 7+; toast, auto shelter when SEP starts (Q15)",
+toast.sep.shelter_airlock,"Solar storm! You were moved inside to stay safe.","태양 폭풍! 안전하게 안으로 옮겨졌어요.",,"age 7+; toast, auto shelter when SEP starts (Q15)",
+toast.oxygen.low,"Oxygen is low! Go inside or get in the rover.","산소가 부족해요! 안으로 들어가거나 로버에 타세요.",,"age 7+; toast, outdoor oxygen warning (Q28). Glossary word Oxygen, not air",
+toast.facility.too_far,"Use the control panel or the lander console.","제어반이나 착륙선 콘솔에서 조작하세요.",,"age 7+; toast (Q33)",
+toast.pipe.site_set,"The water pipe will go to {site}. Build it at the water tank.","물 파이프를 {site}에 연결해요. 물탱크 옆에서 지으세요.","{site}","age 7+; toast. site is nested map.ice.label { n } (Ice Site 2 / 얼음 후보지 2). ko uses only particles that do not change with the last sound (에, 에서, 에는, 까지)",
+toast.mission.not_ready,"That base isn't ready yet.","그 기지는 아직 준비 중이에요.",,"age 7+; toast, mission select, bases other than C (Q23)",
+tip.badge,"Tip","팁",,"age 7+; tip card badge",6
+tip.airlock,"First job: walk to the airlock and start its check. Then it can refill your oxygen.","첫 임무: 에어록으로 걸어가 점검을 시작해요. 그러면 산소를 채울 수 있어요.",,"age 7+; tip card, 2 to 3 lines (Q28)",
+tip.oxygen,"Oxygen runs out outside. Go back into the lander or a working airlock to refill.","밖에서는 산소가 줄어요. 착륙선이나 가동 중인 에어록에 들어가 채워요.",,"age 7+; tip card, 2 to 3 lines (Q28)",
+tip.console,"Use the lander console to see the map and send the rover for ice.","착륙선 콘솔에서 지도를 보고 로버를 보내 얼음을 가져와요.",,"age 7+; tip card, 2 to 3 lines, solo",
+tip.console_team,"Mission Control can pin an ice site on the console map. Everyone else sees an arrow.","관제사는 콘솔 지도에서 얼음 후보지에 핀을 찍을 수 있어요. 다른 대원에게는 화살표가 보여요.",,"age 7+; tip card, 2 to 3 lines, team game (Q25)",
+tip.pin,"Follow the arrow to the spot Mission Control picked.","관제사가 고른 곳까지 화살표를 따라가요.",,"age 7+; tip card, 2 to 3 lines, team game",
+tip.pause,"Low on energy? Pause a facility at the console or on its wall panel to save energy.","에너지가 부족하면 콘솔이나 건물 벽 제어반에서 시설을 잠시 멈춰 아껴요.",,"age 7+; tip card, 2 to 3 lines (Q33)",
+tip.rover_damage,"Your rover got hurt and is slower now. Repair it at the rover park.","로버가 다쳐서 느려졌어요. 로버 주차장에서 고쳐요.",,"age 7+; tip card, 2 to 3 lines (Q30)",
+tip.pipe,"The water pipe is unlocked! Pick an ice site for it on the console map.","물 파이프가 열렸어요! 콘솔 지도에서 연결할 얼음 후보지를 골라요.",,"age 7+; tip card, 2 to 3 lines (Q10)",
+tip.boost,"Hold {key_boost} to boost. It uses the battery faster.","{key_boost} 길게 누르면 부스터가 켜져요. 배터리가 빨리 줄어요.","{key_boost}","age 7+; tip card, 2 to 3 lines. key_boost is filled by Localizer (device label), callers pass nothing",
+tip.low_food,"Food is getting low. Build the greenhouse to grow more food.","식량이 줄고 있어요. 그린하우스를 지어 식량을 길러요.",,"age 7+; tip card, 2 to 3 lines",
+tip.low_water,"Water is getting low. Send the rover to an ice site.","물이 줄고 있어요. 로버를 얼음 후보지로 보내요.",,"age 7+; tip card, 2 to 3 lines, solo",
+tip.low_water_team,"Water is getting low. Drive the rover to an ice site and bring ice back.","물이 줄고 있어요. 로버를 몰고 얼음 후보지에 다녀와요.",,"age 7+; tip card, 2 to 3 lines, team game",
+tip.sep,"Solar storms are dangerous. When the warning shows, get inside fast!","태양 폭풍은 위험해요. 경보가 뜨면 얼른 안으로 들어가요!",,"age 7+; tip card, 2 to 3 lines (Q15)",
+tip.panels,"Put up solar panels at the solar field. Each panel makes energy every day.","태양광 필드에 태양광 패널을 세워요. 패널은 날마다 에너지를 만들어요.",,"age 7+; tip card, 2 to 3 lines",
+tip.pause_to_save,"Done building? Pause LED Grow Lights and the Nutrient System to save energy for your next build. Built things still count for your medal.","다 지었나요? LED 조명과 영양분 관리를 잠시 멈추면 다음 건설에 쓸 에너지를 아낄 수 있어요. 이미 지은 시설은 그대로 메달에 들어가요.",,"age 8+; tip card, shown once right after the first greenhouse upgrade becomes active (Q33). Names match facility.*.name",
+fact.badge,"Did you know?","알고 있나요?",,"age 7+; fact card badge",16
+fact.source,"Based on public NASA information","NASA 공개 자료 기반",,"age 8+; fact card footer, sources per card in docs/content/FACTS_V2.md",36
+fact.south_pole.title,"Why the south pole?","왜 달의 남극일까요?",,"age 8+; fact card, verbatim from docs/content/FACTS_V2.md card 1 title",52
+fact.south_pole.body,"Near the Moon's south pole, the Sun hangs low over the horizon, and some high spots stay sunny for a long time. Some deep craters never see sunlight at all, and NASA missions have found signs of ice in some of them. That is one reason NASA plans to build a Moon Base near the south pole.","달의 남극 근처에서는 해가 지평선 가까이에 낮게 떠 있고, 높은 곳 중에는 햇빛을 아주 오래 받는 곳이 있어요. 깊은 크레이터 중에는 햇빛이 전혀 닿지 않는 곳도 있는데, NASA 탐사선이 그 가운데 일부에서 얼음의 흔적을 찾았어요. 이것이 NASA가 남극 근처에 달 기지(Moon Base)를 지으려는 이유 중 하나예요.",,"age 9+; fact card, verbatim from docs/content/FACTS_V2.md card 1 body. Edit only with the fact check, sources listed there",
+fact.shadowed_ice.title,"Craters that never see the Sun","해가 한 번도 비치지 않는 크레이터",,"age 8+; fact card, verbatim from docs/content/FACTS_V2.md card 2 title",52
+fact.shadowed_ice.body,"The Moon is tilted by only about 1.5 degrees, so sunlight never reaches the floors of some craters near the poles. These dark, very cold places are called permanently shadowed regions. Water that gets into them may stay frozen for a very long time.","달은 기울어진 정도가 약 1.5도뿐이라서, 극지방 가까이에 있는 어떤 크레이터 바닥에는 햇빛이 한 번도 닿지 않아요. 이렇게 어둡고 아주 추운 곳을 '영구 음영 지역'이라고 불러요. 이곳에 들어간 물은 아주 오랫동안 얼음으로 남아 있을 수 있어요.",,"age 9+; fact card, verbatim from docs/content/FACTS_V2.md card 2 body. Edit only with the fact check, sources listed there",
+fact.lcross.title,"The crash that found water","물을 찾아낸 우주선 충돌",,"age 8+; fact card, verbatim from docs/content/FACTS_V2.md card 3 title",52
+fact.lcross.body,"In 2009, a NASA spacecraft called LCROSS crashed its rocket stage into Cabeus, a crater at the Moon's south pole, on purpose. Four minutes later, LCROSS itself flew through the cloud of dust that rose up and measured it. Scientists reported that LCROSS found water there.","2009년에 NASA의 우주선 LCROSS는 로켓 상단부를 일부러 달 남극의 카베우스(Cabeus) 크레이터에 충돌시켰어요. 4분 뒤 LCROSS가 솟아오른 먼지 구름 속을 날아가며 성분을 조사했어요. 과학자들은 그곳에서 물을 찾았다고 발표했어요.",,"age 9+; fact card, verbatim from docs/content/FACTS_V2.md card 3 body. Edit only with the fact check, sources listed there",
+fact.isru.title,"Using what the Moon already has","달에 있는 것을 가져다 써요",,"age 8+; fact card, verbatim from docs/content/FACTS_V2.md card 4 title",52
+fact.isru.body,"Shipping everything from Earth is very hard, so NASA wants to use resources found where astronauts go. This idea is called ISRU, short for in-situ resource utilization, which means using local resources. Moon ice could give astronauts water to use, and NASA is studying how to split water into oxygen and hydrogen to make rocket fuel.","필요한 물건을 모두 지구에서 실어 나르는 일은 아주 어려워요. 그래서 NASA는 우주비행사가 가는 곳에서 구할 수 있는 자원을 쓰려고 해요. 이것을 ISRU(현지 자원 활용)라고 불러요. 달의 얼음은 우주비행사가 쓸 물이 될 수 있고, NASA는 물을 산소와 수소로 나눠 로켓 연료를 만드는 방법도 연구하고 있어요.",,"age 9+; fact card, verbatim from docs/content/FACTS_V2.md card 4 body. Edit only with the fact check, sources listed there",
+fact.lunar_day.title,"A very long day on the Moon","달의 하루는 아주 길어요",,"age 8+; fact card, verbatim from docs/content/FACTS_V2.md card 5 title",52
+fact.lunar_day.body,"Near the Moon's equator, daylight lasts about 14 Earth days, and then the night lasts about 14 more. Near the south pole, the Sun circles close to the horizon and never climbs high in the sky. Some high ridges stay sunny for much longer, which makes them good places for solar panels.","달의 적도 근처에서는 낮이 지구 시간으로 약 14일 이어지고, 그다음 밤도 약 14일 이어져요. 남극 근처에서는 해가 지평선 가까이에서 빙글빙글 돌고 하늘 높이 올라가지 않아요. 높은 능선 중에는 훨씬 오래 햇빛을 받는 곳이 있어서 태양광 패널을 놓기에 좋아요.",,"age 9+; fact card, verbatim from docs/content/FACTS_V2.md card 5 body. Edit only with the fact check, sources listed there",
+fact.space_garden.title,"Fresh food from a space garden","우주 정원에서 얻은 신선한 음식",,"age 8+; fact card, verbatim from docs/content/FACTS_V2.md card 6 title",52
+fact.space_garden.body,"Astronauts on the International Space Station have grown lettuce and other plants in a small garden called Veggie. Some of the plants were picked and eaten by the crew, and the food was safe. Plants can also help astronauts stay happy and healthy on long trips.","국제우주정거장의 우주비행사들은 '베지(Veggie)'라는 작은 정원에서 상추 같은 식물을 길렀어요. 그중 일부는 수확해서 직접 먹었고, 안전한 음식이었어요. 식물은 긴 우주여행에서 우주비행사의 마음과 몸을 건강하게 지키는 데도 도움이 돼요.",,"age 9+; fact card, verbatim from docs/content/FACTS_V2.md card 6 body. Edit only with the fact check, sources listed there",
+fact.grow_lights.title,"Why does the space garden glow pink?","우주 정원은 왜 분홍색으로 빛날까요?",,"age 8+; fact card, verbatim from docs/content/FACTS_V2.md card 7 title",52
+fact.grow_lights.body,"Plants use mostly red and blue light, and they reflect a lot of green light. So the LED lights (small, bright lamps) above NASA's Veggie space garden are chosen for what plants use, and the chamber typically glows magenta pink. Another space garden, the Advanced Plant Habitat, uses red, blue and green LEDs.","식물은 주로 빨간빛과 파란빛을 쓰고, 초록빛은 많이 반사해요. 그래서 NASA의 우주 정원 '베지' 위에는 식물에게 맞춘 LED 조명(작고 밝은 전등)이 달려 있고, 식물 방이 보통 자홍빛 분홍색으로 빛나요. 또 다른 우주 정원인 '어드밴스드 플랜트 해비타트'는 빨강, 파랑, 초록 LED를 써요.",,"age 9+; fact card, verbatim from docs/content/FACTS_V2.md card 7 body. Edit only with the fact check, sources listed there",
+fact.hydroponics.title,"Gardening without soil","흙 없이 키우는 정원",,"age 8+; fact card, verbatim from docs/content/FACTS_V2.md card 8 title",52
+fact.hydroponics.body,"NASA tested a space garden called XROOTS that grows plants without soil. It uses hydroponics (roots sit in water with plant food) and aeroponics (roots are misted with water and plant food). Astronauts on the space station harvested tomatoes grown this way.","NASA는 흙 없이 식물을 기르는 우주 정원 'XROOTS'를 시험했어요. 수경 재배(뿌리를 영양분이 든 물에 담가 기르는 방법)와 분무 재배(뿌리에 영양분이 든 물안개를 뿌려 기르는 방법)를 써요. 우주정거장의 우주비행사들이 이 방법으로 자란 토마토를 수확했어요.",,"age 9+; fact card, verbatim from docs/content/FACTS_V2.md card 8 body. Edit only with the fact check, sources listed there",
+fact.plant_water.title,"Every drop of water counts","물 한 방울도 소중해요",,"age 8+; fact card, verbatim from docs/content/FACTS_V2.md card 9 title",52
+fact.plant_water.body,"In space, every drop of water counts. NASA's Advanced Plant Habitat, a space garden, handles its water recovery and distribution automatically. On the space station, the crew's life support system can now recover about 98% of the water, almost all of it, from urine, sweat and breath moisture.","우주에서는 물 한 방울도 소중해요. NASA의 우주 정원 '어드밴스드 플랜트 해비타트'는 물을 되찾고 나눠 주는 일을 자동으로 해요. 국제우주정거장의 생명 유지 장치는 소변, 땀, 숨에서 나온 수분에서 물의 약 98%, 거의 전부를 다시 찾아 쓸 수 있어요.",,"age 9+; fact card, verbatim from docs/content/FACTS_V2.md card 9 body. Edit only with the fact check, sources listed there",
+fact.sep.title,"Fast particles from the Sun","태양에서 오는 빠른 입자",,"age 8+; fact card, verbatim from docs/content/FACTS_V2.md card 10 title",52
+fact.sep.body,"A big eruption on the Sun can shoot out tiny particles at very high speed, called solar energetic particles, or SEP. They can cross the space from the Sun to Earth in as little as tens of minutes, and a storm can last hours to days. The Moon has no global magnetic field (the invisible bubble that helps protect Earth) and only a very thin atmosphere, so astronauts outside can be in danger.","태양에서 큰 폭발이 일어나면 아주 작은 입자들이 엄청난 속도로 튀어나올 수 있어요. 이것을 태양 고에너지 입자, 줄여서 SEP라고 해요. 이 입자는 태양에서 지구까지 짧게는 수십 분 만에 날아올 수 있고, 폭풍은 몇 시간에서 며칠까지 이어져요. 달에는 지구를 지켜 주는 보이지 않는 방패 같은 전 지구적 자기장이 없고 대기도 아주 얇아서, 밖에 있는 우주비행사는 위험할 수 있어요.",,"age 9+; fact card, verbatim from docs/content/FACTS_V2.md card 10 body. Edit only with the fact check, sources listed there",
+fact.sep_shelter.title,"Hide behind a wall of bags","짐 가방으로 쌓는 방패",,"age 8+; fact card, verbatim from docs/content/FACTS_V2.md card 11 title",52
+fact.sep_shelter.body,"Orion is the spaceship that carries Artemis astronauts. It has a sensor that warns the crew about a radiation storm, and the crew has up to about an hour to build a shelter from stowage bags, which put extra material between them and the radiation. They might need to stay inside for as long as 24 hours.","오리온은 아르테미스 우주비행사를 태우고 가는 우주선이에요. 방사선 폭풍이 오면 경보 장치가 알려 주고, 승무원은 약 한 시간 안에 짐 가방을 쌓아 대피 공간을 만들어요. 가방이 방사선과 사람 사이에 물질을 더해 주고, 상황에 따라 최대 24시간까지 그 안에 머물러야 할 수 있어요.",,"age 9+; fact card, verbatim from docs/content/FACTS_V2.md card 11 body. Edit only with the fact check, sources listed there",
+fact.geomagnetic.title,"When Earth's magnetic bubble shakes","지구 자기장이 크게 흔들릴 때",,"age 8+; fact card, verbatim from docs/content/FACTS_V2.md card 12 title",52
+fact.geomagnetic.body,"A geomagnetic storm is a big disturbance of Earth's magnetic field, the huge invisible bubble around our planet. The biggest ones come from huge clouds of gas thrown out by the Sun, and they can cause mistakes in GPS (the system that finds locations), disturb radio signals, and cause problems for power grids on Earth. The Moon has no global magnetic field like Earth's, so the trouble shows up on the Earth side.","지자기 폭풍은 지구 자기장, 곧 지구를 둘러싼 보이지 않는 커다란 방패가 크게 흔들리는 현상이에요. 가장 큰 폭풍은 태양이 내뿜은 거대한 가스 구름 때문에 생기고, 지구에서 GPS(위치를 알려 주는 시스템) 오차, 무선 통신 방해, 전력망 문제를 일으킬 수 있어요. 달에는 지구 같은 전 지구적 자기장이 없어서, 이런 문제는 지구 쪽에서 나타나요.",,"age 9+; fact card, verbatim from docs/content/FACTS_V2.md card 12 body. Edit only with the fact check, sources listed there",
+fact.rover_driving.title,"Rovers that drive themselves, and rovers we steer","스스로 달리는 로버, 우리가 모는 로버",,"age 8+; fact card, verbatim from docs/content/FACTS_V2.md card 13 title",52
+fact.rover_driving.body,"On Mars, radio signals take too long to steer a rover with a joystick, so NASA's Perseverance rover uses cameras and 3D maps to plan its own path around hazards. NASA's Moon rovers, called Lunar Terrain Vehicles, or LTVs, will be driven by Artemis astronauts. When no astronauts are there, they will be driven remotely from Earth.","화성에서는 신호가 오가는 데 시간이 너무 오래 걸려서 조이스틱으로 로버를 조종할 수 없어요. 그래서 NASA의 퍼서비어런스 로버는 카메라와 3D 지도로 위험한 곳을 피하는 길을 스스로 계획해요. 달 탐사 로버(LTV)는 아르테미스 우주비행사가 직접 운전하고, 우주비행사가 없을 때는 지구에서 원격으로 운전할 계획이에요.",,"age 9+; fact card, verbatim from docs/content/FACTS_V2.md card 13 body. Edit only with the fact check, sources listed there",
+fact.gravity.title,"The Moon is much lighter","달에서는 몸이 훨씬 가벼워요",,"age 8+; fact card, verbatim from docs/content/FACTS_V2.md card 14 title",52
+fact.gravity.body,"Gravity on the Moon is one-sixth of Earth's gravity. A kid who weighs 30 kilograms on Earth would weigh only about 5 kilograms on the Moon.","달 표면의 중력은 지구의 6분의 1이에요. 지구에서 몸무게가 30kg인 어린이는 달에서 약 5kg으로 느껴져요.",,"age 9+; fact card, verbatim from docs/content/FACTS_V2.md card 14 body. Edit only with the fact check, sources listed there",
+fact.artemis.title,"Artemis: back to the Moon to stay","아르테미스, 달로 돌아가 오래 머물러요",,"age 8+; fact card, verbatim from docs/content/FACTS_V2.md card 15 title",52
+fact.artemis.body,"Artemis is NASA's program to send astronauts on harder and harder trips to the Moon. In April 2026, four Artemis II astronauts flew around the Moon and came back to Earth. NASA now plans a Moon Base near the south pole, so people can stay a long time and prepare for trips to Mars.","아르테미스는 NASA가 우주비행사를 점점 더 어려운 달 탐사에 보내는 계획이에요. 2026년 4월에는 아르테미스 II의 우주비행사 네 명이 달 주위를 돌고 지구로 돌아왔어요. NASA는 이제 남극 근처에 달 기지를 지어, 사람이 오래 머물고 화성 탐사를 준비하려고 해요.",,"age 9+; fact card, verbatim from docs/content/FACTS_V2.md card 15 body. Edit only with the fact check, sources listed there",
+fact.mission_control.title,"The team on the ground","지상에서 돕는 팀",,"age 8+; fact card, verbatim from docs/content/FACTS_V2.md card 16 title",52
+fact.mission_control.body,"Mission Control at NASA's Johnson Space Center in Houston is staffed 24 hours a day by flight controllers. One person there, called the capcom (short for capsule communicator), talks with the astronauts. Mission Control also oversees NASA's Artemis missions on their trips to the Moon and back.","미국 휴스턴 NASA 존슨 우주센터의 미션 컨트롤은 비행 관제사들이 하루 24시간 일하는 곳이에요. 그중 '캡콤'(우주선 교신 담당)이 우주비행사와 직접 이야기를 나눠요. 미션 컨트롤은 아르테미스 임무가 달에 갔다 오는 동안에도 지켜보며 도와줘요.",,"age 9+; fact card, verbatim from docs/content/FACTS_V2.md card 16 body. Edit only with the fact check, sources listed there",
+fact.donki.title,"Where does the space weather come from?","우주 날씨는 어디서 올까요?",,"age 8+; fact card, verbatim from docs/content/FACTS_V2.md spare card (About the data or first weather alert) title",52
+fact.donki.body,"NASA keeps a database called DONKI that records space weather events, like solar flares, solar energetic particle events, big clouds of gas from the Sun, and geomagnetic storms. It is run mainly by the Moon-to-Mars Space Weather Analysis Office at NASA's Goddard Space Flight Center. In this game, the alerts replay real events from the past, and we show their real dates.","NASA에는 태양 폭발, 태양 고에너지 입자 사건, 태양이 내뿜은 거대한 가스 구름, 지자기 폭풍 같은 우주 날씨 사건을 기록하는 DONKI라는 데이터베이스가 있어요. NASA 고다드 우주비행센터의 달-화성 우주 기상 분석 사무실이 주로 운영해요. 이 게임의 알림은 과거에 실제로 있었던 일을 다시 보여 주는 것이고, 실제 날짜도 함께 보여 줘요.",,"age 9+; fact card, verbatim from docs/content/FACTS_V2.md spare card (About the data or first weather alert) body. Edit only with the fact check, sources listed there",
+result.weather.title,"Space weather this game","이번 판의 우주 날씨",,"age 8+; result screen data box title (Q36)",28
+result.weather.range,"Real NASA records from {start} to {end}","{start}부터 {end}까지의 실제 NASA 기록","{start} {end}","age 8+; start and end are nested fmt.date.long (Q36)",
+result.weather.sep.one,"{count} solar radiation storm",,"{count}","age 8+; SEP count this game (Q36)",
+result.weather.sep.other,"{count} solar radiation storms","태양 방사선 폭풍 {count}번","{count}","age 8+; SEP count this game (Q36)",
+result.weather.gst.one,"{count} geomagnetic storm",,"{count}","age 8+; GST count this game (Q36)",
+result.weather.gst.other,"{count} geomagnetic storms","지자기 폭풍 {count}번","{count}","age 8+; GST count this game (Q36)",
+result.tag.won,"MISSION COMPLETE","임무 완료",,"age 7+; result screen tag, sign style capitals in en",20
+result.tag.lost,"MISSION OVER","임무 종료",,"age 7+; result screen tag, sign style capitals in en, kind tone (Q32)",20
+result.title.won,"Great job, crew!","멋져요, 대원들!",,"age 7+; result screen headline",24
+result.title.lost,"Good try!","좋은 도전이었어요!",,"age 7+; result screen headline, kind fail screen (Q32)",24
+result.days.label,"Days","걸린 날",,"age 7+; result screen stat label",10
+result.score.start,"Started with {points}","시작 점수 {points}점","{points}","age 7+; result screen score start line (1000, Q4)",24
+result.rank,"#{rank}","{rank}위","{rank}","age 7+; result screen rank number",6
+result.ranks.mission,"{mission}: top 5","{mission} 순위","{mission}","age 7+; result screen ranking box title (Q24), mission is nested mission.*.name",30
+result.ranks.global,"All missions: top 5","전체 순위",,"age 7+; result screen ranking box title (Q24)",24
+result.ranks.empty,"No records yet. Be the first!","아직 기록이 없어요. 첫 기록을 세워 봐요!",,"age 7+; result screen",40
+result.ranks.loading,"Loading records...","기록을 불러오는 중...",,"age 7+; result screen",24
+result.ranks.offline,"Records are not saved on this server.","이 서버에서는 기록을 저장하지 않아요.",,"age 7+; result screen, DataStore offline",44
+result.ranks.this_game,"This game","이번 판",,"age 7+; result screen marks this run",12
+result.ranks.you,"You","나",,"age 7+; result screen marks your row",8
+result.team,"Team of {n}","팀 {n}명","{n}","age 7+; result screen team size (Q5), n is 2 or more",12
+result.gold_count.one,"{count} gold medal",,"{count}","age 7+; result screen global leaderboard value (Q5)",18
+result.gold_count.other,"{count} gold medals","금메달 {count}개","{count}","age 7+; result screen global leaderboard value (Q5)",18
+result.crew.title,"What we did together","함께 한 일",,"age 7+; result screen crew box title (Q25)",24
+result.crew.panels,"Panels","패널",,"age 7+; result screen crew column",10
+result.crew.builds,"Builds","건설",,"age 7+; result screen crew column",10
+result.crew.repairs,"Repairs","수리",,"age 7+; result screen crew column",10
+result.crew.rescues,"Rescues","산소 구조",,"age 7+; result screen crew column, oxygen rescues (Q3)",12
+result.restart,"Play again","다시 하기",,"age 7+; result screen button",16
+result.restart_wait.one,"Play again in {count} second",,"{count}","age 7+; result screen button during cooldown",30
+result.restart_wait.other,"Play again in {count} seconds","{count}초 뒤 다시 하기","{count}","age 7+; result screen button during cooldown",30
+result.restart_host,"Waiting for {name} to start again","{name} 님이 다시 시작하기를 기다려요","{name}","age 7+; result screen, name is a raw player name",44
+result.restart_sent,"Starting again...","다시 시작하는 중...",,"age 7+; result screen",20
+end.lost.water,"The base was out of Water for too long. Next time, send the rover for ice early!","기지에 물이 너무 오래 없었어요. 다음엔 로버를 일찍 보내 얼음을 캐 봐요!",,"age 7+; kind fail screen line with a next time tip (Q32), water at 0 too many days",
+end.lost.food,"The base was out of Food for too long. Next time, build the greenhouse early!","기지에 식량이 너무 오래 없었어요. 다음엔 그린하우스를 일찍 지어 봐요!",,"age 7+; kind fail screen line with a next time tip (Q32), food at 0 too many days",
+end.lost.both,"The base was out of Water and Food for too long. Next time, keep an eye on both!","기지에 물과 식량이 너무 오래 없었어요. 다음엔 둘 다 미리 채워 봐요!",,"age 7+; kind fail screen line with a next time tip (Q32), water and food at 0 too many days",
+end.lost.no_medal,"Time ran out before you earned a medal. Next time, start building sooner!","메달을 따기 전에 시간이 다 됐어요. 다음엔 더 일찍 짓기 시작해 봐요!",,"age 7+; kind fail screen line with a next time tip (Q32), day 60 with no medal (Q2)",
+title.about.button,"About the data","데이터 출처",,"age 7+; title screen button (Q36)",18
+title.about.title,"About the data","이 게임에 쓴 데이터",,"age 8+; About the data panel title (Q36)",28
+title.about.donki,"Space weather comes from NASA DONKI, a list of real space weather events.","우주 날씨는 실제 우주 날씨 기록을 모은 NASA DONKI에서 가져왔어요.",,"age 9+; About the data panel line",
+title.about.donki_name,"DONKI stands for Space Weather Database Of Notifications, Knowledge, Information.","DONKI는 NASA의 우주 날씨 알림, 지식, 정보 데이터베이스예요.",,"age 10+; About the data panel line, official DONKI name",
+title.about.replay,"We play back past records. Nothing here is live.","지난 기록을 다시 보여 주는 거예요. 실시간 정보가 아니에요.",,"age 8+; About the data panel line. Challenge rule: never show old data as live",
+title.about.sites,"The landing sites are real places near the Moon's south pole, from candidate landing regions NASA announced in 2024.","착륙지는 NASA가 2024년에 발표한 착륙 후보 지역에서 고른, 달 남극 근처의 실제 장소예요.",,"age 9+; About the data panel line. Do not say Artemis III landing site (brief 3.4, FACTS_V2 6.1)",
+title.about.ice,"The 5 ice spots are ice search candidates, not places where ice was found. They sit in permanently shadowed areas from NASA maps, scaled to fit the game.","얼음 지점 5곳은 얼음이 확인된 곳이 아니라 얼음 탐사 후보지예요. NASA 지도의 영구 음영 지역에 맞춰 게임 크기로 줄여 놓았어요.",,"age 9+; About the data panel line (Q37, brief 3.7)",
+title.about.terrain,"The ground is made from NASA LOLA laser altimeter height data, scaled down to fit the game. Maps of sunlight and permanent shadow helped pick the base and the ice candidates.","지형은 NASA LOLA 레이저 고도계로 잰 높이 자료를 게임 크기로 줄여서 만들었어요. 햇빛 지도와 영구 음영 지도로 기지 자리와 얼음 후보지를 골랐어요.",,"age 10+; About the data panel line. LOLA flies on NASA's Lunar Reconnaissance Orbiter. Sunlight model is not NASA (Wueller et al.), so do not call it a NASA map (brief 3.7)",
+title.about.facts,"Fact cards are based on public NASA information.","사실 카드는 NASA 공개 자료를 바탕으로 만들었어요.",,"age 8+; About the data panel line",
+title.badge,"Moon South Pole Mission","달 남극 기지 미션",,"age 7+; title screen badge",28
+title.name,"The\nFrontier","The\nFrontier",,"game title, proper noun, same in every language, two lines",
+title.subtitle,"Build a Moon base and keep your crew safe for {days} days.","{days}일 동안 달 기지를 짓고 대원들을 지켜요.","{days}","age 7+; title screen subtitle, days is the mission length (60)",70
+title.start,"Start","시작하기",,"age 7+; title screen button",12
+title.chip.energy,"Make energy","에너지를 만들고",,"age 7+; title screen chip 1 of 3 (ko reads as one sentence across the chips)",18
+title.chip.water,"Get water from ice","얼음으로 물을 얻고",,"age 7+; title screen chip 2 of 3",20
+title.chip.food,"Grow food","식량을 길러요",,"age 7+; title screen chip 3 of 3",18
+title.crew,"Play alone or as a team of up to 4","혼자 또는 최대 4명이 함께",,"age 7+; title screen, players per server (Q6)",40
+title.about.close,"Close","닫기",,"age 7+; title screen, About the data panel close button",10
+world.sign.lander,"LANDER","착륙선",,"age 7+; door sign on the lander, sign style capitals in en (Q35)",10
+world.sign.airlock,"AIRLOCK","에어록",,"age 7+; door sign on the airlock, sign style capitals in en (Q35)",10
+world.lander.name,"Lander","착륙선",,"age 7+; 3D label from MissionWorld TextKey, drawn by the client in each language (Q35, Q38)",16
+world.water_tank.name,"Water Tank","물탱크",,"age 7+; 3D label from MissionWorld TextKey, drawn by the client in each language (Q35, Q38)",16
+world.rover.name,"Rover","로버",,"age 7+; 3D label from MissionWorld TextKey, drawn by the client in each language (Q35, Q38)",16
+world.water_rover.name,"Water Rover","물 로버",,"age 7+; 3D label from MissionWorld TextKey, drawn by the client in each language (Q35, Q38). Mission B has a second rover",16
+world.ice_site.name,"Ice Site","얼음 후보지",,"age 7+; 3D label from MissionWorld TextKey, drawn by the client in each language (Q35, Q38). Must read as an ice search candidate, not confirmed ice (brief 3.7)",16
+world.placeholder.name,"Coming Soon","준비 중",,"age 7+; 3D label from MissionWorld TextKey, drawn by the client in each language (Q35, Q38). Label on a simple code-made shape when no asset exists yet (Q27)",16
+world.solar_field.name,"Solar Field","태양광 필드",,"age 7+; 3D object name (ObjectKey or TextKey), drawn by the client in each language (Q35), where solar panels go",16
+world.console.name,"Lander Console","착륙선 콘솔",,"age 7+; 3D object name of the console inside the lander. Same name as map.console.title and the toasts (lander console)",16
+world.door.name,"Door","문",,"age 7+; 3D object name (ObjectKey or TextKey), drawn by the client in each language (Q35)",16

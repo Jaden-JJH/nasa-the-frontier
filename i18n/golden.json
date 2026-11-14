@@ -1,0 +1,1184 @@
+{
+  "_about": "Shared test vectors for src/shared/Loc.luau + Msg.luau (tests/i18n.spec.luau) and i18n/loc.js (i18n/test_golden.mjs). Both must pass every case. The strings table here is separate from i18n/strings.csv so copy edits never break it.",
+  "strings": {
+    "g.hello": {
+      "en": "Hello, {name}!",
+      "ko": "안녕, {name}!"
+    },
+    "g.en_only": {
+      "en": "Only English"
+    },
+    "g.empty_ko": {
+      "en": "Empty Korean",
+      "ko": ""
+    },
+    "g.days.one": {
+      "en": "{count} day left"
+    },
+    "g.days.other": {
+      "en": "{count} days left",
+      "ko": "{count}일 남음"
+    },
+    "g.items.other": {
+      "en": "{count} items",
+      "ko": "{count}개"
+    },
+    "g.apples.one": {
+      "en": "{count} apple"
+    },
+    "g.apples.other": {
+      "en": "{count} apples"
+    },
+    "g.count_base": {
+      "en": "Count is {count}",
+      "ko": "개수 {count}"
+    },
+    "g.outer": {
+      "en": "Found {thing}.",
+      "ko": "{thing} 발견."
+    },
+    "g.thing": {
+      "en": "ice",
+      "ko": "얼음"
+    },
+    "g.loop": {
+      "en": "[{x}]"
+    },
+    "g.bold.rich": {
+      "en": "Hi <b>{name}</b>!",
+      "ko": "<b>{name}</b> 안녕!"
+    },
+    "g.inner.rich": {
+      "en": "<b>{v}</b>"
+    },
+    "g.wrap.rich": {
+      "en": "Got {item}"
+    },
+    "g.plain_wrap": {
+      "en": "Say {x}"
+    },
+    "g.source": {
+      "en": "NASA DONKI record, {date}",
+      "ko": "NASA DONKI 기록, {date}"
+    },
+    "date.month.8": {
+      "en": "August",
+      "ko": "8월"
+    },
+    "date.month.12": {
+      "en": "December",
+      "ko": "12월"
+    },
+    "date.month_short.8": {
+      "en": "Aug",
+      "ko": "8월"
+    },
+    "date.month_short.12": {
+      "en": "Dec",
+      "ko": "12월"
+    },
+    "fmt.date.short": {
+      "en": "{month_short} {day}",
+      "ko": "{month_short} {day}일"
+    },
+    "fmt.date.long": {
+      "en": "{month_name} {day}, {year}",
+      "ko": "{year}년 {month_name} {day}일"
+    },
+    "fmt.list.two": {
+      "en": "{a} and {b}",
+      "ko": "{a}, {b}"
+    },
+    "fmt.list.start": {
+      "en": "{a}, {b}",
+      "ko": "{a}, {b}"
+    },
+    "fmt.list.middle": {
+      "en": "{a}, {b}",
+      "ko": "{a}, {b}"
+    },
+    "fmt.list.end": {
+      "en": "{a}, and {b}",
+      "ko": "{a}, {b}"
+    }
+  },
+  "cases": [
+    {
+      "id": "basic.en",
+      "kind": "resolve",
+      "msg": {
+        "key": "g.hello",
+        "args": {
+          "name": "Mia"
+        }
+      },
+      "lang": "en",
+      "expected": "Hello, Mia!"
+    },
+    {
+      "id": "basic.ko",
+      "kind": "resolve",
+      "msg": {
+        "key": "g.hello",
+        "args": {
+          "name": "Mia"
+        }
+      },
+      "lang": "ko",
+      "expected": "안녕, Mia!"
+    },
+    {
+      "id": "basic.string_key",
+      "kind": "resolve",
+      "msg": "g.thing",
+      "lang": "ko",
+      "expected": "얼음"
+    },
+    {
+      "id": "fallback.ko_missing",
+      "kind": "resolve",
+      "msg": {
+        "key": "g.en_only"
+      },
+      "lang": "ko",
+      "expected": "Only English"
+    },
+    {
+      "id": "fallback.ko_empty_cell",
+      "kind": "resolve",
+      "msg": {
+        "key": "g.empty_ko"
+      },
+      "lang": "ko",
+      "expected": "Empty Korean"
+    },
+    {
+      "id": "fallback.unknown_lang",
+      "kind": "resolve",
+      "msg": {
+        "key": "g.hello",
+        "args": {
+          "name": "Mia"
+        }
+      },
+      "lang": "fr",
+      "expected": "Hello, Mia!"
+    },
+    {
+      "id": "fallback.missing_key",
+      "kind": "resolve",
+      "msg": {
+        "key": "g.nope",
+        "args": {
+          "name": "Mia"
+        }
+      },
+      "lang": "ko",
+      "expected": "g.nope"
+    },
+    {
+      "id": "plural.en_one",
+      "kind": "resolve",
+      "msg": {
+        "key": "g.days",
+        "args": {
+          "count": 1
+        }
+      },
+      "lang": "en",
+      "expected": "1 day left"
+    },
+    {
+      "id": "plural.en_zero",
+      "kind": "resolve",
+      "msg": {
+        "key": "g.days",
+        "args": {
+          "count": 0
+        }
+      },
+      "lang": "en",
+      "expected": "0 days left"
+    },
+    {
+      "id": "plural.en_two",
+      "kind": "resolve",
+      "msg": {
+        "key": "g.days",
+        "args": {
+          "count": 2
+        }
+      },
+      "lang": "en",
+      "expected": "2 days left"
+    },
+    {
+      "id": "plural.en_fraction",
+      "kind": "resolve",
+      "msg": {
+        "key": "g.days",
+        "args": {
+          "count": 1.5
+        }
+      },
+      "lang": "en",
+      "expected": "1.5 days left"
+    },
+    {
+      "id": "plural.en_negative_one",
+      "kind": "resolve",
+      "msg": {
+        "key": "g.days",
+        "args": {
+          "count": -1
+        }
+      },
+      "lang": "en",
+      "expected": "-1 days left"
+    },
+    {
+      "id": "plural.ko_one_uses_other",
+      "kind": "resolve",
+      "msg": {
+        "key": "g.days",
+        "args": {
+          "count": 1
+        }
+      },
+      "lang": "ko",
+      "expected": "1일 남음"
+    },
+    {
+      "id": "plural.no_one_row",
+      "kind": "resolve",
+      "msg": {
+        "key": "g.items",
+        "args": {
+          "count": 1
+        }
+      },
+      "lang": "en",
+      "expected": "1 items"
+    },
+    {
+      "id": "plural.ko_fallback_uses_en_rule",
+      "kind": "resolve",
+      "msg": {
+        "key": "g.apples",
+        "args": {
+          "count": 1
+        }
+      },
+      "lang": "ko",
+      "expected": "1 apple"
+    },
+    {
+      "id": "plural.count_string_not_plural",
+      "kind": "resolve",
+      "msg": {
+        "key": "g.days",
+        "args": {
+          "count": "1"
+        }
+      },
+      "lang": "en",
+      "expected": "1 days left"
+    },
+    {
+      "id": "plural.base_key_with_count",
+      "kind": "resolve",
+      "msg": {
+        "key": "g.count_base",
+        "args": {
+          "count": 3
+        }
+      },
+      "lang": "ko",
+      "expected": "개수 3"
+    },
+    {
+      "id": "plural.explicit_form_key",
+      "kind": "resolve",
+      "msg": {
+        "key": "g.days.one",
+        "args": {
+          "count": 5
+        }
+      },
+      "lang": "en",
+      "expected": "5 day left"
+    },
+    {
+      "id": "args.missing_kept",
+      "kind": "resolve",
+      "msg": {
+        "key": "g.hello"
+      },
+      "lang": "en",
+      "expected": "Hello, {name}!"
+    },
+    {
+      "id": "args.boolean",
+      "kind": "resolve",
+      "msg": {
+        "key": "g.hello",
+        "args": {
+          "name": true
+        }
+      },
+      "lang": "en",
+      "expected": "Hello, true!"
+    },
+    {
+      "id": "nested.ko",
+      "kind": "resolve",
+      "msg": {
+        "key": "g.outer",
+        "args": {
+          "thing": {
+            "key": "g.thing"
+          }
+        }
+      },
+      "lang": "ko",
+      "expected": "얼음 발견."
+    },
+    {
+      "id": "nested.en",
+      "kind": "resolve",
+      "msg": {
+        "key": "g.outer",
+        "args": {
+          "thing": {
+            "key": "g.thing"
+          }
+        }
+      },
+      "lang": "en",
+      "expected": "Found ice."
+    },
+    {
+      "id": "nested.missing_key",
+      "kind": "resolve",
+      "msg": {
+        "key": "g.outer",
+        "args": {
+          "thing": {
+            "key": "g.nope"
+          }
+        }
+      },
+      "lang": "en",
+      "expected": "Found g.nope."
+    },
+    {
+      "id": "nested.object_without_key_kept",
+      "kind": "resolve",
+      "msg": {
+        "key": "g.outer",
+        "args": {
+          "thing": {
+            "nokey": 1
+          }
+        }
+      },
+      "lang": "en",
+      "expected": "Found {thing}."
+    },
+    {
+      "id": "nested.depth_limit",
+      "kind": "resolve",
+      "msg": {
+        "key": "g.loop",
+        "args": {
+          "x": {
+            "key": "g.loop",
+            "args": {
+              "x": {
+                "key": "g.loop",
+                "args": {
+                  "x": {
+                    "key": "g.loop",
+                    "args": {
+                      "x": {
+                        "key": "g.loop",
+                        "args": {
+                          "x": {
+                            "key": "g.loop",
+                            "args": {
+                              "x": {
+                                "key": "g.loop",
+                                "args": {
+                                  "x": {
+                                    "key": "g.loop",
+                                    "args": {
+                                      "x": {
+                                        "key": "g.loop",
+                                        "args": {
+                                          "x": {
+                                            "key": "g.loop",
+                                            "args": {
+                                              "x": {
+                                                "key": "g.loop",
+                                                "args": {
+                                                  "x": {
+                                                    "key": "g.loop",
+                                                    "args": {
+                                                      "x": "end"
+                                                    }
+                                                  }
+                                                }
+                                              }
+                                            }
+                                          }
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "lang": "en",
+      "expected": "[[[[[[[[[[[g.loop]]]]]]]]]]]"
+    },
+    {
+      "id": "rich.escape_values",
+      "kind": "resolve",
+      "msg": {
+        "key": "g.bold.rich",
+        "args": {
+          "name": "<Tom & 'Jo'>"
+        }
+      },
+      "lang": "en",
+      "expected": "Hi <b>&lt;Tom &amp; &apos;Jo&apos;&gt;</b>!"
+    },
+    {
+      "id": "rich.ko",
+      "kind": "resolve",
+      "msg": {
+        "key": "g.bold.rich",
+        "args": {
+          "name": "\"Q\""
+        }
+      },
+      "lang": "ko",
+      "expected": "<b>&quot;Q&quot;</b> 안녕!"
+    },
+    {
+      "id": "rich.nested_plain_escaped",
+      "kind": "resolve",
+      "msg": {
+        "key": "g.wrap.rich",
+        "args": {
+          "item": {
+            "key": "g.plain_wrap",
+            "args": {
+              "x": "<i>"
+            }
+          }
+        }
+      },
+      "lang": "en",
+      "expected": "Got Say &lt;i&gt;"
+    },
+    {
+      "id": "rich.nested_rich_raw",
+      "kind": "resolve",
+      "msg": {
+        "key": "g.wrap.rich",
+        "args": {
+          "item": {
+            "key": "g.inner.rich",
+            "args": {
+              "v": "A&B"
+            }
+          }
+        }
+      },
+      "lang": "en",
+      "expected": "Got <b>A&amp;B</b>"
+    },
+    {
+      "id": "rich.plain_key_not_escaped",
+      "kind": "resolve",
+      "msg": {
+        "key": "g.hello",
+        "args": {
+          "name": "<b>"
+        }
+      },
+      "lang": "en",
+      "expected": "Hello, <b>!"
+    },
+    {
+      "id": "braces.escaped",
+      "kind": "template",
+      "template": "{{name}} = {name}",
+      "args": {
+        "name": "x"
+      },
+      "lang": "en",
+      "expected": "{name} = x"
+    },
+    {
+      "id": "braces.lone",
+      "kind": "template",
+      "template": "a } b { c",
+      "args": {},
+      "lang": "en",
+      "expected": "a } b { c"
+    },
+    {
+      "id": "braces.triple",
+      "kind": "template",
+      "template": "{{{n}}}",
+      "args": {
+        "n": 5
+      },
+      "lang": "en",
+      "expected": "{5}"
+    },
+    {
+      "id": "braces.invalid_name",
+      "kind": "template",
+      "template": "{not valid}",
+      "args": {
+        "not": 1
+      },
+      "lang": "en",
+      "expected": "{not valid}"
+    },
+    {
+      "id": "braces.unclosed",
+      "kind": "template",
+      "template": "Hi {name",
+      "args": {
+        "name": "Mia"
+      },
+      "lang": "en",
+      "expected": "Hi {name"
+    },
+    {
+      "id": "braces.empty",
+      "kind": "template",
+      "template": "x {} y",
+      "args": {},
+      "lang": "en",
+      "expected": "x {} y"
+    },
+    {
+      "id": "braces.korean_text",
+      "kind": "template",
+      "template": "{count}개의 얼음",
+      "args": {
+        "count": 3
+      },
+      "lang": "ko",
+      "expected": "3개의 얼음"
+    },
+    {
+      "id": "braces.repeat",
+      "kind": "template",
+      "template": "{a}{a}-{b}",
+      "args": {
+        "a": "x",
+        "b": 2
+      },
+      "lang": "en",
+      "expected": "xx-2"
+    },
+    {
+      "id": "rich.template_flag",
+      "kind": "template",
+      "template": "<b>{x}</b>",
+      "args": {
+        "x": "<"
+      },
+      "lang": "en",
+      "expected": "<b>&lt;</b>",
+      "rich": true
+    },
+    {
+      "id": "number.integer",
+      "kind": "template",
+      "template": "{n}",
+      "args": {
+        "n": 3
+      },
+      "lang": "en",
+      "expected": "3"
+    },
+    {
+      "id": "number.negative_integer",
+      "kind": "template",
+      "template": "{n}",
+      "args": {
+        "n": -7
+      },
+      "lang": "en",
+      "expected": "-7"
+    },
+    {
+      "id": "number.round_two",
+      "kind": "template",
+      "template": "{n}",
+      "args": {
+        "n": 3.14159
+      },
+      "lang": "en",
+      "expected": "3.14"
+    },
+    {
+      "id": "number.one_decimal",
+      "kind": "template",
+      "template": "{n}",
+      "args": {
+        "n": 2.5
+      },
+      "lang": "en",
+      "expected": "2.5"
+    },
+    {
+      "id": "number.half_up",
+      "kind": "template",
+      "template": "{n}",
+      "args": {
+        "n": 0.125
+      },
+      "lang": "en",
+      "expected": "0.13"
+    },
+    {
+      "id": "number.negative_round",
+      "kind": "template",
+      "template": "{n}",
+      "args": {
+        "n": -2.345
+      },
+      "lang": "en",
+      "expected": "-2.35"
+    },
+    {
+      "id": "number.binary_rounding",
+      "kind": "template",
+      "template": "{n}",
+      "args": {
+        "n": 1.005
+      },
+      "lang": "en",
+      "expected": "1"
+    },
+    {
+      "id": "number.rounds_to_integer",
+      "kind": "template",
+      "template": "{n}",
+      "args": {
+        "n": 10.999
+      },
+      "lang": "en",
+      "expected": "11"
+    },
+    {
+      "id": "number.tiny_negative",
+      "kind": "template",
+      "template": "{n}",
+      "args": {
+        "n": -0.004
+      },
+      "lang": "en",
+      "expected": "0"
+    },
+    {
+      "id": "number.float_noise",
+      "kind": "template",
+      "template": "{n}",
+      "args": {
+        "n": 0.30000000000000004
+      },
+      "lang": "en",
+      "expected": "0.3"
+    },
+    {
+      "id": "number.large_integer",
+      "kind": "template",
+      "template": "{n}",
+      "args": {
+        "n": 999999999999999
+      },
+      "lang": "en",
+      "expected": "999999999999999"
+    },
+    {
+      "id": "number.too_large",
+      "kind": "template",
+      "template": "{n}",
+      "args": {
+        "n": 1000000000000000.0
+      },
+      "lang": "en",
+      "expected": "?"
+    },
+    {
+      "id": "number.zero_padded_fraction",
+      "kind": "template",
+      "template": "{n}",
+      "args": {
+        "n": 1.05
+      },
+      "lang": "en",
+      "expected": "1.05"
+    },
+    {
+      "id": "date.long.en",
+      "kind": "date",
+      "date": {
+        "year": 2024,
+        "month": 8,
+        "day": 12
+      },
+      "style": "long",
+      "lang": "en",
+      "expected": "August 12, 2024"
+    },
+    {
+      "id": "date.long.ko",
+      "kind": "date",
+      "date": {
+        "year": 2024,
+        "month": 8,
+        "day": 12
+      },
+      "style": "long",
+      "lang": "ko",
+      "expected": "2024년 8월 12일"
+    },
+    {
+      "id": "date.short.en",
+      "kind": "date",
+      "date": {
+        "year": 2024,
+        "month": 12,
+        "day": 3
+      },
+      "style": "short",
+      "lang": "en",
+      "expected": "Dec 3"
+    },
+    {
+      "id": "date.short.ko",
+      "kind": "date",
+      "date": {
+        "year": 2024,
+        "month": 12,
+        "day": 3
+      },
+      "style": "short",
+      "lang": "ko",
+      "expected": "12월 3일"
+    },
+    {
+      "id": "date.unknown_month",
+      "kind": "date",
+      "date": {
+        "year": 2024,
+        "month": 13,
+        "day": 1
+      },
+      "style": "long",
+      "lang": "en",
+      "expected": "date.month.13 1, 2024"
+    },
+    {
+      "id": "date.nested_arg",
+      "kind": "date_arg",
+      "key": "g.source",
+      "arg": "date",
+      "date": {
+        "year": 2024,
+        "month": 12,
+        "day": 25
+      },
+      "style": "long",
+      "lang": "en",
+      "expected": "NASA DONKI record, December 25, 2024"
+    },
+    {
+      "id": "date.nested_arg.ko",
+      "kind": "date_arg",
+      "key": "g.source",
+      "arg": "date",
+      "date": {
+        "year": 2024,
+        "month": 8,
+        "day": 2
+      },
+      "style": "long",
+      "lang": "ko",
+      "expected": "NASA DONKI 기록, 2024년 8월 2일"
+    },
+    {
+      "id": "date.from_time_utc_start",
+      "kind": "date_time",
+      "time": 1723420800,
+      "style": "long",
+      "lang": "en",
+      "expected": "August 12, 2024"
+    },
+    {
+      "id": "date.from_time_utc_end_of_day",
+      "kind": "date_time",
+      "time": 1723507199,
+      "style": "short",
+      "lang": "ko",
+      "expected": "8월 12일"
+    },
+    {
+      "id": "list.empty",
+      "kind": "list",
+      "items": [],
+      "lang": "en",
+      "expected": ""
+    },
+    {
+      "id": "list.one",
+      "kind": "list",
+      "items": [
+        "Mia"
+      ],
+      "lang": "en",
+      "expected": "Mia"
+    },
+    {
+      "id": "list.two.en",
+      "kind": "list",
+      "items": [
+        "Mia",
+        "Leo"
+      ],
+      "lang": "en",
+      "expected": "Mia and Leo"
+    },
+    {
+      "id": "list.two.ko",
+      "kind": "list",
+      "items": [
+        "Mia",
+        "Leo"
+      ],
+      "lang": "ko",
+      "expected": "Mia, Leo"
+    },
+    {
+      "id": "list.three.en",
+      "kind": "list",
+      "items": [
+        "Mia",
+        "Leo",
+        "Sam"
+      ],
+      "lang": "en",
+      "expected": "Mia, Leo, and Sam"
+    },
+    {
+      "id": "list.four.en",
+      "kind": "list",
+      "items": [
+        "Mia",
+        "Leo",
+        "Sam",
+        "Ava"
+      ],
+      "lang": "en",
+      "expected": "Mia, Leo, Sam, and Ava"
+    },
+    {
+      "id": "list.three.ko",
+      "kind": "list",
+      "items": [
+        "Mia",
+        "Leo",
+        "Sam"
+      ],
+      "lang": "ko",
+      "expected": "Mia, Leo, Sam"
+    },
+    {
+      "id": "list.nested_msg.ko",
+      "kind": "list",
+      "items": [
+        {
+          "key": "g.thing"
+        },
+        "rock"
+      ],
+      "lang": "ko",
+      "expected": "얼음, rock"
+    },
+    {
+      "id": "escape.all",
+      "kind": "escape",
+      "text": "a<b>&\"'",
+      "expected": "a&lt;b&gt;&amp;&quot;&apos;"
+    },
+    {
+      "id": "escape.no_double",
+      "kind": "escape",
+      "text": "&amp;",
+      "expected": "&amp;amp;"
+    },
+    {
+      "id": "normalize.en",
+      "kind": "normalize",
+      "value": "en",
+      "expected": "en"
+    },
+    {
+      "id": "normalize.upper",
+      "kind": "normalize",
+      "value": "KO",
+      "expected": "ko"
+    },
+    {
+      "id": "normalize.unknown",
+      "kind": "normalize",
+      "value": "fr",
+      "expected": ""
+    },
+    {
+      "id": "normalize.kr_alias_rejected",
+      "kind": "normalize",
+      "value": "kr",
+      "expected": ""
+    },
+    {
+      "id": "normalize.number",
+      "kind": "normalize",
+      "value": 1,
+      "expected": ""
+    },
+    {
+      "id": "is_msg.key_only",
+      "kind": "is_msg",
+      "value": {
+        "key": "a.b"
+      },
+      "expected": true
+    },
+    {
+      "id": "is_msg.empty_key",
+      "kind": "is_msg",
+      "value": {
+        "key": ""
+      },
+      "expected": false
+    },
+    {
+      "id": "is_msg.args",
+      "kind": "is_msg",
+      "value": {
+        "key": "a.b",
+        "args": {
+          "n": 1,
+          "s": "x",
+          "b": false
+        }
+      },
+      "expected": true
+    },
+    {
+      "id": "is_msg.empty_args",
+      "kind": "is_msg",
+      "value": {
+        "key": "a.b",
+        "args": {}
+      },
+      "expected": true
+    },
+    {
+      "id": "is_msg.extra_field",
+      "kind": "is_msg",
+      "value": {
+        "key": "a.b",
+        "extra": 1
+      },
+      "expected": false
+    },
+    {
+      "id": "is_msg.array_args",
+      "kind": "is_msg",
+      "value": {
+        "key": "a.b",
+        "args": [
+          1,
+          2
+        ]
+      },
+      "expected": false
+    },
+    {
+      "id": "is_msg.nested",
+      "kind": "is_msg",
+      "value": {
+        "key": "a.b",
+        "args": {
+          "m": {
+            "key": "c.d",
+            "args": {
+              "x": 1
+            }
+          }
+        }
+      },
+      "expected": true
+    },
+    {
+      "id": "is_msg.nested_bad",
+      "kind": "is_msg",
+      "value": {
+        "key": "a.b",
+        "args": {
+          "m": {
+            "nokey": 1
+          }
+        }
+      },
+      "expected": false
+    },
+    {
+      "id": "is_msg.not_table",
+      "kind": "is_msg",
+      "value": "a.b",
+      "expected": false
+    },
+    {
+      "id": "equals.same",
+      "kind": "equals",
+      "a": {
+        "key": "a.b",
+        "args": {
+          "n": 1
+        }
+      },
+      "b": {
+        "key": "a.b",
+        "args": {
+          "n": 1
+        }
+      },
+      "expected": true
+    },
+    {
+      "id": "equals.no_args_vs_empty",
+      "kind": "equals",
+      "a": {
+        "key": "a.b"
+      },
+      "b": {
+        "key": "a.b",
+        "args": {}
+      },
+      "expected": true
+    },
+    {
+      "id": "equals.different_value",
+      "kind": "equals",
+      "a": {
+        "key": "a.b",
+        "args": {
+          "n": 1
+        }
+      },
+      "b": {
+        "key": "a.b",
+        "args": {
+          "n": 2
+        }
+      },
+      "expected": false
+    },
+    {
+      "id": "equals.extra_arg",
+      "kind": "equals",
+      "a": {
+        "key": "a.b",
+        "args": {
+          "n": 1
+        }
+      },
+      "b": {
+        "key": "a.b",
+        "args": {
+          "n": 1,
+          "m": 2
+        }
+      },
+      "expected": false
+    },
+    {
+      "id": "equals.nested",
+      "kind": "equals",
+      "a": {
+        "key": "a.b",
+        "args": {
+          "m": {
+            "key": "c.d",
+            "args": {
+              "x": "y"
+            }
+          }
+        }
+      },
+      "b": {
+        "key": "a.b",
+        "args": {
+          "m": {
+            "key": "c.d",
+            "args": {
+              "x": "y"
+            }
+          }
+        }
+      },
+      "expected": true
+    },
+    {
+      "id": "equals.nested_diff",
+      "kind": "equals",
+      "a": {
+        "key": "a.b",
+        "args": {
+          "m": {
+            "key": "c.d",
+            "args": {
+              "x": "y"
+            }
+          }
+        }
+      },
+      "b": {
+        "key": "a.b",
+        "args": {
+          "m": {
+            "key": "c.e",
+            "args": {
+              "x": "y"
+            }
+          }
+        }
+      },
+      "expected": false
+    }
+  ]
+}
