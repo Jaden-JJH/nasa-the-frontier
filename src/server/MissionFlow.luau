@@ -31,6 +31,7 @@ local MissionWorld = require(script.Parent.MissionWorld)
 local OxygenV2 = require(script.Parent.OxygenV2)
 local PromptKit = require(script.Parent.PromptKit)
 local RecordsV2 = require(script.Parent.RecordsV2)
+local RoleMissions = require(script.Parent.RoleMissions)
 local Roles = require(script.Parent.Roles)
 local RoverFleet = require(script.Parent.RoverFleet)
 local ServerUtil = require(script.Parent.ServerUtil)
@@ -362,6 +363,7 @@ local function defaultRover(): { [string]: any }
         maxDamage = viewMission().rover.maxDamage,
         battery = m.batteryMax,
         batteryMax = m.batteryMax,
+        batteryPercent = 100,
         tank = 0,
         tankMax = viewMission().ice.amountPerTrip,
         boosting = false,
@@ -387,6 +389,7 @@ function MissionFlow.buildState(): { [string]: any }
         mission = stepMsg(state, m),
         pipeSite = Interactions.pipeSite(),
         mapPoints = mapPoints(),
+        roleMissions = RoleMissions.view(), -- 멀티 역할 미션 (솔로 nil, 점수와 무관)
     }
     if not state then
         base.day = 0
@@ -620,6 +623,7 @@ local flow = {
     end,
     contribute = function(player: Player?, field: any, amount: number?)
         ContributionsV2.add(player, field, amount)
+        RoleMissions.onContribute(player, field, amount)
     end,
     roleOf = Roles.roleOf,
     canUseMap = Roles.canUseMap,
@@ -793,6 +797,7 @@ confirmMission = function(id: string)
     dayStart = snapshot(rules)
     prevDayStart = dayStart
     ContributionsV2.reset()
+    RoleMissions.reset()
     for _, player in list do
         ContributionsV2.ensure(player)
     end
@@ -816,6 +821,17 @@ confirmMission = function(id: string)
 end
 
 -- 하루 마감과 종료 ------------------------------------------------------------
+
+-- 결과 "함께 한 일" 줄에 역할 미션 결과를 붙인다 (멀티만, 점수와 무관)
+local function crewWithMissions(): { any }
+    local rows = ContributionsV2.crew(CFG.crewRows)
+    if mode == "multi" then
+        for _, row in rows do
+            row.roleMission = RoleMissions.resultFor(row.userId)
+        end
+    end
+    return rows
+end
 
 local function endGame(result: any)
     MissionClock.stop()
@@ -852,7 +868,7 @@ local function endGame(result: any)
             sep = summary.sep,
             gst = summary.gst,
         },
-        crew = ContributionsV2.crew(CFG.crewRows),
+        crew = crewWithMissions(),
         restartAvailableAt = workspace:GetServerTimeNow() + CFG.resultMinSeconds,
         chooserUserId = if chooser then chooser.UserId else 0,
         missionId = missionId,
@@ -932,6 +948,7 @@ local function restart(leaving: Player?)
     OxygenV2.resetAll()
     Roles.reset()
     ContributionsV2.reset()
+    RoleMissions.reset()
     RoverFleet.reset()
     Interactions.reset()
     beginSelecting(leaving)
@@ -1030,6 +1047,7 @@ function MissionFlow.start(bootMission: string?)
     worldMission = bootMission
 
     Roles.init(flow)
+    RoleMissions.init(flow)
     SpaceWeather.init(flow)
     OxygenV2.init(flow)
     RoverFleet.init(flow)

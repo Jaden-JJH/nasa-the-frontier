@@ -4,6 +4,7 @@
 --   ActionKey, ObjectKey: 문구 키 (i18n/strings.csv)
 --   ActionArgs, ObjectArgs: Msg args의 JSON 문자열 (없으면 Attribute를 지운다)
 --   CooldownUntil: 서버 시각(workspace:GetServerTimeNow 기준, 선택)
+--   CostEnergy, CostWater, BuildDays, Affordable, LockMsg: 자원을 쓰는 프롬프트의 비용 표시 (setCost)
 -- 클라이언트 PromptUI가 Attribute 변화를 구독해 현재 언어로 그린다.
 -- Interactions, RoverFleet, AirlockDoors가 같이 쓴다 (서로 require하지 않도록 따로 둔 모듈).
 
@@ -82,6 +83,33 @@ end
 -- 쿨다운 끝 서버 시각 (nil이면 지운다)
 function PromptKit.setCooldown(prompt: ProximityPrompt, untilTime: number?)
     setAttr(prompt, "CooldownUntil", untilTime)
+end
+
+-- 비용 표시 (2026-11-15 시험 피드백: 무엇이 얼마인지 안 보였다). 숫자는 호출한 쪽이 MissionConfig, Rules에서 읽는다
+--   CostEnergy, CostWater: number, 0이면 Attribute를 지운다 (클라이언트는 nil을 0으로 본다)
+--   BuildDays: number, 건설을 시작하는 프롬프트에만
+--   Affordable: boolean, 지금 기지 자원으로 낼 수 있는지 (비용이나 BuildDays가 있을 때만, 상태를 모르면 nil)
+--   LockMsg: 규칙상 잠겨 있으면 Msg의 JSON 문자열 { key, args } (예: toast.pipe.locked { need, done })
+-- info가 nil이면 다섯 개 모두 지운다
+export type CostInfo = {
+    energy: number?,
+    water: number?,
+    buildDays: number?,
+    affordable: boolean?,
+    lock: { key: string, args: Args? }?,
+}
+
+function PromptKit.setCost(prompt: ProximityPrompt, info: CostInfo?)
+    local energy = if info and info.energy and info.energy > 0 then info.energy else nil
+    local water = if info and info.water and info.water > 0 then info.water else nil
+    local days = if info then info.buildDays else nil
+    local costed = energy ~= nil or water ~= nil or days ~= nil
+    setAttr(prompt, "CostEnergy", energy)
+    setAttr(prompt, "CostWater", water)
+    setAttr(prompt, "BuildDays", days)
+    setAttr(prompt, "Affordable", if costed and info then info.affordable else nil)
+    local lock = if info then info.lock else nil
+    setAttr(prompt, "LockMsg", if lock then PromptKit.encode(lock :: any) else nil)
 end
 
 -- Attribute 프로토콜 프롬프트를 만든다. Style Custom, 시야 검사 없음

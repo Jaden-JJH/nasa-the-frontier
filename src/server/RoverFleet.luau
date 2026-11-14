@@ -38,7 +38,9 @@ RoverFleet.CONFIG = {
     lowBatteryRatio = 0.25,
     recoverBatteryRatio = 0.2,
     boostMinBatteryRatio = 0.2,
-    hazardTag = "RoverHazard", -- 이 태그(또는 Attribute BoulderLayer)가 붙은 파트에 세게 부딪혀도 충돌 파손 (B 바위용)
+    -- 이 태그(또는 Attribute BoulderLayer)가 붙은 파트나 모델에 세게 부딪혀도 충돌 파손 (B 바위용, 설치한 태양광 패널.
+    -- MissionWorld.CONFIG.solar.hazardTag와 같아야 한다). 패널은 고정이라 부서지지 않고 로버만 파손 1
+    hazardTag = "RoverHazard",
     boardDistance = 10,
     repairDistance = 8,
     collectRadius = 20, -- 얼음 채취: 섀시에서 MinePoint까지 수평 거리
@@ -98,6 +100,7 @@ local boosting = false
 local boostHeat = 0
 local overheated = false
 local charging = false
+local chargeBlocked: Msg.Msg? = nil -- 충전판 위, 배터리가 덜 찼는데 충전이 안 되는 이유 (S6)
 local weatherHold = false
 local warnedLow = false
 local notifiedFull = true
@@ -237,6 +240,42 @@ local function setAttr(name: string, value: any)
     end
 end
 
+local function setChassisAttr(name: string, value: any)
+    local body = chassis
+    if body and body:GetAttribute(name) ~= value then
+        body:SetAttribute(name, value)
+    end
+end
+
+local function batteryPercent(): number
+    local max = manual().batteryMax
+    return math.clamp(math.floor(battery / math.max(max, 1e-6) * 100 + 0.5), 0, 100)
+end
+
+-- 섀시 Attribute: Charging(boolean), BatteryPercent(0 ~ 100 정수), ChargeBlocked(문구 키 또는 nil),
+-- ChargeBlockedArgs(JSON 또는 nil). 클라이언트가 충전 중인지와 못 하는 이유를 그린다 (2026-11-15 시험 피드백)
+local function refreshChargeAttrs()
+    setChassisAttr("Charging", charging)
+    setChassisAttr("BatteryPercent", batteryPercent())
+    local blocked = chargeBlocked
+    setChassisAttr("ChargeBlocked", if blocked then blocked.key else nil)
+    setChassisAttr("ChargeBlockedArgs", if blocked then PromptKit.encode(blocked.args) else nil)
+end
+
+-- 수리 프롬프트 비용 (PromptKit.setCost): 에너지 repairEnergy, 지금 기지 에너지로 낼 수 있는지
+function RoverFleet.refreshCosts()
+    local repair = repairPrompt
+    if not repair or repair.Parent == nil then
+        return
+    end
+    local cost = roverDef().repairEnergy
+    local state = rulesState()
+    PromptKit.setCost(repair, {
+        energy = cost,
+        affordable = if state then state.energy + 1e-6 >= cost else nil,
+    })
+end
+
 -- 프롬프트 ----------------------------------------------------------------
 
 function RoverFleet.refresh()
@@ -256,6 +295,8 @@ function RoverFleet.refresh()
     setAttr("Tank", tank)
     setAttr("Boosting", boosting)
     setAttr("Status", if inField then "broken" else status)
+    refreshChargeAttrs()
+    RoverFleet.refreshCosts()
     refreshDrive()
 end
 
@@ -693,6 +734,12 @@ function RoverFleet.step(dt: number)
     local position = chassisPosition()
     if hidden or inField or not position then
         lastPosition = nil
+        if charging or chargeBlocked then
+            charging = false
+            chargeBlocked = nil
+            refreshChargeAttrs()
+            flow.markDirty()
+        end
         return
     end
     local m = manual()
@@ -711,7 +758,10 @@ function RoverFleet.step(dt: number)
     end
     boostTick(dt, seatEmpty)
     charging = false
-    if seatEmpty and battery < m.batteryMax and nearPads(CFG.chargeRadius) then
+    local wasBlocked = chargeBlocked
+    chargeBlocked = nil
+    local onPad = battery < m.batteryMax and nearPads(CFG.chargeRadius)
+    if onPad and seatEmpty then
         local state = rulesState()
         if state then
             -- Rules.payEnergy("rover_charge")가 기지 에너지 MANUAL_DRIVE.chargeKeepEnergy를 남긴다
@@ -722,10 +772,20 @@ function RoverFleet.step(dt: number)
                     battery = math.min(m.batteryMax, battery + paid)
                     charging = true
                     flow.commit(new, { publish = false })
+                else
+                    -- 기지 에너지가 남겨 둘 양 이하라 충전기가 멈췄다 (예전에는 아무 표시 없이 멈췄다)
+                    chargeBlocked = Msg.new(
+                        "hud.rover.charge_blocked_energy",
+                        { keep = m.chargeKeepEnergy or 0 }
+                    )
                 end
             end
         end
+    elseif onPad and speed <= CFG.movingSpeed then
+        -- 운전석이 비어야 충전한다 (판 위를 지나가는 중에는 알리지 않는다)
+        chargeBlocked = Msg.new("hud.rover.charge_blocked_seat")
     end
+    local blockChanged = (wasBlocked and wasBlocked.key) ~= (chargeBlocked and chargeBlocked.key)
     -- 알림
     if battery <= 0 and before > 0 then
         if not emptyNotified then
@@ -758,9 +818,11 @@ function RoverFleet.step(dt: number)
     elseif battery < m.batteryMax then
         notifiedFull = false
     end
+    refreshChargeAttrs()
     local now = os.clock()
     if
         charging ~= wasCharging
+        or blockChanged
         or (battery ~= before and now - lastPublish >= CFG.publishSeconds)
     then
         lastPublish = now
@@ -1039,6 +1101,7 @@ function RoverFleet.reset()
     boostHeat = 0
     overheated = false
     charging = false
+    chargeBlocked = nil
     weatherHold = false
     warnedLow = false
     notifiedFull = true
@@ -1229,6 +1292,8 @@ function RoverFleet.view(state: any): { [string]: any }
         boosting = boosting,
         boostHeat = math.floor(boostHeat * 100 + 0.5) / 100,
         charging = charging,
+        chargeBlocked = chargeBlocked, -- Msg 또는 nil (섀시 Attribute ChargeBlocked와 같은 이유)
+        batteryPercent = batteryPercent(),
         atBase = RoverFleet.isAtBase(),
         fsd = Rules.roverFsdView(state, MissionConfig),
     }

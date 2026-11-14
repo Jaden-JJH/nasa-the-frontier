@@ -9,6 +9,7 @@
 --   잠그는 것은 전체 지도와 핀뿐이다(운전, 건설, 패널은 누구나). 솔로는 모든 역할(roles = {}).
 --   RoleUpdate(roles, selecting, deadline?)의 roles 키는 tostring(userId) (RemoteEvent 숫자 키 변환을 피한다).
 --   핀: 관제사만(솔로는 혼자라 누구나), GST 중 거절. PinUpdate({ siteIndex?, byUserId? }).
+--   역할 미션(RoleMissions): 역할표가 바뀔 때마다 배정을 맞추고 핀을 넘긴다(점수와 무관).
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -16,6 +17,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Msg = require(ReplicatedStorage.Shared.Msg)
 local Remotes = require(ReplicatedStorage.Shared.Remotes)
 local ContributionsV2 = require(script.Parent.ContributionsV2)
+local RoleMissions = require(script.Parent.RoleMissions)
 
 local Roles = {}
 
@@ -96,7 +98,18 @@ local function payload(): { [string]: string }
     return out
 end
 
+-- 역할 미션 배정 (선택이 끝난 멀티만. 역할이 같으면 그대로, 바뀌면 새 미션)
+local function syncMissions()
+    RoleMissions.assign(mode, selecting, order, roles)
+end
+
+local function sendPin()
+    RoleMissions.setPin(pin)
+    Remotes.get("PinUpdate"):FireAllClients(pin)
+end
+
 local function broadcast()
+    syncMissions()
     Remotes.get("RoleUpdate"):FireAllClients(payload(), selecting, deadline)
 end
 
@@ -187,7 +200,7 @@ function Roles.begin(newMode: string)
         end
     end
     broadcast()
-    Remotes.get("PinUpdate"):FireAllClients(pin)
+    sendPin()
 end
 
 -- 선택 시간을 끝내고 남은 사람을 배정한다 (playing 시작 때도 부른다)
@@ -210,7 +223,7 @@ function Roles.reset()
     table.clear(order)
     pin = {}
     broadcast()
-    Remotes.get("PinUpdate"):FireAllClients(pin)
+    sendPin()
 end
 
 function Roles.roleOf(player: Player): string?
@@ -309,6 +322,7 @@ function Roles.onPlayerAdded(player: Player)
             ContributionsV2.setRole(player, "solo")
         end
     end
+    syncMissions()
     Remotes.get("RoleUpdate"):FireClient(player, payload(), selecting, deadline)
     Remotes.get("PinUpdate"):FireClient(player, pin)
 end
@@ -325,6 +339,7 @@ function Roles.onPlayerRemoving(player: Player)
     end
     if pin.byUserId == player.UserId then
         pin.byUserId = nil
+        RoleMissions.setPin(pin)
     end
     broadcast()
 end
@@ -357,7 +372,7 @@ function Roles.setPin(player: Player, siteIndex: any)
     else
         pin = {}
     end
-    Remotes.get("PinUpdate"):FireAllClients(pin)
+    sendPin()
 end
 
 function Roles.getPin(): { siteIndex: number?, byUserId: number? }

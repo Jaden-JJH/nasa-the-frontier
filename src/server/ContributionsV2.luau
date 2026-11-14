@@ -6,6 +6,7 @@
 export type Field = "panels" | "water" | "builds" | "repairs" | "rescues"
 
 export type CrewRow = {
+    userId: number, -- 결과 화면에서 내 줄 찾기 (개인 정보 아님, Roblox 공개 id)
     name: string,
     role: string?, -- "controller" | "explorer" | "engineer" | "solo"
     panels: number,
@@ -15,7 +16,7 @@ export type CrewRow = {
     rescues: number,
 }
 
-type Row = CrewRow & { order: number, userId: number }
+type Row = CrewRow & { order: number }
 
 local ContributionsV2 = {}
 
@@ -101,6 +102,7 @@ function ContributionsV2.crew(limit: number?): { CrewRow }
             break
         end
         table.insert(out, {
+            userId = row.userId,
             name = row.name,
             role = row.role,
             panels = row.panels,

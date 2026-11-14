@@ -804,6 +804,21 @@ function H.topUp(fields)
     M.MissionFlow.flow.commit(s)
     advance(0)
 end
+-- Rules siteIndex의 얼음 후보지 지면 위치 (MissionWorld.iceSites, 표시 이름으로 맞춘다)
+function H.icePosition(siteIndex)
+    local site = H.rules().sites[siteIndex]
+    for _, info in M.MissionWorld.iceSites() do
+        if info.markerName == site.id then
+            return info.position
+        end
+    end
+    return nil
+end
+-- 역할 미션 한 사람 (StateUpdate.roleMissions, 문자열 userId 키)
+function H.mission(p)
+    local list = H.state().roleMissions
+    return list and list[tostring(p.UserId)]
+end
 function H.landerInside()
     local shelter = M.MissionWorld.getShelter("lander")
     return shelter.zone.CFrame.Position
@@ -833,6 +848,7 @@ M.RoverFleet = loadModule(Server:FindFirstChild("RoverFleet"))
 M.AirlockDoors = loadModule(Server:FindFirstChild("AirlockDoors"))
 M.OxygenV2 = loadModule(Server:FindFirstChild("OxygenV2"))
 M.Roles = loadModule(Server:FindFirstChild("Roles"))
+M.RoleMissions = loadModule(Server:FindFirstChild("RoleMissions"))
 M.RecordsV2 = loadModule(Server:FindFirstChild("RecordsV2"))
 M.SpaceWeather = loadModule(Server:FindFirstChild("SpaceWeather"))
 
@@ -1069,6 +1085,25 @@ do
             and airlockPrompt:GetAttribute("ObjectKey") == "facility.airlock.name",
         "에어록 프롬프트: Attribute 키만 (문장 없음)"
     )
+    -- [S1] 비용 표시: 에어록 점검은 무료 2일 (CostEnergy, CostWater 없음, BuildDays, Affordable)
+    local airlockDef = M.MissionConfig.MISSIONS.C.facilities.airlock
+    check(
+        airlockPrompt:GetAttribute("BuildDays") == airlockDef.buildDays
+            and airlockPrompt:GetAttribute("CostEnergy") == nil
+            and airlockPrompt:GetAttribute("CostWater") == nil
+            and airlockPrompt:GetAttribute("Affordable") == true
+            and airlockPrompt:GetAttribute("LockMsg") == nil,
+        "비용: 에어록 점검 BuildDays 2, 무료, Affordable"
+    )
+    local panelPrompt = M.Interactions.prompt("installPad")
+    local panelCfg = M.MissionConfig.MISSIONS.C.panels
+    check(
+        panelPrompt:GetAttribute("CostEnergy") == panelCfg.cost
+            and panelPrompt:GetAttribute("CostWater") == nil
+            and panelPrompt:GetAttribute("BuildDays") == nil
+            and panelPrompt:GetAttribute("Affordable") == true,
+        "비용: 패널 CostEnergy = MissionConfig panels.cost, BuildDays 없음"
+    )
     local mark = R.mark()
     H.trigger(airlockPrompt, ana)
     check(
@@ -1078,6 +1113,7 @@ do
     check(R.notified(mark, "toast.build.started") ~= nil, "알림 toast.build.started")
     check(M.MissionWorld.getAirlockStatus() == "inspecting", "MissionWorld 에어록 inspecting")
     check(H.state().airlock.status == "inspecting", "StateUpdate airlock inspecting")
+    check(H.state().roleMissions == nil, "역할 미션: 솔로에는 없다 (roleMissions nil)")
     local panel = M.Interactions.prompt("installPad")
     check(
         panel
@@ -1094,6 +1130,32 @@ do
         R.notified(mark, "toast.panel.limit_today", ana) ~= nil,
         "3장째: 하루 한도 알림 (그 플레이어)"
     )
+    do
+        local lock = panel:GetAttribute("LockMsg")
+        local decoded = type(lock) == "string" and serde.decode("json", lock)
+        check(
+            decoded
+                and decoded.key == "toast.panel.limit_today"
+                and decoded.args.perDay == panelCfg.perDay,
+            "비용: 오늘 한도면 패널 LockMsg toast.panel.limit_today"
+        )
+        local saved = H.rules().energy
+        H.topUp({ energy = 2 })
+        check(
+            panel:GetAttribute("Affordable") == true,
+            "비용: 에너지 2라도 패널 발전(2장 x 2 = 4) < 대원 12면 Rules 비상 설치 -> Affordable true"
+        )
+        H.topUp({ energy = 2, panels = 6 })
+        check(
+            panel:GetAttribute("Affordable") == false,
+            "비용: 패널 6장(발전 12)이면 비상 설치 아님, 에너지 2 < 4 -> Affordable false"
+        )
+        H.topUp({ energy = saved, panels = 2 })
+        check(
+            panel:GetAttribute("Affordable") == true,
+            "비용: 에너지가 돌아오면 Affordable true"
+        )
+    end
     local panels = Workspace.MissionRuntime.Base.SolarField:FindFirstChild("Panels")
     check(
         panels ~= nil and #panels:GetChildren() == 2,
@@ -1170,6 +1232,25 @@ do
         type(args) == "string" and string.find(args, "facility.farm.name", 1, true) ~= nil,
         "ActionArgs JSON: 중첩 facility Msg"
     )
+    local farmDef = M.MissionConfig.MISSIONS.C.facilities.farm
+    check(
+        farm:GetAttribute("CostEnergy") == farmDef.cost.energy
+            and farm:GetAttribute("CostWater") == farmDef.cost.water
+            and farm:GetAttribute("BuildDays") == farmDef.buildDays
+            and farm:GetAttribute("LockMsg") == nil,
+        "비용: 그린하우스 E10 W5, 3일 (MissionConfig)"
+    )
+    do
+        local saved = { energy = H.rules().energy, water = H.rules().water }
+        H.topUp({ energy = farmDef.cost.energy - 1 })
+        check(
+            farm:GetAttribute("Affordable") == false,
+            "비용: 에너지가 모자라면 Affordable false"
+        )
+        H.topUp({ energy = farmDef.cost.energy, water = farmDef.cost.water })
+        check(farm:GetAttribute("Affordable") == true, "비용: 딱 맞으면 Affordable true")
+        H.topUp(saved)
+    end
     H.trigger(farm, ana)
     check(
         H.rules().facilities.farm and H.rules().facilities.farm.status == "building",
@@ -1195,6 +1276,11 @@ do
         airlockPrompt:GetAttribute("ActionKey") == "prompt.act.pause",
         "가동 뒤 에어록 제어반: 멈춤"
     )
+    check(
+        airlockPrompt:GetAttribute("BuildDays") == nil
+            and airlockPrompt:GetAttribute("Affordable") == nil,
+        "비용: 멈춤/재개는 비용 Attribute 없음"
+    )
     local mark = R.mark()
     H.trigger(airlockPrompt, ana)
     check(
@@ -1204,12 +1290,35 @@ do
     check(airlockPrompt:GetAttribute("ActionKey") == "prompt.act.resume", "멈춘 뒤: 재개")
     H.fire("SetFacilityPaused", ana, "airlock", false)
     check(H.rules().facilities.airlock.paused == false, "SetFacilityPaused(콘솔 근처): 재개")
+    -- [S2] 건설 중 그린하우스 안에 들어가 있던 플레이어는 완공 순간 정면 바깥으로 옮겨진다
+    local farmPad = M.MissionWorld.getMarker("FarmPad").position
+    local insidePos = Vector3.new(farmPad.X, groundAt(farmPad.X, farmPad.Z) + 3, farmPad.Z)
     H.day()
+    -- 야외 산소(60초)를 아끼려고 완공 직전 2초 전에만 들어간다
+    advance(M.MissionConfig.DAY_SECONDS - 2)
+    moveTo(ana, insidePos)
     H.day()
     check(
         H.rules().day == 5 and H.rules().facilities.farm.status == "active",
         "재배 공간 가동 (day 5)"
     )
+    do
+        local farmModel = M.MissionWorld.facilityModel("farm")
+        local root = ana.Character.HumanoidRootPart
+        local pos = root.CFrame.Position
+        local toLander = (M.MissionWorld.getMarker("Lander").position - farmPad)
+            * Vector3.new(1, 0, 1)
+        local moved = (pos - insidePos) * Vector3.new(1, 0, 1)
+        check(
+            farmModel ~= nil and moved.Magnitude > 5 and moved.Unit:Dot(toLander.Unit) > 0.7,
+            "갇힘 방지: 완공 순간 그린하우스 안 대원을 정면(착륙선 쪽) 바깥으로"
+        )
+        check(
+            H.near(pos.Y, groundAt(pos.X, pos.Z) + 3, 1e-3),
+            "갇힘 방지: 옮긴 자리는 지면"
+        )
+    end
+    moveTo(ana, H.landerInside())
     local farmState = H.state()
     check(
         farmState.facilities.farm.status == "active"
@@ -1253,6 +1362,31 @@ do
         led and led.Enabled and nutrient and nutrient.Enabled,
         "업그레이드 착공 자리 켜짐"
     )
+    do
+        local defs = M.MissionConfig.MISSIONS.C.facilities
+        check(
+            led:GetAttribute("CostEnergy") == defs.led.cost.energy
+                and led:GetAttribute("CostWater") == defs.led.cost.water
+                and led:GetAttribute("BuildDays") == defs.led.buildDays
+                and led:GetAttribute("Affordable") == true
+                and led:GetAttribute("LockMsg") == nil,
+            "비용: LED E35 W20, 1일, Affordable"
+        )
+        local hydro = M.Interactions.prompt("upgrade_hydroponics")
+        local lock = hydro:GetAttribute("LockMsg")
+        local decoded = type(lock) == "string" and serde.decode("json", lock)
+        check(
+            decoded
+                and decoded.key == "toast.build.need_prereq"
+                and decoded.args.facility.key == "facility.pipe.name",
+            "비용: 수경 재배는 파이프 전 LockMsg need_prereq (중첩 facility)"
+        )
+        check(
+            hydro:GetAttribute("CostEnergy") == defs.hydroponics.cost.energy
+                and hydro:GetAttribute("CostWater") == defs.hydroponics.cost.water,
+            "비용: 수경 재배 E60 W40"
+        )
+    end
     H.trigger(led, ana)
     H.topUp({ energy = 100, water = 100 })
     H.trigger(nutrient, ana)
@@ -1272,11 +1406,47 @@ do
     )
     -- 파이프: 하역 5회 (테스트 단축) -> 콘솔 SetPipeSite -> 물탱크 옆 착공
     local pipe = M.Interactions.prompt("pipe")
-    check(pipe and not pipe.Enabled, "파이프 잠김: 착공 프롬프트 꺼짐")
+    local pipeDef = M.MissionConfig.MISSIONS.C.facilities.pipe
+    -- [S1] 해금 전에도 프롬프트를 보이고 LockMsg로 하역 진행(done / need)과 비용을 알린다
+    H.topUp({ deliveries = 2 })
+    do
+        local lock = pipe:GetAttribute("LockMsg")
+        local decoded = type(lock) == "string" and serde.decode("json", lock)
+        check(
+            pipe.Enabled
+                and pipe:GetAttribute("ActionKey") == "prompt.act.build"
+                and pipe.HoldDuration == 0,
+            "파이프 잠김: 프롬프트는 보이고 짓기 키 (누르면 안내)"
+        )
+        check(
+            decoded
+                and decoded.key == "toast.pipe.locked"
+                and decoded.args.need == pipeDef.unlockDeliveries
+                and decoded.args.done == 2,
+            "파이프 잠김: LockMsg toast.pipe.locked { need 5, done 2 }"
+        )
+        check(
+            pipe:GetAttribute("CostEnergy") == pipeDef.cost.energy
+                and pipe:GetAttribute("CostWater") == pipeDef.cost.water
+                and pipe:GetAttribute("BuildDays") == pipeDef.buildDays,
+            "파이프 잠김: 비용 E60 W40, 5일도 보인다"
+        )
+        local lockMark = R.mark()
+        H.trigger(pipe, ana)
+        local note = R.notified(lockMark, "toast.pipe.locked", ana)
+        check(
+            note and note.args[1].args.done == 2 and H.rules().facilities.pipe == nil,
+            "파이프 잠김: 누르면 toast.pipe.locked, 착공 안 함"
+        )
+    end
     H.topUp({ deliveries = 5, energy = 100, water = 100 })
     check(
         pipe.Enabled and pipe:GetAttribute("ActionKey") == "prompt.act.pick_pipe_site",
         "해금 뒤: 콘솔에서 고르기"
+    )
+    check(
+        pipe:GetAttribute("LockMsg") == nil and pipe:GetAttribute("Affordable") == true,
+        "해금 뒤: LockMsg 지움, Affordable"
     )
     mark = R.mark()
     H.trigger(pipe, ana)
@@ -1573,6 +1743,10 @@ do
     )
     local row = result and result.crew[1]
     check(
+        row and row.userId == 101 and row.roleMission == nil,
+        "역할 미션: 솔로 crew 줄에 userId, roleMission 없음"
+    )
+    check(
         row
             and row.name == "Ana"
             and row.role == "solo"
@@ -1673,6 +1847,41 @@ do
         pin and pin.args[1].siteIndex == 2 and pin.args[1].byUserId == 202,
         "PinUpdate { siteIndex, byUserId }"
     )
+    -- [S7] 역할 미션 (2인): 관제사 guide, 탐사대원 water. 점수와 무관, 서버 모듈이 센다
+    do
+        local cfg = M.RoleMissions.CONFIG
+        local benMission, anaMission = H.mission(ben), H.mission(ana)
+        check(
+            benMission
+                and benMission.id == "guide"
+                and benMission.goal == cfg.guide.goal
+                and benMission.progress == 0
+                and benMission.done == false
+                and benMission.radius == cfg.guide.radius,
+            "역할 미션 2인: 관제사 Ben guide (목표 2, 반경 30)"
+        )
+        check(
+            anaMission
+                and anaMission.id == "water"
+                and anaMission.goal == cfg.water.goal
+                and anaMission.targets == nil,
+            "역할 미션 2인: 탐사대원 Ana water (목표 3)"
+        )
+        advance(0.6)
+        check(H.mission(ben).progress == 0, "guide: 핀 후보지에 아무도 없으면 0")
+        local site2 = H.icePosition(2)
+        moveTo(ana, site2 + Vector3.new(cfg.guide.radius - 5, 3, 0))
+        advance(0.6)
+        check(H.mission(ben).progress == 1, "guide: 팀원이 핀 후보지 반경 안에 오면 1")
+        H.fire("SetPin", ben, 2)
+        advance(1.2)
+        check(
+            H.mission(ben).progress == 1,
+            "guide: 같은 후보지 다시 핀은 세지 않는다"
+        )
+        moveTo(ana, H.landerInside())
+        advance(0.6)
+    end
     mark = R.mark()
     H.fire("DispatchRover", ana, 1, false)
     check(
@@ -1823,6 +2032,55 @@ do
         "하역: 하역 횟수 +1, 탱크 0"
     )
     check(H.state().deliveries == deliveries + 1, "StateUpdate deliveries")
+    -- [S7] 하역 1회 = water 진행 1. 나머지 2회는 같은 경로(flow.contribute water)로 채워 완료 알림을 본다
+    check(H.mission(ana).progress == 1, "water: 본인 하역 1회 -> 진행 1")
+    do
+        local doneMark = R.mark()
+        M.MissionFlow.flow.contribute(ana, "water", 30)
+        advance(0)
+        check(H.mission(ana).progress == 2 and not H.mission(ana).done, "water: 2 / 3")
+        M.MissionFlow.flow.contribute(ana, "water", 30)
+        advance(0)
+        check(H.mission(ana).done == true and H.mission(ana).progress == 3, "water: 3회면 완료")
+        check(
+            R.notified(doneMark, "rolemission.water.done_self", ana) ~= nil,
+            "완료: 본인에게 rolemission.water.done_self"
+        )
+        local team = R.notified(doneMark, "rolemission.done_team", ben)
+        check(
+            team
+                and team.target == ben
+                and team.args[1].args.name == "Ana"
+                and team.args[1].args.role.key == "role.explorer.name",
+            "완료: 팀원에게 rolemission.done_team { name, role = role.explorer.name }"
+        )
+        local selfTeam = false
+        for i = doneMark + 1, #sent do
+            local item = sent[i]
+            if
+                item.name == "Notify"
+                and item.args[1].key == "rolemission.done_team"
+                and (item.target == ana or item.target == "all")
+            then
+                selfTeam = true
+            end
+        end
+        check(not selfTeam, "완료: 팀 알림은 본인에게 겹쳐 보내지 않는다")
+        M.MissionFlow.flow.contribute(ana, "water", 30)
+        advance(0)
+        check(H.mission(ana).progress == 3, "water: 완료 뒤에는 더 세지 않는다")
+        -- guide 두 번째 후보지
+        local guideMark = R.mark()
+        H.fire("SetPin", ben, 1)
+        moveTo(ana, H.icePosition(1) + Vector3.new(0, 3, 4))
+        advance(0.6)
+        check(H.mission(ben).done == true, "guide: 서로 다른 후보지 2곳이면 완료")
+        check(
+            R.notified(guideMark, "rolemission.guide.done_self", ben) ~= nil,
+            "guide 완료: 관제사에게 done_self"
+        )
+        moveTo(ana, H.landerInside())
+    end
     -- 충돌 파손과 수리
     mark = R.mark()
     check(M.RoverFleet.registerHit(20), "바위 충돌: 파손 +1")
@@ -1837,6 +2095,23 @@ do
         repair and repair.Enabled and repair.KeyboardKeyCode == Enum.KeyCode.R,
         "수리 프롬프트 (R)"
     )
+    do
+        local repairEnergy = M.MissionConfig.MISSIONS.C.rover.repairEnergy
+        check(
+            repair:GetAttribute("CostEnergy") == repairEnergy
+                and repair:GetAttribute("CostWater") == nil
+                and repair:GetAttribute("BuildDays") == nil
+                and repair:GetAttribute("Affordable") == (H.rules().energy >= repairEnergy),
+            "비용: 로버 수리 CostEnergy = rover.repairEnergy, Affordable"
+        )
+        local saved = H.rules().energy
+        H.topUp({ energy = repairEnergy - 1 })
+        check(
+            repair:GetAttribute("Affordable") == false,
+            "비용: 수리 에너지 모자라면 Affordable false"
+        )
+        H.topUp({ energy = saved })
+    end
     local energy = H.rules().energy
     H.trigger(repair, ana)
     check(
@@ -1885,6 +2160,87 @@ do
         s.rover.battery >= battery and s.rover.batteryMax == 50 and s.rover.atBase == true,
         "주차판: 충전 (배터리 <= 50)"
     )
+    -- [S6] 충전이 보여야 한다: StateUpdate rover 필드와 섀시 Attribute, 막힌 이유
+    do
+        local chassis = rover.PrimaryPart
+        local keep = M.MissionConfig.MANUAL_DRIVE.chargeKeepEnergy
+        local drained = M.MissionConfig.MANUAL_DRIVE.batteryMax * 0.5
+        -- 배터리를 반쯤 비운 상태로 만든다 (주행 소모 흉내: 섀시를 옮겨 가며 step)
+        local function drainTo(target)
+            local guard = 0
+            while H.state().rover.battery > target and guard < 4000 do
+                guard += 1
+                rover:PivotTo(
+                    rover.PrimaryPart.CFrame * CFrame.new(0, 0, if guard % 2 == 0 then 6 else -6)
+                )
+                M.RoverFleet.step(1)
+            end
+            advance(0.6)
+        end
+        H.topUp({ energy = keep })
+        drainTo(drained)
+        advance(1)
+        local st = H.state()
+        check(
+            type(st.rover.charging) == "boolean"
+                and type(st.rover.battery) == "number"
+                and type(st.rover.batteryMax) == "number"
+                and type(st.rover.atBase) == "boolean",
+            "충전: StateUpdate rover에 charging, battery, batteryMax, atBase"
+        )
+        check(
+            st.rover.charging == false
+                and st.rover.chargeBlocked
+                and st.rover.chargeBlocked.key == "hud.rover.charge_blocked_energy"
+                and st.rover.chargeBlocked.args.keep == keep,
+            "충전: 기지 에너지 <= chargeKeepEnergy면 rover.chargeBlocked (energy, keep)"
+        )
+        local blockedArgs = chassis:GetAttribute("ChargeBlockedArgs")
+        check(
+            chassis:GetAttribute("Charging") == false
+                and chassis:GetAttribute("ChargeBlocked") == "hud.rover.charge_blocked_energy"
+                and type(blockedArgs) == "string"
+                and serde.decode("json", blockedArgs).keep == keep,
+            "충전: 섀시 Charging false, ChargeBlocked 키, ChargeBlockedArgs keep"
+        )
+        local pct = chassis:GetAttribute("BatteryPercent")
+        check(
+            type(pct) == "number"
+                and pct % 1 == 0
+                and pct >= 0
+                and pct <= 100
+                and math.abs(pct - st.rover.battery / st.rover.batteryMax * 100) <= 1,
+            "충전: 섀시 BatteryPercent 0 ~ 100 정수 (" .. tostring(pct) .. ")"
+        )
+        check(
+            H.rules().energy == keep,
+            "충전: 막혔을 때 기지 에너지는 그대로 (남길 양)"
+        )
+        H.topUp({ energy = 90 })
+        advance(1)
+        st = H.state()
+        check(
+            st.rover.charging == true
+                and st.rover.chargeBlocked == nil
+                and chassis:GetAttribute("Charging") == true
+                and chassis:GetAttribute("ChargeBlocked") == nil
+                and chassis:GetAttribute("ChargeBlockedArgs") == nil,
+            "충전: 에너지가 있으면 Charging true, 막힌 이유 지움"
+        )
+        -- 운전석에 앉아 있으면 충전하지 않는다
+        moveTo(ana, rover.PrimaryPart.CFrame.Position + Vector3.new(4, 0, 0))
+        H.trigger(rover.PrimaryPart:FindFirstChild("BoardPrompt"), ana)
+        advance(1)
+        check(
+            chassis:GetAttribute("Charging") == false
+                and chassis:GetAttribute("ChargeBlocked") == "hud.rover.charge_blocked_seat"
+                and H.state().rover.chargeBlocked.key == "hud.rover.charge_blocked_seat",
+            "충전: 운전석에 앉으면 ChargeBlocked seat"
+        )
+        H.unseat(ana)
+        advance(1)
+        check(chassis:GetAttribute("ChargeBlocked") == nil, "충전: 내리면 다시 충전")
+    end
 end
 
 print("[2판 멀티: 역할 맞바꾸기, 관제사 이탈, 실패]")
@@ -1898,6 +2254,15 @@ do
         "콘솔에서 관제사 맞바꾸기"
     )
     check(R.notified(mark, "toast.role.changed") ~= nil, "역할 변경 알림")
+    advance(0)
+    check(
+        H.mission(ana).id == "guide"
+            and H.mission(ana).progress == 0
+            and H.mission(ana).done == false
+            and H.mission(ben).id == "water"
+            and H.mission(ben).progress == 0,
+        "역할 미션: 역할을 바꾸면 새 역할 미션을 0부터 (Ana guide, Ben water)"
+    )
     moveTo(ben, H.outsidePoint())
     mark = R.mark()
     H.fire("ChooseRole", ben, "engineer")
@@ -1938,6 +2303,20 @@ do
         roleNames.Ben == "controller" and roleNames.Ana == "controller",
         "crew 역할 (나간 사람은 마지막 역할)"
     )
+    local missionsById = {}
+    for _, row in result.crew do
+        missionsById[row.userId] = row.roleMission
+    end
+    check(
+        missionsById[202]
+            and missionsById[202].id == "guide"
+            and missionsById[202].done == false
+            and type(missionsById[202].goal) == "number"
+            and missionsById[101]
+            and missionsById[101].id == "guide"
+            and missionsById[101].progress == 0,
+        "GameOver crew roleMission { id, progress, goal, done } (나간 사람도 남는다)"
+    )
     advance(10.5)
     local submittedAgain = false
     for i = failMark + 1, #sent do
@@ -1953,6 +2332,177 @@ do
         M.MissionFlow.getPhase() == "selecting" and H.state().chooserUserId == 0,
         "모두 나감: selecting, 권한자 없음"
     )
+end
+
+-- 3판 멀티 4명: 역할 미션 4종 (S7) ------------------------------------------------
+print("[3판 멀티 4명: 역할 미션]")
+do
+    local cy = makePlayer("Cy", 303)
+    local di = makePlayer("Di", 404)
+    local ed = makePlayer("Ed", 505)
+    local flo = makePlayer("Flo", 606)
+    for _, p in { cy, di, ed, flo } do
+        moveTo(p, H.landerInside())
+        join(p)
+    end
+    M.MissionFlow.setNextWindow("2022-08-12")
+    H.fire("SelectMission", cy, "C")
+    check(H.state().mode == "multi" and H.state().players == 4, "4명 확정: multi")
+    H.fire("ChooseRole", cy, "controller")
+    H.fire("ChooseRole", di, "explorer")
+    H.fire("ChooseRole", ed, "explorer")
+    H.fire("ChooseRole", flo, "engineer")
+    check(H.state().roleMissions == nil, "역할 미션: 선택 시간에는 아직 배정 안 함")
+    advance(10.2)
+    check(M.MissionFlow.getPhase() == "playing", "4명: playing")
+    local cfg = M.RoleMissions.CONFIG
+    local panelsTotal = M.MissionConfig.MISSIONS.C.panels.total
+    local m = {
+        cy = H.mission(cy),
+        di = H.mission(di),
+        ed = H.mission(ed),
+        flo = H.mission(flo),
+    }
+    check(m.cy and m.cy.id == "guide", "4명: 관제사 guide")
+    check(m.di and m.di.id == "water", "4명: 먼저 들어온 탐사대원 water")
+    check(
+        m.flo and m.flo.id == "panels" and m.flo.goal == math.min(cfg.panels.goal, panelsTotal),
+        "4명: 엔지니어 panels (목표 6)"
+    )
+    local targetsOk = m.ed ~= nil
+        and m.ed.id == "scout"
+        and m.ed.goal == 3
+        and m.ed.radius == cfg.scout.radius
+        and type(m.ed.targets) == "table"
+        and #m.ed.targets == 3
+    local ids, keys = {}, {}
+    for _, t in (m.ed and m.ed.targets) or {} do
+        ids[t.id] = true
+        keys[t.id] = t.key
+        if type(t.x) ~= "number" or type(t.z) ~= "number" or t.visited ~= false then
+            targetsOk = false
+        end
+        if string.sub(t.id, 1, 3) == "Ice" then
+            targetsOk = false
+        end
+    end
+    check(
+        targetsOk and ids.buildSpot and ids.pipeSpot and ids.installPad,
+        "4명: 두 번째 탐사대원 scout, 자리 3곳 (buildSpot, pipeSpot, installPad, 얼음 없음)"
+    )
+    check(
+        keys.buildSpot == "facility.farm.name"
+            and keys.pipeSpot == "facility.pipe.name"
+            and keys.installPad == "world.solar_field.name",
+        "scout: 자리 이름 키"
+    )
+    -- scout: 자리 3곳 방문
+    local scoutMark = R.mark()
+    for i, anchorId in { "buildSpot", "installPad", "pipeSpot" } do
+        local spot = M.MissionWorld.anchor(anchorId).CFrame.Position
+        moveTo(ed, spot + Vector3.new(cfg.scout.radius - 4, 3, 0))
+        advance(0.6)
+        check(H.mission(ed).progress == i, "scout: " .. anchorId .. " 방문 -> " .. i)
+    end
+    local visitedAll = true
+    for _, t in H.mission(ed).targets do
+        if not t.visited then
+            visitedAll = false
+        end
+    end
+    check(H.mission(ed).done and visitedAll, "scout: 3곳 모두 visited, 완료")
+    check(
+        R.notified(scoutMark, "rolemission.scout.done_self", ed) ~= nil,
+        "scout 완료: 본인 알림"
+    )
+    local teamTargets = {}
+    for i = scoutMark + 1, #sent do
+        local item = sent[i]
+        if item.name == "Notify" and item.args[1].key == "rolemission.done_team" then
+            teamTargets[item.target] = item.args[1].args
+        end
+    end
+    check(
+        teamTargets[cy] and teamTargets[di] and teamTargets[flo] and teamTargets[ed] == nil,
+        "scout 완료: 다른 3명에게만 팀 알림"
+    )
+    moveTo(ed, H.landerInside())
+    -- panels: 다른 사람이 패널을 많이 세워 남은 칸이 2면 목표가 2로 줄고, 엔지니어가 2장 세우면 완료
+    H.topUp({ panels = panelsTotal - 2 })
+    advance(0.6)
+    check(H.mission(flo).goal == 2 and not H.mission(flo).done, "panels: 남은 칸 2 -> 목표 2")
+    local panelPrompt = M.Interactions.prompt("installPad")
+    H.trigger(panelPrompt, flo)
+    check(H.mission(flo).progress == 1, "panels: 엔지니어 설치 1장")
+    local panelMark = R.mark()
+    H.trigger(panelPrompt, flo)
+    check(H.mission(flo).done == true, "panels: 목표만큼 세우면 완료")
+    check(
+        R.notified(panelMark, "rolemission.panels.done_self", flo) ~= nil,
+        "panels 완료: 본인 알림"
+    )
+    H.trigger(panelPrompt, cy)
+    check(
+        H.mission(cy).progress == 0,
+        "panels: 관제사의 패널은 관제사 미션에 세지 않는다"
+    )
+    -- guide: 관제사 자신은 세지 않고, 팀원(엔지니어)이 오면 센다
+    H.fire("SetPin", cy, 3)
+    moveTo(cy, H.icePosition(3) + Vector3.new(0, 3, 2))
+    advance(0.6)
+    check(H.mission(cy).progress == 0, "guide: 관제사 자신이 가면 세지 않는다")
+    moveTo(flo, H.icePosition(3) + Vector3.new(2, 3, 0))
+    advance(0.6)
+    check(H.mission(cy).progress == 1, "guide: 엔지니어가 도착 -> 1")
+    for _, p in { cy, flo } do
+        moveTo(p, H.landerInside())
+    end
+    -- 역할 바꾸기: 탐사대원 Di가 엔지니어 자리로 (Flo와 맞바꿈) -> Di panels 0부터, Flo는 water (Ed는 scout 유지)
+    H.fire("ChooseRole", di, "engineer")
+    advance(0)
+    check(
+        H.mission(di).id == "panels"
+            and H.mission(di).progress == 0
+            and H.mission(flo).id == "water"
+            and H.mission(flo).progress == 0
+            and H.mission(ed).id == "scout"
+            and H.mission(ed).done == true,
+        "역할 바꾸기: Di panels, Flo water 새로, Ed scout 그대로"
+    )
+    -- 결과: 4줄 모두 userId와 roleMission
+    H.topUp({ water = 0, food = 0 })
+    for _ = 1, 6 do
+        if M.MissionFlow.getPhase() ~= "playing" then
+            break
+        end
+        H.day()
+    end
+    check(M.MissionFlow.getPhase() == "result", "4명: 부족 실패로 결과")
+    local result = R.last("GameOver").args[1]
+    local byId = {}
+    for _, row in result.crew do
+        byId[row.userId] = row.roleMission
+    end
+    check(
+        #result.crew == 4
+            and byId[303]
+            and byId[303].id == "guide"
+            and byId[505]
+            and byId[505].id == "scout"
+            and byId[505].done == true
+            and byId[404]
+            and byId[404].id == "panels"
+            and byId[606]
+            and byId[606].id == "water",
+        "4명 GameOver: crew 4줄 roleMission (Ed scout 완료)"
+    )
+    advance(10.5)
+    H.fire("RequestRestart", cy)
+    check(M.MissionFlow.getPhase() == "selecting", "4명: 재시작 -> selecting")
+    check(M.RoleMissions.recordOf(505) == nil, "재시작: 역할 미션 초기화")
+    for _, p in { cy, di, ed, flo } do
+        leave(p)
+    end
 end
 
 -- 페이로드 검사 ----------------------------------------------------------------

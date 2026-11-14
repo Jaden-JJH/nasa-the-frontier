@@ -10,6 +10,8 @@
 --   IceN.MinePoint 얼음 채취 (RoverFleet.collect, 운전석). 쿨타임이면 남은 일수, 파이프가 연결되면 그 표시
 --   시설 제어반   멈춤/재개 (MissionWorld.controlPanel(id), E 1초, Q33). 바꾸면 모두에게 알림
 -- 원격 요청: SetFacilityPaused(facilityId, paused), SetPipeSite(siteIndex)도 여기서 처리한다.
+-- 비용 표시(PromptKit.setCost): 에어록 점검, 패널, 재배 공간, 업그레이드 3종, 파이프 프롬프트에 CostEnergy, CostWater,
+--   BuildDays, Affordable, LockMsg를 refresh마다 맞춘다(로버 수리는 RoverFleet.refreshCosts). 파이프는 해금 전에도 보인다.
 -- MissionWorld.reset 뒤에는 attach를 다시 부른다(프롬프트가 MissionRuntime과 함께 지워진다).
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -101,6 +103,68 @@ local function playing(): boolean
     return flow ~= nil and flow.phase() == "playing"
 end
 
+-- 비용 표시 (PromptKit.setCost, 2026-11-15 시험 피드백) ------------------------------------
+-- 숫자는 MissionConfig 시설 정의와 패널 값. 규칙 판정은 Rules와 같게 (Rules.canBuild, Rules.installPanel)
+
+local EPSILON = 1e-6
+
+local function covers(state: any, cost: { energy: number, water: number }): boolean
+    return state.energy + EPSILON >= cost.energy and state.water + EPSILON >= cost.water
+end
+
+-- 규칙상 잠긴 사유: 해금 전(파이프 하역 횟수), 선행 시설 미완공. MissionFlow 시설 unlockMsg와 같은 판정
+local function lockFor(state: any?, defId: string): Msg.Msg?
+    local def = facilityDef(defId)
+    if not state or not def then
+        return nil
+    end
+    if def.unlockDeliveries and state.deliveries < def.unlockDeliveries then
+        return Msg.new(
+            "toast.pipe.locked",
+            { done = state.deliveries, need = def.unlockDeliveries }
+        )
+    end
+    for _, req in def.requires do
+        if not Rules.isBuilt(state, req) then
+            return Msg.new("toast.build.need_prereq", { facility = nameMsg(req) })
+        end
+    end
+    return nil
+end
+
+local function setBuildCost(prompt: ProximityPrompt, state: any?, defId: string)
+    local def = facilityDef(defId)
+    if not def then
+        PromptKit.setCost(prompt, nil)
+        return
+    end
+    PromptKit.setCost(prompt, {
+        energy = def.cost.energy,
+        water = def.cost.water,
+        buildDays = def.buildDays,
+        affordable = if state then covers(state, def.cost) else nil,
+        lock = lockFor(state, defId),
+    })
+end
+
+-- 패널: 에너지가 모자라도 Rules 비상 설치 조건이면 낼 수 있다 (남은 에너지만 낸다)
+local function setPanelCost(prompt: ProximityPrompt, state: any?, m: any)
+    local p = m.panels
+    local affordable: boolean? = nil
+    local lock: Msg.Msg? = nil
+    if state then
+        affordable = state.energy + EPSILON >= p.cost
+            or (
+                p.emergencyInstall == true
+                and state.panels * p.output < Rules.crewUse(state, MissionConfig).energy
+            )
+        if state.panelsToday >= p.perDay then
+            lock = Msg.new("toast.panel.limit_today", { perDay = p.perDay })
+        end
+    end
+    PromptKit.setCost(prompt, { energy = p.cost, affordable = affordable, lock = lock })
+end
+
 -- 처리 함수 --------------------------------------------------------------
 
 local function onAirlock(player: Player)
@@ -138,6 +202,13 @@ local function startBuild(player: Player, defId: string, siteIndex: number?)
 end
 
 local function onPipe(player: Player)
+    local state = flow.rules()
+    local lock = lockFor(state, "pipe")
+    if lock then
+        -- 해금 전에도 프롬프트를 보여 진행(하역 n / 5)을 알린다. 누르면 같은 안내
+        flow.notify(player, lock, "warn")
+        return
+    end
     local site = pipeSite
     if site == nil then
         flow.notify(player, Msg.new("toast.pipe.pick_site"), "warn")
@@ -292,6 +363,7 @@ function Interactions.refresh()
         if airlock == nil then
             PromptKit.set(airlockPrompt, "prompt.act.inspect", nil, "facility.airlock.name")
             PromptKit.setHold(airlockPrompt, CFG.inspectHold)
+            setBuildCost(airlockPrompt, state, "airlock")
             PromptKit.setEnabled(airlockPrompt, live)
         elseif airlock.status == "active" then
             PromptKit.set(
@@ -301,26 +373,31 @@ function Interactions.refresh()
                 "facility.airlock.name"
             )
             PromptKit.setHold(airlockPrompt, CFG.pauseHold)
+            PromptKit.setCost(airlockPrompt, nil) -- 멈춤과 재개는 비용 없음
             PromptKit.setEnabled(airlockPrompt, live)
         else
+            PromptKit.setCost(airlockPrompt, nil)
             PromptKit.setEnabled(airlockPrompt, false)
         end
     end
 
     local panel = prompts.installPad
     if panel then
+        setPanelCost(panel, state, m)
         PromptKit.setEnabled(panel, live and state.panels < m.panels.total)
     end
 
     local farmPrompt = prompts.farm
     local hasFarm = state ~= nil and state.facilities.farm ~= nil
     if farmPrompt then
+        setBuildCost(farmPrompt, state, "farm")
         PromptKit.setEnabled(farmPrompt, live and not hasFarm)
     end
     for _, defId in UPGRADES do
         local prompt = prompts["upgrade_" .. defId]
         if prompt then
             local started = state ~= nil and state.facilities[defId] ~= nil
+            setBuildCost(prompt, state, defId)
             PromptKit.setEnabled(
                 prompt,
                 live and hasFarm and not started and m.facilities[defId] ~= nil
@@ -339,14 +416,21 @@ function Interactions.refresh()
                 end
             end
         end
-        local unlocked = def ~= nil
-            and state ~= nil
-            and state.deliveries >= (def.unlockDeliveries or 0)
-            and count < (def.maxCount or 1)
+        local room = def ~= nil and count < (def.maxCount or 1)
+        local lock = lockFor(state, "pipe")
         if pipeSite ~= nil and state and state.sites[pipeSite] and state.sites[pipeSite].pipeId then
             pipeSite = nil
         end
-        if pipeSite == nil then
+        if lock then
+            -- 해금 전: 짓기 키 + LockMsg(하역 n / 5). 누르면 같은 안내 토스트
+            PromptKit.set(
+                pipePrompt,
+                "prompt.act.build",
+                { facility = nameMsg("pipe") },
+                "facility.pipe.name"
+            )
+            PromptKit.setHold(pipePrompt, 0)
+        elseif pipeSite == nil then
             PromptKit.set(pipePrompt, "prompt.act.pick_pipe_site", nil, "facility.pipe.name")
             PromptKit.setHold(pipePrompt, 0)
         else
@@ -358,7 +442,8 @@ function Interactions.refresh()
             )
             PromptKit.setHold(pipePrompt, CFG.buildHold)
         end
-        PromptKit.setEnabled(pipePrompt, live and unlocked)
+        setBuildCost(pipePrompt, state, "pipe")
+        PromptKit.setEnabled(pipePrompt, live and room)
     end
 
     local unload = prompts.unload
@@ -392,6 +477,8 @@ function Interactions.refresh()
     end
 
     syncPanels(if live then state else nil)
+    -- 로버 수리 프롬프트 비용도 같은 때 맞춘다 (충전처럼 commit 없이 에너지가 바뀌어도 publish마다 여기로 온다)
+    RoverFleet.refreshCosts()
 end
 
 -- 콘솔에서 고른 파이프 얼음 후보지 (착공 전)
