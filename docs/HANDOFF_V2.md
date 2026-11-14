@@ -34,13 +34,15 @@ v2 라운드 3 코드 완료(2026-11-14 18:00). 에이전트 6명 모두 완료(
 - **전부 통과**: `lune run tests/run.luau` 종료 코드 0(단위 288 = 기존 273 + Client 15, 월드 스모크 173, v2 서버 스모크 219, build --check, lint 누락 0). stylua 통과, selene 오류 0(v1 경고 1). 아래 17:35 기록은 이력.
 - `lune run tests/run.luau`(서버 담당이 통합): 단위 273, 월드 스모크 173, v2 서버 스모크 219, `tools/i18n/build.luau --check` 통과. **`tools/i18n/lint.luau`만 실패 12건(모두 src/client의 키)** -> v2-client가 기존 키로 바꾸면 통과하고 CI 초록.
 - v1 서버 스모크는 run.luau에서 뺐다(파일은 남음). v1 모듈 파일은 남아 있지만 부팅하지 않는다(Main.server가 v2 부팅).
-- 검사 명령(저장소 루트, 각각): `export PATH="$HOME/.rokit/bin:$PATH"`; `stylua --check src tests`; `selene src tests`(v1 server_smoke 경고 1개는 정상); `lune run tests/run.luau`; `rm -rf build`.
+- 검사 명령(저장소 루트, 각각): `export PATH="$HOME/.rokit/bin:$PATH"`; `stylua --check src tests`; `selene src tests`(경고 0이어야 함, 경고도 CI 실패); `lune run tests/run.luau`; `rm -rf build`.
 
 ## 4. 커밋 상태
 - 마지막 커밋 `09c6ae8`(원격과 같음). 그 뒤 v2 코드, 문서, 에셋, 데이터가 전부 **미커밋**(`git status`로 확인).
 - 화면 담당이 끝나고 전체 검사가 통과하면 커밋한다(에이전트 작업 중 커밋 금지: 레이스). 커밋 메시지는 영어 conventional, AI 표기 없음.
 - 푸시: 사용자 pre-push 훅이 하루 3회 제한. **2026-11-14는 2회 사용, 1회 남음.** `--no-verify` 우회는 사용자에게 다시 물어야 한다.
-- 저장소는 2026-11-14 사용자 요청으로 비공개 전환(Jaden-JJH/the-frontier). `v1-final` 태그 = `2d6307d`.
+- **저장소 이전(2026-11-14 18:05, 사용자 요청):** 새 비공개 저장소 `Jaden-JJH/nasa-the-frontier`가 `origin`(이력 전체와 `v1-final` 태그 = `2d6307d` 옮김). 옛 저장소 `Jaden-JJH/the-frontier`는 지우지 않고 원격 이름 `legacy`로 남김(더 이상 푸시하지 않음).
+- 2026-11-14 푸시: 옛 저장소 3회(한도 소진) + 새 저장소 첫 푸시는 사용자 허락으로 `--no-verify`. 이후 우회는 다시 허락받는다.
+- 커밋 `c19d223`(클라이언트 늦은 수정), `5bf7958`(selene 경고 수정: selene는 경고만 있어도 종료 코드 1이라 옛 main CI가 빨간색이었음), `b728397`(Airlock.fbx, SolarTower.fbx 원본 추가, 사용자가 `나사/` 폴더에 넣은 원본은 그대로 둠).
 - `.gitignore`: `.env`, `*.rbxm`(그래서 `assets/models/KitImports_v1.rbxm`은 제외됨), `.omc/`.
 
 ## 5. Roblox 새 프로젝트
