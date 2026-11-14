@@ -9,6 +9,9 @@
 -- LockMsg(JSON Msg)가 있으면 행동 줄 아래에 에너지, 물 아이콘과 숫자, 건설 일수를 보이고, 살 수 없으면 모자란 숫자를
 -- 빨갛게(ClientMath.costShortfall), 잠김이면 그 사유를 한 줄 더 쓴다. 자원이 바뀌면(StateUpdate) 색을 다시 맞춘다.
 -- 패널 높이는 줄 수에 따라 바뀌고, 쌓을 때는 위 패널의 실제 높이만큼 내린다.
+-- 안전: 패널 만들기와 글자 갱신은 보호 호출이라 한 프롬프트의 오류가 다른 프롬프트나 페이드 인을 막지 않는다(오류는 warn).
+-- 디버그(2026-11-15 C5): workspace Attribute DebugPrompts = true(서버에서 켜면 복제)이면 PromptShown/Hidden 수신,
+-- 그리기 결과, 그리고 2초마다 내 캐릭터 16 stud 안의 MissionRuntime 프롬프트 상태(Enabled, 거리, 키, 그려졌는지)를 출력한다.
 
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
@@ -44,9 +47,29 @@ local MAX_PANEL_HEIGHT = PANEL_HEIGHT + COST_ROW + LOCK_ROW
 local MAX_VISIBLE = 2
 local COOLDOWN_TICK = 0.25
 local COST_ATTRIBUTES = { "CostEnergy", "CostWater", "BuildDays", "Affordable", "LockMsg" }
+local DEBUG_ATTRIBUTE = "DebugPrompts"
+local DEBUG_SCAN_SECONDS = 2
+local DEBUG_SCAN_RADIUS = 16
 
 local active = {} -- { [ProximityPrompt] = entry }
 local order = {} -- PromptShown 순서의 프롬프트 목록
+
+local function debugOn()
+    return workspace:GetAttribute(DEBUG_ATTRIBUTE) == true
+end
+
+local function debugLog(...)
+    if debugOn() then
+        print("[PromptUI]", ...)
+    end
+end
+
+local function promptName(prompt)
+    local ok, name = pcall(function()
+        return prompt:GetFullName()
+    end)
+    return if ok then name else tostring(prompt)
+end
 
 -- 게임패드 버튼 이름 정리 (ButtonX -> X)
 local function gamepadLabel(keyCode)
@@ -274,6 +297,14 @@ local function refreshTexts(prompt, entry)
     end
 end
 
+-- 글자 갱신 보호 호출 (오류가 나도 패널은 보이고, 원인은 warn으로 남긴다)
+local function safeRefresh(prompt, entry)
+    local ok, err = pcall(refreshTexts, prompt, entry)
+    if not ok then
+        warn("[PromptUI] 글자 갱신 실패 " .. promptName(prompt) .. ": " .. tostring(err))
+    end
+end
+
 -- 건설비 줄 (아이콘 + 숫자 묶음 둘, 일수). 글자는 refreshTexts가 채운다
 local function makeCostRow()
     local function amount(kind, layoutOrder)
@@ -373,10 +404,12 @@ end
 
 local function show(prompt, inputType)
     if active[prompt] then
+        debugLog("이미 그림", promptName(prompt))
         return
     end
     local adornee, extra = getAdornee(prompt)
     if not adornee then
+        debugLog("부모가 Part나 Attachment가 아님", promptName(prompt))
         return
     end
 
@@ -507,10 +540,11 @@ local function show(prompt, inputType)
     active[prompt] = entry
     table.insert(order, prompt)
     relayout()
-    refreshTexts(prompt, entry)
+    safeRefresh(prompt, entry)
+    debugLog("그림", promptName(prompt), "->", gui:GetFullName())
 
     local function refresh()
-        refreshTexts(prompt, entry)
+        safeRefresh(prompt, entry)
     end
     for _, name in ipairs({ "ActionKey", "ObjectKey", "ActionArgs", "ObjectArgs", "CooldownUntil" }) do
         table.insert(entry.conns, prompt:GetAttributeChangedSignal(name):Connect(refresh))
@@ -540,7 +574,7 @@ local function show(prompt, inputType)
     task.spawn(function()
         while entry.alive do
             if prompt:GetAttribute("CooldownUntil") ~= nil then
-                refreshTexts(prompt, entry)
+                safeRefresh(prompt, entry)
             end
             task.wait(COOLDOWN_TICK)
         end
@@ -591,8 +625,72 @@ local function resetHold(entry)
     entry.holdBar.setRatio(0)
 end
 
+-- 디버그: 내 캐릭터 가까이의 MissionRuntime 프롬프트 상태 (Enabled인데 "shown"이 안 오면 엔진이 보이지 않기로 한 것)
+local function debugScan()
+    local character = Players.LocalPlayer.Character
+    local root = character and character:FindFirstChild("HumanoidRootPart")
+    local runtime = workspace:FindFirstChild("MissionRuntime")
+    local camera = workspace.CurrentCamera
+    print(
+        "[PromptUI] scan service.Enabled",
+        ProximityPromptService.Enabled,
+        "MaxPromptsVisible",
+        ProximityPromptService.MaxPromptsVisible,
+        "camera",
+        camera and camera.CameraType.Name,
+        "root",
+        root and tostring(root.Position) or "없음",
+        "그린 수",
+        #order
+    )
+    if not root or not runtime then
+        return
+    end
+    for _, prompt in ipairs(runtime:GetDescendants()) do
+        if prompt:IsA("ProximityPrompt") then
+            local pos = getWorldPosition(prompt)
+            local dist = pos and (pos - root.Position).Magnitude
+            if dist and dist <= DEBUG_SCAN_RADIUS then
+                print(
+                    "[PromptUI]  ",
+                    promptName(prompt),
+                    "Enabled",
+                    prompt.Enabled,
+                    "Style",
+                    prompt.Style.Name,
+                    string.format("dist %.1f / max %.1f", dist, prompt.MaxActivationDistance),
+                    "key",
+                    prompt.KeyboardKeyCode.Name,
+                    "excl",
+                    prompt.Exclusivity.Name,
+                    "그려짐",
+                    active[prompt] ~= nil
+                )
+            end
+        end
+    end
+end
+
 function PromptUI.init(_ctx)
-    ProximityPromptService.PromptShown:Connect(show)
+    ProximityPromptService.PromptShown:Connect(function(prompt, inputType)
+        debugLog("shown 수신", promptName(prompt), inputType and inputType.Name)
+        local ok, err = xpcall(show, debug.traceback, prompt, inputType)
+        if not ok then
+            warn("[PromptUI] 그리기 실패 " .. promptName(prompt) .. ": " .. tostring(err))
+        end
+    end)
+
+    task.spawn(function()
+        while true do
+            task.wait(DEBUG_SCAN_SECONDS)
+            if debugOn() then
+                local ok, err = pcall(debugScan)
+                if not ok then
+                    warn("[PromptUI] 디버그 스캔 실패: " .. tostring(err))
+                end
+            end
+        end
+    end)
 
     -- 자원이 바뀌면 건설비 숫자 색을 다시 맞춘다
     Session.changed:Connect(function(what)
@@ -601,12 +699,13 @@ function PromptUI.init(_ctx)
         end
         for prompt, entry in pairs(active) do
             if entry.alive and entry.cost.row.Visible then
-                refreshTexts(prompt, entry)
+                safeRefresh(prompt, entry)
             end
         end
     end)
 
     ProximityPromptService.PromptHidden:Connect(function(prompt)
+        debugLog("hidden 수신", promptName(prompt))
         local entry = active[prompt]
         if entry then
             destroyEntry(prompt, entry)

@@ -277,6 +277,11 @@ return function(t)
             with({ serverReasons = true, blocked = "hud.rover.charge_blocked_energy" }).reason,
             "energy"
         )
+        t.eq(
+            with({ serverReasons = true, blocked = "hud.rover.charge_blocked_pad", energy = keep }).reason,
+            "pad",
+            "서버가 보낸 충전판 밖 이유가 짐작보다 우선"
+        )
         t.eq(with({ atBase = false }).mode, "away")
         t.eq(with({ localDriving = true, charging = true }).mode, "driving", "내가 운전 중")
         t.eq(with({ status = "fsd" }).mode, "hidden")
