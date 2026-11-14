@@ -136,9 +136,9 @@
 ### 카드 10. fact.sep
 - 트리거: SEP 경보가 뜰 때(15초 경보 직후).
 - EN title: Fast particles from the Sun
-- EN body: A big eruption on the Sun can shoot out tiny particles at very high speed, called solar energetic particles, or SEP. They can cross the space from the Sun to Earth in as little as tens of minutes, and a storm can last hours to days. The Moon has no global magnetic field (the invisible bubble that helps protect Earth) and only a very thin atmosphere, so astronauts outside can be in danger.
+- EN body: A big eruption on the Sun can shoot out tiny particles at very high speed, called solar energetic particles, or SEP. They can travel from the Sun to Earth in as little as tens of minutes, and a storm can last hours to days. The Moon has no global magnetic field (the invisible bubble that helps protect Earth) and only a very thin atmosphere, so astronauts outside can be in danger.
 - KO title: 태양에서 오는 빠른 입자
-- KO body: 태양에서 큰 폭발이 일어나면 아주 작은 입자들이 엄청난 속도로 튀어나올 수 있어요. 이것을 태양 고에너지 입자, 줄여서 SEP라고 해요. 이 입자는 태양에서 지구까지 짧게는 수십 분 만에 날아올 수 있고, 폭풍은 몇 시간에서 며칠까지 이어져요. 달에는 지구를 지켜 주는 보이지 않는 방패 같은 전 지구적 자기장이 없고 대기도 아주 얇아서, 밖에 있는 우주비행사는 위험할 수 있어요.
+- KO body: 태양에서 큰 폭발이 일어나면 아주 작은 입자들이 엄청난 속도로 튀어나올 수 있어요. 이것을 태양 고에너지 입자, 줄여서 SEP라고 해요. 이 입자는 태양에서 지구까지 짧게는 수십 분 만에 날아올 수 있고, 폭풍은 몇 시간에서 며칠까지 이어져요. 지구는 보이지 않는 방패 같은 자기장이 감싸 지켜 주지만, 달에는 달 전체를 감싸는 자기장이 없고 대기도 아주 얇아서 밖에 있는 우주비행사는 위험할 수 있어요.
 - 출처:
   - https://www.spaceweather.gov/phenomena/solar-radiation-storm [A]
   - https://ntrs.nasa.gov/citations/20110015549 [A, PDF 본문, ARTEMIS Science Objectives]
@@ -160,7 +160,7 @@
 - EN title: When Earth's magnetic bubble shakes
 - EN body: A geomagnetic storm is a big disturbance of Earth's magnetic field, the huge invisible bubble around our planet. The biggest ones come from huge clouds of gas thrown out by the Sun, and they can cause mistakes in GPS (the system that finds locations), disturb radio signals, and cause problems for power grids on Earth. The Moon has no global magnetic field like Earth's, so the trouble shows up on the Earth side.
 - KO title: 지구 자기장이 크게 흔들릴 때
-- KO body: 지자기 폭풍은 지구 자기장, 곧 지구를 둘러싼 보이지 않는 커다란 방패가 크게 흔들리는 현상이에요. 가장 큰 폭풍은 태양이 내뿜은 거대한 가스 구름 때문에 생기고, 지구에서 GPS(위치를 알려 주는 시스템) 오차, 무선 통신 방해, 전력망 문제를 일으킬 수 있어요. 달에는 지구 같은 전 지구적 자기장이 없어서, 이런 문제는 지구 쪽에서 나타나요.
+- KO body: 지자기 폭풍은 지구 자기장, 곧 지구를 둘러싼 보이지 않는 커다란 방패가 크게 흔들리는 현상이에요. 가장 큰 폭풍은 태양이 내뿜은 거대한 가스 구름 때문에 생기고, 지구에서 GPS(위치를 알려 주는 시스템) 오차, 무선 통신 방해, 전력망 문제를 일으킬 수 있어요. 달에는 지구처럼 전체를 감싸는 자기장이 없어서, 이런 문제는 지구 쪽에서 나타나요.
 - 출처:
   - https://www.spaceweather.gov/phenomena/geomagnetic-storms [A]
   - https://ntrs.nasa.gov/citations/20110015549 [A]
@@ -207,16 +207,16 @@
 - EN title: The team on the ground
 - EN body: Mission Control at NASA's Johnson Space Center in Houston is staffed 24 hours a day by flight controllers. One person there, called the capcom (short for capsule communicator), talks with the astronauts. Mission Control also oversees NASA's Artemis missions on their trips to the Moon and back.
 - KO title: 지상에서 돕는 팀
-- KO body: 미국 휴스턴 NASA 존슨 우주센터의 미션 컨트롤은 비행 관제사들이 하루 24시간 일하는 곳이에요. 그중 '캡콤'(우주선 교신 담당)이 우주비행사와 직접 이야기를 나눠요. 미션 컨트롤은 아르테미스 임무가 달에 갔다 오는 동안에도 지켜보며 도와줘요.
+- KO body: 미국 휴스턴 NASA 존슨 우주센터의 관제센터(미션 컨트롤)는 비행 관제사들이 하루 24시간 일하는 곳이에요. 그중 '캡콤'(우주선 교신 담당)이 우주비행사와 직접 이야기를 나눠요. 관제센터는 아르테미스 미션이 달에 갔다 오는 동안에도 지켜보며 도와줘요.
 - 출처:
   - https://www.nasa.gov/johnson/jsc-mission-control-center/ [A]
 - 문장별 근거: "The building is staffed 24/7 with flight controllers", "the capcom is the person talking with the astronauts aboard their spacecraft", "overseeing NASA's Artemis missions during journeys to the Moon and back".
 
 ### 예비 카드. fact.donki
 - 트리거: 첫 우주 기상 알림, 타이틀 "About the data".
-- EN title: Where does the space weather come from?
+- EN title: Where does the game's space weather come from?
 - EN body: NASA keeps a database called DONKI that records space weather events, like solar flares, solar energetic particle events, big clouds of gas from the Sun, and geomagnetic storms. It is run mainly by the Moon-to-Mars Space Weather Analysis Office at NASA's Goddard Space Flight Center. In this game, the alerts replay real events from the past, and we show their real dates.
-- KO title: 우주 날씨는 어디서 올까요?
+- KO title: 게임 속 우주 날씨는 어디서 왔을까요?
 - KO body: NASA에는 태양 폭발, 태양 고에너지 입자 사건, 태양이 내뿜은 거대한 가스 구름, 지자기 폭풍 같은 우주 날씨 사건을 기록하는 DONKI라는 데이터베이스가 있어요. NASA 고다드 우주비행센터의 달-화성 우주 기상 분석 사무실이 주로 운영해요. 이 게임의 알림은 과거에 실제로 있었던 일을 다시 보여 주는 것이고, 실제 날짜도 함께 보여 줘요.
 - 출처:
   - https://ccmc.gsfc.nasa.gov/tools/DONKI/ [A]
@@ -347,3 +347,6 @@
 - NOAA 2026-01-19 S4 방사선 폭풍 공지: 검색 요약만.
 - 보도 요약에 있던 "극대기 정점 달은 나중에 확정" 문장: NASA, NOAA 페이지 본문에서는 못 찾음.
 - Artemis III Science Definition Team Report(SP-20205009602): 지역별 얼음, 일조, 지구 가시성 값이 있을 가능성이 있으나 열어 보지 못함.
+
+## 변경 기록
+- 2026-11-15 번역 교차 검수(docs/i18n/review_2026-11-15_a.md, _b.md) 반영: fact.sep 본문(EN "cross the space" -> "travel", KO "전 지구적 자기장" -> "달 전체를 감싸는 자기장"), fact.geomagnetic 본문 KO(같은 표현), fact.mission_control 본문 KO("미션 컨트롤" -> "관제센터(미션 컨트롤)", "임무" -> "미션"), fact.donki 제목(게임 속 우주 날씨의 출처임을 분명히). 사실 내용은 바뀌지 않았다. 카드 문구는 i18n/strings.csv와 글자 단위로 같다.
