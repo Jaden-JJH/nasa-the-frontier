@@ -6,7 +6,8 @@
 --     편집용 Workspace.AssetPreview는 실행 중에만 떼어 둔다(Parent = nil, 참조 유지). 표시 Part는 실행 중에만
 --     고정하고 숨긴다(Studio 편집 화면에는 영향 없음). Terrain, Lighting, Sky는 절대 건드리지 않는다.
 --   resolveAsset(role): ServerStorage.Assets.<역할> -> Assets.Kit 조합 -> 코드 도형 + 이름표(TextKey) 3단계 대체(Q27)
---   placeBase(): 착륙선과 에어록(걸어 들어가는 대피처: 문, 보이지 않는 벽, 산소 구역), 태양광 슬롯,
+--   placeBase(): 착륙선과 에어록(걸어 들어가는 대피처: 문, 보이지 않는 벽, 산소 구역. 에셋 Attribute DoorOffsetX가 있으면
+--     출입구를 그 해치 쪽으로 옮긴다), 태양광 슬롯,
 --     물탱크, 로버 주차판, 기지 출구, 얼음 지점, 재배 공간 착공 자리. 모두 표시 자리의 지형 높이에 맞춘다.
 --   시설 손잡이: place, setBuildProgress(땅에서 솟아오름), setActive, setPaused, syncFacilities.
 --     그린하우스 안 Grow_LED_Bar는 LED가 가동 중일 때만, Hydroponic_Bed는 수경 재배가 가동 중일 때만 보인다.
@@ -1278,14 +1279,17 @@ local function buildEntry(
     hi: Vector3,
     shape: string,
     withDoor: boolean,
-    signKey: string?
-): (Model, BasePart?, Vector3, Vector3, number)
+    signKey: string?,
+    doorOffset: number?
+): (Model, BasePart?, Vector3, Vector3, number, number)
     local e = CFG.entry
     local entry = newModel(if withDoor then "Entry" else "Walls", parent)
     local cx, cz = (lo.X + hi.X) / 2, (lo.Z + hi.Z) / 2
     local doorZ = lo.Z + e.doorInset
     local wallHeight = math.max(hi.Y, e.minWallHeight)
     local t = e.wallThickness
+    -- 출입구 가운데 로컬 X. doorOffset(에셋 해치 위치)이 있으면 그만큼 옮기되, 문 틈이 정면 벽 안에 남도록 자른다
+    local doorX = cx
 
     local function wall(name: string, length: number, center: Vector3, outward: Vector3)
         local position = Vector3.new(center.X, wallHeight / 2, center.Z)
@@ -1301,18 +1305,18 @@ local function buildEntry(
         part.CanQuery = false
         part.CastShadow = false
     end
+    -- 정면 벽: 출입구(doorGap)를 doorX에 비운다. 양쪽 조각 길이는 출입구 위치에 따라 다르다 (정면 접선은 로컬 +X)
     local function frontWall(length: number, center: Vector3, tangent: Vector3, outward: Vector3)
-        local piece = (length - e.doorGap) / 2
-        if piece <= 0 then
-            return
+        local limit = math.max(0, length / 2 - t - e.doorGap / 2)
+        local shift = math.clamp(doorOffset or 0, -limit, limit)
+        doorX = center.X + shift
+        local left = length / 2 + shift - e.doorGap / 2
+        local right = length / 2 - shift - e.doorGap / 2
+        if left > MIN_EXTENT then
+            wall("WallFrontLeft", left, center + tangent * (-length / 2 + left / 2), outward)
         end
-        for _, side in { -1, 1 } do
-            wall(
-                if side < 0 then "WallFrontLeft" else "WallFrontRight",
-                piece,
-                center + tangent * side * (e.doorGap / 2 + piece / 2),
-                outward
-            )
+        if right > MIN_EXTENT then
+            wall("WallFrontRight", right, center + tangent * (length / 2 - right / 2), outward)
         end
     end
 
@@ -1385,7 +1389,7 @@ local function buildEntry(
             solid(
                 "DoorLintel",
                 Vector3.new(e.doorGap, wallHeight - doorTop, t),
-                Vector3.new(cx, (doorTop + wallHeight) / 2, frontZ)
+                Vector3.new(doorX, (doorTop + wallHeight) / 2, frontZ)
             )
         end
     end
@@ -1401,7 +1405,7 @@ local function buildEntry(
                 e.doorThickness / 2
             ),
             cframe = frame
-                * CFrame.new(cx, (e.doorHeight + e.frameBorder) / 2, doorZ + e.doorThickness / 2),
+                * CFrame.new(doorX, (e.doorHeight + e.frameBorder) / 2, doorZ + e.doorThickness / 2),
             color = frameColor,
             material = Enum.Material.Metal,
             canCollide = false,
@@ -1412,7 +1416,7 @@ local function buildEntry(
         door = newPart({
             name = "Door",
             size = Vector3.new(e.doorWidth, e.doorHeight, e.doorThickness),
-            cframe = frame * CFrame.new(cx, e.doorHeight / 2, doorZ),
+            cframe = frame * CFrame.new(doorX, e.doorHeight / 2, doorZ),
             color = rgb(CFG.colors.door),
             material = Enum.Material.Metal,
             canCollide = true,
@@ -1422,7 +1426,7 @@ local function buildEntry(
             name = "DoorSign",
             size = Vector3.new(e.doorWidth, e.signHeight, e.doorThickness / 2),
             cframe = frame * CFrame.new(
-                cx,
+                doorX,
                 e.doorHeight + e.frameBorder + e.signHeight / 2,
                 doorZ - e.doorThickness / 4
             ),
@@ -1460,7 +1464,7 @@ local function buildEntry(
         math.max(hi.Y - e.zoneInset, e.doorHeight),
         hi.Z - e.zoneInset
     )
-    return entry, door, zoneMin, zoneMax, doorZ
+    return entry, door, zoneMin, zoneMax, doorZ, doorX
 end
 
 -- 제어반과 상태 표시등: frame 로컬 위치 localPos, 바깥 방향 outward(로컬). TextKey = 시설 이름
@@ -1594,19 +1598,27 @@ local function buildShelter(id: string, parent: Instance)
 
     local visual, source = MissionWorld.resolveAsset(spec.role)
     visual.Name = "Visual"
-    fitIntoFrame(
+    local factor = fitIntoFrame(
         visual,
         frame,
         { X = footX, Z = footZ, Y = math.max(foot.Y, spec.minHeight) },
         spec.minHeight
     )
+    model:SetAttribute("AssetScale", factor)
+    -- 에셋 해치 위치: 모델 Attribute DoorOffsetX(에셋 원래 축척 stud, 모델 가운데 기준 로컬 X)에 맞춤 배율을 곱한다.
+    -- 없으면 정면 가운데 (예: Assets.Airlock은 캡슐 2개 사이가 연결 통로라 계단 해치 쪽 X -7.6)
+    local offsetAttr = visual:GetAttribute("DoorOffsetX")
+    local doorOffset = if typeof(offsetAttr) == "number" and offsetAttr == offsetAttr
+        then offsetAttr * factor
+        else nil
     makeWalkIn(visual, if source == "placeholder" then CFG.hutSolid else CFG.farm.walkable)
     visual.Parent = model
     local lo, hi = boundsIn(visual, frame)
     lo = Vector3.new(lo.X, 0, lo.Z)
     local shape = if info.shape == "Cylinder" and source ~= "placeholder" then "octagon" else "box"
-    local _, door, zoneMin, zoneMax, doorZ =
-        buildEntry(model, frame, lo, hi, shape, true, spec.signKey)
+    local _, door, zoneMin, zoneMax, doorZ, doorX =
+        buildEntry(model, frame, lo, hi, shape, true, spec.signKey, doorOffset)
+    model:SetAttribute("DoorX", doorX)
 
     local e = CFG.entry
     local zone = newMarker(
@@ -1628,7 +1640,7 @@ local function buildShelter(id: string, parent: Instance)
         console = nil,
         panel = nil,
         light = nil,
-        inside = frame * CFrame.new(0, e.insideHeight, (doorZ + hi.Z) / 2),
+        inside = frame * CFrame.new(doorX, e.insideHeight, (doorZ + hi.Z) / 2), -- 출입구 안쪽
     }
     if spec.console then
         local size = vec(CFG.console.size)
@@ -1647,7 +1659,11 @@ local function buildShelter(id: string, parent: Instance)
     if spec.panel then
         local cp = CFG.controlPanel
         local panelSize = vec(cp.size)
-        local x = e.doorGap / 2 + cp.sideGap + panelSize.X / 2
+        -- 출입구 옆 (출입구가 옮겨지면 같이). 정면 벽 끝을 넘으면 출입구 반대쪽에 둔다
+        local x = doorX + e.doorGap / 2 + cp.sideGap + panelSize.X / 2
+        if x + panelSize.X / 2 > hi.X then
+            x = doorX - (e.doorGap / 2 + cp.sideGap + panelSize.X / 2)
+        end
         local z = lo.Z - e.wallThickness - cp.wallGap - panelSize.Z / 2
         local panel, light = buildControlPanel(
             model,
@@ -2359,6 +2375,39 @@ function MissionWorld.pathCrossesSolarField(fromName: string, toName: string): b
     )
 end
 
+-- 두 표시 사이 곧은 수평 길이 대피처(외형 Visual과 보이지 않는 벽 Entry의 경계, 대피처 frame 기준)를 지나는지.
+-- 대피처나 표시가 없으면 nil
+function MissionWorld.pathCrossesShelter(
+    fromName: string,
+    toName: string,
+    shelterId: string
+): boolean?
+    local shelter = shelters[shelterId]
+    local a = markers[fromName]
+    local b = markers[toName]
+    if not shelter or not a or not b then
+        return nil
+    end
+    local lo = Vector3.new(math.huge, math.huge, math.huge)
+    local hi = -lo
+    for _, name in { "Visual", "Entry" } do
+        local child = shelter.model:FindFirstChild(name)
+        if child then
+            local clo, chi = boundsIn(child, shelter.frame)
+            lo = Vector3.new(math.min(lo.X, clo.X), math.min(lo.Y, clo.Y), math.min(lo.Z, clo.Z))
+            hi = Vector3.new(math.max(hi.X, chi.X), math.max(hi.Y, chi.Y), math.max(hi.Z, chi.Z))
+        end
+    end
+    if lo.X > hi.X then
+        return nil
+    end
+    local center = (lo + hi) / 2
+    local half = (hi - lo) / 2
+    local pa = shelter.frame:PointToObjectSpace(a.position) - center
+    local pb = shelter.frame:PointToObjectSpace(b.position) - center
+    return WorldMath.segmentHitsBox({ X = pa.X, Z = pa.Z }, { X = pb.X, Z = pb.Z }, half.X, half.Z)
+end
+
 -- 기지 고정 구조물을 놓는다 (init 뒤에). 다시 부르면 기지만 새로 만든다
 function MissionWorld.placeBase(options: BaseOptions?)
     local root = runtime
@@ -2412,6 +2461,16 @@ function MissionWorld.placeBase(options: BaseOptions?)
             "roverPath",
             "RoverPark에서 BaseExit까지 곧은 길이 SolarField를 지납니다. 패널이 로버를 막으니 표시 위치를 확인하세요"
         )
+    end
+    for _, id in { "airlock", "lander" } do
+        if MissionWorld.pathCrossesShelter("RoverPark", "BaseExit", id) then
+            warnOnce(
+                "roverPath:" .. id,
+                "RoverPark에서 BaseExit까지 곧은 길이 "
+                    .. id
+                    .. " 건물을 지납니다. 직접 운전은 돌아가야 하니 표시 위치를 확인하세요"
+            )
+        end
     end
     applyAirlockLook()
     -- 패널 수가 이미 있으면 연출 없이 다시 놓는다

@@ -6,17 +6,17 @@ local function p(x: number, z: number, y: number?): any
     return { X = x, Y = y or 0, Z = z }
 end
 
--- Studio 실측 표시 중심 (X, Z)
+-- Studio 실측 표시 중심 (X, Z). 얼음은 2026-11-14, 기지는 2026-11-15 옮긴 자리 (리드 전달)
 local ICE = {
-    { name = "Ice1", position = p(576.5, -245.5) },
-    { name = "Ice2", position = p(664.0, -663.7) },
-    { name = "Ice3", position = p(759.9, -183.8) },
-    { name = "Ice4", position = p(328.0, -232.0) },
-    { name = "Ice5", position = p(-296.1, -375.9) },
+    { name = "Ice1", position = p(576.50, -245.50) },
+    { name = "Ice2", position = p(663.96, -663.72) },
+    { name = "Ice3", position = p(759.92, -183.77) },
+    { name = "Ice4", position = p(327.98, -231.96) },
+    { name = "Ice5", position = p(-296.10, -375.90) },
 }
-local BASE_EXIT = p(312.7, -416.0)
-local LANDER = p(188.3, -516.6)
-local ROVER_PARK = p(122.8, -577.9)
+local BASE_EXIT = p(-38.20, -43.09) -- 리드가 얼음 쪽으로 다시 옮긴 자리
+local LANDER = p(-65.69, 63.42)
+local ROVER_PARK = p(-131.18, 2.11)
 
 local function names(list): string
     local out = {}
@@ -38,10 +38,10 @@ return function(t)
             local sorted = WorldMath.sortByDistance(ICE, BASE_EXIT)
             t.eq(
                 names(sorted),
-                "Ice4,Ice1,Ice2,Ice3,Ice5",
-                "출구 기준 순서 (V2_PLAN 15.5와 같음)"
+                "Ice4,Ice5,Ice1,Ice3,Ice2",
+                "출구 기준 순서 (2026-11-15 옮긴 기지, 리드 실측 412, 421, 647, 810, 937)"
             )
-            local expected = { 184.6, 314.1, 429.8, 503.9, 610.1 }
+            local expected = { 412.0, 421.0, 647.2, 810.4, 937.1 }
             for i, entry in sorted do
                 t.eq(entry.index, i, "index " .. i)
                 t.truthy(
@@ -57,13 +57,13 @@ return function(t)
         function()
             t.eq(
                 names(WorldMath.sortByDistance(ICE, LANDER)),
-                "Ice4,Ice1,Ice2,Ice5,Ice3",
-                "착륙선 기준"
+                "Ice4,Ice5,Ice1,Ice3,Ice2",
+                "착륙선 기준 (Ice4 492, Ice5 496으로 출구 기준과 1, 2위가 바뀐다)"
             )
             local park = WorldMath.sortByDistance(ICE, ROVER_PARK)
-            t.eq(names(park), "Ice4,Ice5,Ice2,Ice1,Ice3", "로버 주차 기준")
-            t.truthy(math.abs(park[1].distance - 402.2) < 0.5, "가장 가까운 곳 약 402")
-            t.truthy(math.abs(park[5].distance - 749.1) < 0.5, "가장 먼 곳 약 749")
+            t.eq(names(park), "Ice5,Ice4,Ice1,Ice3,Ice2", "로버 주차 기준")
+            t.truthy(math.abs(park[1].distance - 412.4) < 0.5, "가장 가까운 곳 약 412")
+            t.truthy(math.abs(park[5].distance - 1037.1) < 0.5, "가장 먼 곳 약 1037")
         end
     )
 

@@ -330,19 +330,21 @@ for _, method in { "FillBlock", "FillBall", "FillCylinder", "FillRegion", "Clear
     end)
 end
 local GROUND_SAMPLES = {
-    { 188.3, -516.6, -0.8 },
-    { 180.3, -542.4, -0.6 },
-    { 39.3, -496.9, 0.2 },
-    { -14.2, -595.9, 1.0 },
-    { -14.2, -673.9, -1.1 },
-    { 122.8, -577.9, -2.8 },
-    { 312.7, -416.0, -3.4 },
-    { 174.8, -525.6, -1.2 },
-    { 576.5, -245.5, -4.3 },
-    { 664.0, -663.7, -4.1 },
-    { 759.9, -183.8, -0.4 },
-    { 328.0, -232.0, -28.8 },
-    { -296.1, -375.9, -15.4 },
+    -- 기지 표시 8개: 2026-11-15 옮긴 자리의 표시 중심 아래 지면 실측 (리드 전달, BaseExit는 다시 옮긴 자리).
+    -- 얼음 5곳은 2026-11-14 실측 그대로 (얼음은 옮기지 않았다)
+    { -65.69, 63.42, -24.60 }, -- Lander (실측)
+    { -73.68, 37.61, -23.72 }, -- SpawnLocation (실측)
+    { -174.68, 40.11, -22.61 }, -- SolarField (실측)
+    { -231.13, 49.11, -23.02 }, -- FarmPad (실측)
+    { -268.18, -93.89, -17.17 }, -- WaterTank (실측)
+    { -131.18, 2.11, -21.24 }, -- RoverPark (실측)
+    { -38.20, -43.09, -19.69 }, -- BaseExit (실측)
+    { -119.2, 81.4, -23.47 }, -- Airlock (실측)
+    { 576.5, -245.5, -4.3 }, -- Ice1
+    { 664.0, -663.7, -4.1 }, -- Ice2
+    { 759.9, -183.8, -0.4 }, -- Ice3
+    { 328.0, -232.0, -28.8 }, -- Ice4
+    { -296.1, -375.9, -15.4 }, -- Ice5
 }
 local function groundAt(x: number, z: number): number
     local sum, weight = 0, 0
@@ -465,8 +467,10 @@ local ReplicatedStorage = dm:GetService("ReplicatedStorage")
 local missionC = Instance.new("Folder")
 missionC.Name = "MissionC"
 missionC.Parent = Workspace
-local YAW_LOOK_PLUS_X = CFrame.Angles(0, math.rad(-90), 0)
-local UPRIGHT_CYLINDER = CFrame.fromMatrix(Vector3.zero, Vector3.new(0, 1, 0), Vector3.new(0, 0, 1))
+-- Studio Part.Orientation(도) -> CFrame (Roblox ToOrientation과 같은 Y, X, Z 순서)
+local function orient(x: number, y: number, z: number)
+    return CFrame.fromOrientation(math.rad(x), math.rad(y), math.rad(z))
+end
 local function marker(name, className, pos, size, rot, shape)
     local part = Instance.new(className)
     part.Name = name
@@ -479,74 +483,74 @@ local function marker(name, className, pos, size, rot, shape)
     part.Parent = missionC
     return part
 end
+-- 2026-11-15 Studio 실측 (리드 전달, 사용자 결정으로 C 기지를 옮긴 뒤). 방향은 ToOrientation(도) 그대로
 marker(
     "Lander",
     "Part",
-    Vector3.new(188.3, 11.2, -516.6),
+    Vector3.new(-65.69, -12.59, 63.42),
     Vector3.new(28, 118, 12),
-    UPRIGHT_CYLINDER,
+    orient(0.1, 90.0, 92.8),
     Enum.PartType.Cylinder
 )
 marker(
     "Airlock",
     "Part",
-    Vector3.new(174.8, 2.2, -525.6),
-    Vector3.new(11, 105, 9),
-    UPRIGHT_CYLINDER,
-    Enum.PartType.Cylinder
-)
+    Vector3.new(-119.2, -15.0, 81.4),
+    Vector3.new(43, 17, 43),
+    orient(0, 0, 0)
+) -- S9: 원기둥(지름 9)에서 Block으로 (원래 값은 Studio 표시 Attribute OriginalShape, OriginalSize, OriginalCFrame)
 marker(
     "SpawnLocation",
     "SpawnLocation",
-    Vector3.new(180.3, -0.5, -542.4),
+    Vector3.new(-73.68, -23.63, 37.61),
     Vector3.new(12, 1, 12),
-    CFrame.Angles(0, math.rad(90), 0)
+    orient(0, 90, 0)
 )
 marker(
     "SolarField",
     "Part",
-    Vector3.new(39.3, 3.6, -496.9),
+    Vector3.new(-174.68, -16.91, 40.11),
     Vector3.new(82, 5, 49),
-    CFrame.Angles(0, math.rad(180), 0)
+    orient(0, 90, 0)
 )
 marker(
     "FarmPad",
     "Part",
-    Vector3.new(-14.2, 13.6, -595.9),
+    Vector3.new(-231.13, -11.53, 49.11),
     Vector3.new(31, 20, 25),
-    YAW_LOOK_PLUS_X
+    orient(0, -90, 0)
 )
 marker(
     "WaterTank",
     "Part",
-    Vector3.new(-14.2, 8.8, -673.9),
+    Vector3.new(-268.18, -7.29, -93.89),
     Vector3.new(31, 20, 25),
-    YAW_LOOK_PLUS_X
+    orient(0, -90, 0)
 )
 marker(
     "RoverPark",
     "Part",
-    Vector3.new(122.8, -1.5, -577.9),
+    Vector3.new(-131.18, -19.95, 2.11),
     Vector3.new(31, 4, 25),
-    YAW_LOOK_PLUS_X
+    orient(0, -90, 0)
 )
 marker(
     "BaseExit",
     "Part",
-    Vector3.new(312.7, -1.5, -416.0),
+    Vector3.new(-38.20, -18.19, -43.09),
     Vector3.new(31, 4, 25),
-    CFrame.Angles(0, math.atan2(-0.7776, -0.6288), 0)
-)
+    orient(0, -56.3, 0)
+) -- 리드가 얼음 쪽으로 다시 옮김: CFrame.lookAt(pos, 얼음 무게중심 (406, y, -340))
 for i, pos in
     {
-        Vector3.new(576.5, -3.9, -245.5),
-        Vector3.new(664.0, -2.3, -663.7),
-        Vector3.new(759.9, 1.5, -183.8),
-        Vector3.new(328.0, -26.9, -232.0),
-        Vector3.new(-296.1, -13.6, -375.9),
+        Vector3.new(576.50, -3.93, -245.50),
+        Vector3.new(663.96, -2.28, -663.72),
+        Vector3.new(759.92, 1.47, -183.77),
+        Vector3.new(327.98, -26.90, -231.96),
+        Vector3.new(-296.10, -13.58, -375.90),
     }
 do
-    marker("Ice" .. i, "Part", pos, Vector3.new(31, 4, 25), YAW_LOOK_PLUS_X)
+    marker("Ice" .. i, "Part", pos, Vector3.new(31, 4, 25), orient(0, -90, 0))
 end
 local assets = Instance.new("Folder")
 assets.Name = "Assets"
@@ -581,6 +585,23 @@ do
     part.Anchored = true
     part.Parent = inner
     outer.Parent = kit
+end
+-- 디자이너 에어록 (S9, world_smoke와 같은 모양): 텍스처 메시 1개 30.6 x 17.0 x 42.4, 계단 해치 로컬 X -7.6
+do
+    local airlock = Instance.new("Model")
+    airlock.Name = "Airlock"
+    airlock:SetAttribute("AssetId", 114535234500422)
+    airlock:SetAttribute("Role", "facility.airlock")
+    airlock:SetAttribute("DoorOffsetX", -7.6)
+    local hull = Instance.new("MeshPart")
+    hull.Name = "Connected_Habitat"
+    hull.Size = Vector3.new(30.6, 17.0, 42.4)
+    hull.CFrame = CFrame.new(400, 60, -800)
+    hull.Anchored = true
+    hull.CanCollide = false
+    hull.Parent = airlock
+    airlock.PrimaryPart = hull
+    airlock.Parent = assets
 end
 
 -- 모듈 로더 -------------------------------------------------------------
@@ -824,8 +845,9 @@ function H.landerInside()
     return shelter.zone.CFrame.Position
 end
 function H.outsidePoint()
-    -- 솔라 필드 옆 (대피처와 로버에서 멀다)
-    return Vector3.new(39.3, 4, -440)
+    -- 태양광 판 남쪽 바깥 (대피처, 로버 주차판, 물탱크에서 멀다. 2026-11-15 옮긴 기지 기준)
+    local x, z = -174.7, -40
+    return Vector3.new(x, groundAt(x, z) + 3, z)
 end
 
 -- 부팅 ------------------------------------------------------------------
@@ -998,8 +1020,13 @@ do
     local r = H.rules()
     check(r and r.missionId == "C" and r.players == 1, "Rules.newState: C, 1명")
     check(
-        r and r.sites[1].id == "Ice4" and r.sites[5].id == "Ice5",
-        "얼음 순서: BaseExit 실측 거리 (Ice4 가장 가까움, Ice5 가장 멂)"
+        r
+            and r.sites[1].id == "Ice4"
+            and r.sites[2].id == "Ice5"
+            and r.sites[3].id == "Ice1"
+            and r.sites[4].id == "Ice3"
+            and r.sites[5].id == "Ice2",
+        "얼음 순서: BaseExit 실측 거리 Ice4, Ice5, Ice1, Ice3, Ice2 (2026-11-15 옮긴 기지)"
     )
     check(r and r.weather.id == "2022-08-12", "우주 기상 구간: setNextWindow")
     local s = H.state()
@@ -1022,10 +1049,49 @@ do
     )
     check(s and type(s.dayEndsAt) == "number", "StateUpdate: dayEndsAt")
     check(s and s.mission.key == "mission.step.airlock", "미션 문구: 에어록 점검")
-    check(
-        s and #s.ice == 5 and s.ice[1].markerName == "Ice4" and s.ice[1].fsdDays == 1,
-        "ice[1]: Ice4, 왕복 1일"
-    )
+    do
+        -- 화면 ice[i]가 Rules.tripPlan과 모두 같은지 (서버는 MissionWorld 실측 거리로 Rules를 만든다). 값은 INFO로 남긴다
+        local same = s ~= nil and #s.ice == 5
+        for i, site in (s and s.ice) or {} do
+            local plan = M.Rules.tripPlan(H.rules(), M.MissionConfig, i, false)
+            if
+                not plan
+                or site.fsdDays ~= plan.days
+                or site.fsdEnergy ~= plan.energy
+                or site.risk ~= plan.risk
+            then
+                same = false
+            end
+            print(
+                string.format(
+                    "  INFO 얼음 %d %s 거리 %.1f 왕복 %d일 에너지 %d 위험 %s 서둘러 %s",
+                    i,
+                    site.markerName,
+                    site.distance or -1,
+                    site.fsdDays,
+                    site.fsdEnergy,
+                    site.risk,
+                    tostring(site.rushHelps)
+                )
+            )
+        end
+        check(same, "ice[1 .. 5]: 왕복 일수, 에너지, 위험 = Rules.tripPlan")
+    end
+    do
+        -- 왕복 일수는 MissionConfig(fb-balance)가 정한다. 화면 값이 Rules 계산과 같은지만 본다
+        local plan = M.Rules.tripPlan(H.rules(), M.MissionConfig, 1, false)
+        check(
+            s
+                and #s.ice == 5
+                and s.ice[1].markerName == "Ice4"
+                and plan
+                and s.ice[1].fsdDays == plan.days
+                and s.ice[1].fsdDays >= 1,
+            "ice[1]: Ice4, 왕복 일수 = Rules.tripPlan ("
+                .. tostring(s and s.ice[1].fsdDays)
+                .. "일)"
+        )
+    end
     check(
         s and H.near(s.ice[1].x, 328, 0.5) and H.near(s.ice[1].z, -232, 0.5),
         "ice[i].x, z (StreamingEnabled 대비 MinePoint 좌표)"
@@ -1033,8 +1099,8 @@ do
     check(
         s
             and s.mapPoints
-            and H.near(s.mapPoints.Lander.x, 188.3, 0.05)
-            and H.near(s.mapPoints.BaseExit.z, -416, 0.05)
+            and H.near(s.mapPoints.Lander.x, -65.69, 0.05)
+            and H.near(s.mapPoints.BaseExit.z, -43.09, 0.05)
             and s.mapPoints.WaterTank ~= nil
             and s.mapPoints.FarmPad ~= nil,
         "mapPoints (Lander, BaseExit, RoverPark, Airlock, SolarField, FarmPad, WaterTank)"
@@ -1043,13 +1109,24 @@ do
         s and type(s.rover.x) == "number" and type(s.rover.z) == "number",
         "rover.x, z (보이는 로버)"
     )
-    check(
-        s
-            and s.ice[1].rushDays ~= nil
-            and s.ice[1].rushEnergy ~= nil
-            and s.ice[5].rushRisk == "extreme",
-        "ice: 서둘러 가기 미리보기 (먼 곳은 extreme)"
-    )
+    do
+        -- 서둘러 가기 위험은 그 후보지 위험보다 한 등급 위 (등급 경계 숫자는 fb-balance의 MissionConfig가 정한다)
+        local order = M.MissionConfig.MISSIONS.C.rover.riskOrder
+        local far = s and s.ice[5]
+        local base = far and table.find(order, far.risk)
+        check(
+            s
+                and s.ice[1].rushDays ~= nil
+                and s.ice[1].rushEnergy ~= nil
+                and base ~= nil
+                and far.rushRisk == order[math.min(#order, base + 1)],
+            "ice: 서둘러 가기 미리보기 (위험 한 등급 위, 가장 먼 곳 "
+                .. tostring(far and far.risk)
+                .. " -> "
+                .. tostring(far and far.rushRisk)
+                .. ")"
+        )
+    end
     check(
         s and s.facilities.farm and s.facilities.farm.status == "available",
         "facilities.farm available"
@@ -1170,9 +1247,18 @@ do
         "파견: 콘솔에서 멀면 거절"
     )
     moveTo(ana, H.landerInside())
+    -- 옮긴 기지는 가장 가까운 얼음도 멀어 왕복이 1일보다 길고 에너지가 많이 든다. 아래 흐름(하루 단위 우주 기상 일정)을
+    -- 그대로 두려고 에너지를 채우고, 파견 뒤 왕복을 1일로 줄인다 (테스트 단축, 일수 계산은 rules.spec이 본다)
+    H.topUp({ energy = 100 })
     mark = R.mark()
     H.fire("DispatchRover", ana, 1, false)
     check(H.rules().rover.status == "fsd", "파견: Rules rover fsd")
+    do
+        local shorter = M.Rules.copy(H.rules())
+        shorter.rover.trip.totalDays = 1
+        M.MissionFlow.flow.commit(shorter)
+        advance(0)
+    end
     check(R.notified(mark, "toast.rover.dispatched") ~= nil, "알림 toast.rover.dispatched")
     local rover = M.RoverFleet.model()
     check(rover and rover.Parent ~= nil, "파견 직후: 출구로 달려가는 중 (보임)")
@@ -1980,7 +2066,8 @@ do
         M.MissionFlow.flow.commit(fixed)
         advance(1.2)
     end
-    local point = Workspace.MissionRuntime.IceSites:FindFirstChild("Ice4").MinePoint
+    -- siteIndex 1 = 출구에서 가장 가까운 얼음 후보지 (출구를 다시 옮긴 뒤 Ice4)
+    local point = Workspace.MissionRuntime.IceSites:FindFirstChild(H.rules().sites[1].id).MinePoint
     rover:PivotTo(CFrame.new(point.CFrame.Position + Vector3.new(3, 2, 0)))
     advance(0.3)
     local icePrompt = M.Interactions.icePrompt(1)

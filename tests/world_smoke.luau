@@ -151,16 +151,18 @@ do
     end)
 end
 
--- 실측 지면 높이 (2026-11-14 Studio, 표시 중심 아래 지형) 를 역거리 가중으로 보간한 지면
+-- 표시 중심 아래 지면 높이를 역거리 가중으로 보간한 지면 (기지는 추정, 얼음은 실측. 아래 표 주석)
 local GROUND_SAMPLES = {
-    { 188.3, -516.6, -0.8 }, -- Lander
-    { 180.3, -542.4, -0.6 }, -- SpawnLocation
-    { 39.3, -496.9, 0.2 }, -- SolarField
-    { -14.2, -595.9, 1.0 }, -- FarmPad
-    { -14.2, -673.9, -1.1 }, -- WaterTank
-    { 122.8, -577.9, -2.8 }, -- RoverPark
-    { 312.7, -416.0, -3.4 }, -- BaseExit
-    { 174.8, -525.6, -1.2 }, -- Airlock
+    -- 기지 표시 8개: 2026-11-15 옮긴 자리의 표시 중심 아래 지면 실측 (리드 전달, BaseExit는 다시 옮긴 자리).
+    -- 얼음 5곳은 2026-11-14 실측 그대로 (얼음은 옮기지 않았다)
+    { -65.69, 63.42, -24.60 }, -- Lander (실측)
+    { -73.68, 37.61, -23.72 }, -- SpawnLocation (실측)
+    { -174.68, 40.11, -22.61 }, -- SolarField (실측)
+    { -231.13, 49.11, -23.02 }, -- FarmPad (실측)
+    { -268.18, -93.89, -17.17 }, -- WaterTank (실측)
+    { -131.18, 2.11, -21.24 }, -- RoverPark (실측)
+    { -38.20, -43.09, -19.69 }, -- BaseExit (실측)
+    { -119.2, 81.4, -23.47 }, -- Airlock (실측)
     { 576.5, -245.5, -4.3 }, -- Ice1
     { 664.0, -663.7, -4.1 }, -- Ice2
     { 759.9, -183.8, -0.4 }, -- Ice3
@@ -222,8 +224,10 @@ fixture.missionC = Instance.new("Folder")
 fixture.missionC.Name = "MissionC"
 fixture.missionC.Parent = Workspace
 
-local YAW_LOOK_PLUS_X = CFrame.Angles(0, math.rad(-90), 0) -- LookVector (1, 0, 0)
-local UPRIGHT_CYLINDER = CFrame.fromMatrix(Vector3.zero, Vector3.new(0, 1, 0), Vector3.new(0, 0, 1)) -- 원기둥 축 X가 위
+-- Studio Part.Orientation(도) -> CFrame (Roblox ToOrientation과 같은 Y, X, Z 순서)
+local function orient(x: number, y: number, z: number)
+    return CFrame.fromOrientation(math.rad(x), math.rad(y), math.rad(z))
+end
 function fixture.marker(name: string, className: string, pos, size, rot, shape)
     local part = Instance.new(className)
     part.Name = name
@@ -237,74 +241,74 @@ function fixture.marker(name: string, className: string, pos, size, rot, shape)
     part.Parent = fixture.missionC
     return part
 end
+-- 2026-11-15 Studio 실측 (리드 전달, 사용자 결정으로 C 기지를 옮긴 뒤). 방향은 ToOrientation(도) 그대로
 fixture.marker(
     "Lander",
     "Part",
-    Vector3.new(188.3, 11.2, -516.6),
+    Vector3.new(-65.69, -12.59, 63.42),
     Vector3.new(28, 118, 12),
-    UPRIGHT_CYLINDER,
+    orient(0.1, 90.0, 92.8),
     Enum.PartType.Cylinder
 )
 fixture.marker(
     "Airlock",
     "Part",
-    Vector3.new(174.8, 2.2, -525.6),
-    Vector3.new(11, 105, 9),
-    UPRIGHT_CYLINDER,
-    Enum.PartType.Cylinder
-)
+    Vector3.new(-119.2, -15.0, 81.4),
+    Vector3.new(43, 17, 43),
+    orient(0, 0, 0)
+) -- S9: 원기둥(지름 9)에서 Block으로 (원래 값은 Studio 표시 Attribute OriginalShape, OriginalSize, OriginalCFrame)
 fixture.marker(
     "SpawnLocation",
     "SpawnLocation",
-    Vector3.new(180.3, -0.5, -542.4),
+    Vector3.new(-73.68, -23.63, 37.61),
     Vector3.new(12, 1, 12),
-    CFrame.Angles(0, math.rad(90), 0)
+    orient(0, 90, 0)
 )
 fixture.marker(
     "SolarField",
     "Part",
-    Vector3.new(39.3, 3.6, -496.9),
+    Vector3.new(-174.68, -16.91, 40.11),
     Vector3.new(82, 5, 49),
-    CFrame.Angles(0, math.rad(180), 0)
+    orient(0, 90, 0)
 )
 fixture.marker(
     "FarmPad",
     "Part",
-    Vector3.new(-14.2, 13.6, -595.9),
+    Vector3.new(-231.13, -11.53, 49.11),
     Vector3.new(31, 20, 25),
-    YAW_LOOK_PLUS_X
+    orient(0, -90, 0)
 )
 fixture.marker(
     "WaterTank",
     "Part",
-    Vector3.new(-14.2, 8.8, -673.9),
+    Vector3.new(-268.18, -7.29, -93.89),
     Vector3.new(31, 20, 25),
-    YAW_LOOK_PLUS_X
+    orient(0, -90, 0)
 )
 fixture.marker(
     "RoverPark",
     "Part",
-    Vector3.new(122.8, -1.5, -577.9),
+    Vector3.new(-131.18, -19.95, 2.11),
     Vector3.new(31, 4, 25),
-    YAW_LOOK_PLUS_X
+    orient(0, -90, 0)
 )
 fixture.marker(
     "BaseExit",
     "Part",
-    Vector3.new(312.7, -1.5, -416.0),
+    Vector3.new(-38.20, -18.19, -43.09),
     Vector3.new(31, 4, 25),
-    CFrame.Angles(0, math.atan2(-0.7776, -0.6288), 0)
-)
+    orient(0, -56.3, 0)
+) -- 리드가 얼음 쪽으로 다시 옮김: CFrame.lookAt(pos, 얼음 무게중심 (406, y, -340))
 for i, pos in
     {
-        Vector3.new(576.5, -3.9, -245.5),
-        Vector3.new(664.0, -2.3, -663.7),
-        Vector3.new(759.9, 1.5, -183.8),
-        Vector3.new(328.0, -26.9, -232.0),
-        Vector3.new(-296.1, -13.6, -375.9),
+        Vector3.new(576.50, -3.93, -245.50),
+        Vector3.new(663.96, -2.28, -663.72),
+        Vector3.new(759.92, 1.47, -183.77),
+        Vector3.new(327.98, -26.90, -231.96),
+        Vector3.new(-296.10, -13.58, -375.90),
     }
 do
-    fixture.marker("Ice" .. i, "Part", pos, Vector3.new(31, 4, 25), YAW_LOOK_PLUS_X)
+    fixture.marker("Ice" .. i, "Part", pos, Vector3.new(31, 4, 25), orient(0, -90, 0))
 end
 fixture.originalCFrames = {}
 for _, child in fixture.missionC:GetChildren() do
@@ -508,6 +512,24 @@ do
     b(tank, "Blue_Roof_Segment_1", Vector3.new(0, 11.46, 0), Vector3.new(8, 0.4, 6), false, o)
     tank.Parent = fixture.assets
     fixture.tank = tank
+end
+-- 디자이너 에어록 (S9, 에셋 114535234500422): 캡슐 모듈 2개가 나란히 이어진 텍스처 메시 1개, 축척 0.0251 적용 뒤 30.6 x 17.0 x 42.4.
+-- 해치는 로컬 -Z 면에 2개, 계단 해치는 로컬 X 약 -7.6 (Attribute DoorOffsetX). 가운데는 연결 통로
+do
+    local airlock = Instance.new("Model")
+    airlock.Name = "Airlock"
+    airlock:SetAttribute("SourceFile", "assets/models/Airlock.fbx")
+    airlock:SetAttribute("AssetId", 114535234500422)
+    airlock:SetAttribute("Role", "facility.airlock")
+    airlock:SetAttribute("DoorOffsetX", -7.6)
+    airlock.PrimaryPart = fixture.mesh(
+        airlock,
+        "Connected_Habitat",
+        Vector3.new(30.6, 17.0, 42.4),
+        Vector3.new(400, 60, -800)
+    )
+    airlock.Parent = fixture.assets
+    fixture.airlock = airlock
 end
 -- 디자이너 파이프: 원본 경계 최소점 (-2.34, -2.81, -2.34). 고리는 +X 끝, 받침(Ground_Base) 밑면은 바닥에서 2.66 위
 do
@@ -742,6 +764,22 @@ function H.boundsIn(root, frame)
     end
     return lo, hi
 end
+-- 수평 방향 dir로 본 위치 (dir은 단위 벡터)
+function H.along(v, dir): number
+    return v.X * dir.X + v.Z * dir.Z
+end
+-- 축 정렬 경계 lo..hi를 수평 방향 dir로 본 최소, 최대 (네 모서리)
+function H.alongRange(lo, hi, dir): (number, number)
+    local a, b = math.huge, -math.huge
+    for _, x in { lo.X, hi.X } do
+        for _, z in { lo.Z, hi.Z } do
+            local v = x * dir.X + z * dir.Z
+            a = math.min(a, v)
+            b = math.max(b, v)
+        end
+    end
+    return a, b
+end
 function H.find(root, path: string)
     local node = root
     for name in string.gmatch(path, "[^%.]+") do
@@ -829,13 +867,15 @@ do
     local lander = MissionWorld.getMarker("Lander")
     check(lander.shape == "Cylinder", "init: 착륙선 표시 모양 Cylinder")
     check(
-        H.near(lander.extents.X, 12, 0.01)
-            and H.near(lander.extents.Y, 28, 0.01)
-            and H.near(lander.extents.Z, 12, 0.01),
-        "init: 세운 원기둥 렌더 크기 12 x 28 x 12 (" .. tostring(lander.extents) .. ")"
+        H.near(lander.extents.X, 12.05, 0.01)
+            and H.near(lander.extents.Y, 28.57, 0.01)
+            and H.near(lander.extents.Z, 13.35, 0.01),
+        "init: 세운 원기둥(2.8도 기울어짐) 경계 12.05 x 28.57 x 13.35 ("
+            .. tostring(lander.extents)
+            .. ")"
     )
     check(
-        lander.groundFound and H.near(lander.groundSamples[1], -0.8, 0.01),
+        lander.groundFound and H.near(lander.groundSamples[1], -24.60, 0.01),
         "init: 표시 아래 지면 높이 읽기"
     )
 end
@@ -1198,14 +1238,32 @@ do
         H.near(H.find(base, "WaterTank"):GetAttribute("AssetScale"), 1, 0.01),
         "물탱크: 배율 약 1 (표시 크기 그대로)"
     )
-    local function centerZ(name)
+    -- 뒤 끝 방향: 설비(Rear_Utility_Housing)가 선체보다 있는 쪽. 긴 축(월드 Z) 위에서 얼음 무게중심 쪽을 고른다.
+    -- 2026-11-15 옮긴 기지에서는 얼음이 주로 +X(동쪽)라 Z축 위에서는 -Z(남쪽)가 얼음 쪽이다
+    local function centerOf(name)
         local lo, hi = H.bounds(tankVisual:FindFirstChild(name))
-        return (lo.Z + hi.Z) / 2
+        return (lo + hi) / 2
     end
+    local hull = centerOf("Main_Pressurized_Hull")
+    local backRaw = (centerOf("Rear_Utility_Housing") - hull) * Vector3.new(1, 0, 1)
+    local back = backRaw.Unit
+    fixture.tankBack = back
+    local iceSum = Vector3.zero
+    for i = 1, 5 do
+        iceSum += MissionWorld.getMarker("Ice" .. i).position
+    end
+    local toIce = (iceSum / 5 - MissionWorld.getMarker("WaterTank").position) * Vector3.new(1, 0, 1)
     check(
-        centerZ("Rear_Utility_Housing") > centerZ("Main_Pressurized_Hull")
-            and centerZ("Front_Door") < centerZ("Main_Pressurized_Hull"),
-        "물탱크: 뒤 끝(설비)이 얼음 쪽(+Z), 문이 반대쪽"
+        math.abs(back.Z) > 0.99 and back:Dot(toIce) > 0,
+        string.format(
+            "물탱크: 뒤 끝(설비)이 긴 축 위에서 얼음 쪽 (back %.2f, %.2f)",
+            back.X,
+            back.Z
+        )
+    )
+    check(
+        H.along(centerOf("Front_Door") - hull, back) < 0,
+        "물탱크: 문과 경사로는 뒤 끝 반대쪽"
     )
     local unload = MissionWorld.anchor("unloadPoint").CFrame.Position
     local dockPos = MissionWorld.anchor("roverDock").CFrame.Position
@@ -1213,17 +1271,21 @@ do
         unload.X > vhi.X and dockPos.X > vhi.X,
         "물탱크: 하역 자리와 귀환 자리는 착륙선 쪽 긴 옆면"
     )
-    check(dockPos.Z < unload.Z, "물탱크: 귀환 자리는 문 쪽으로 비켜 있다")
     check(
-        MissionWorld.anchor("pipeSpot").CFrame.Position.Z > vhi.Z,
+        H.along(dockPos - unload, back) < 0,
+        "물탱크: 귀환 자리는 문 쪽으로 비켜 있다"
+    )
+    local _, tankBackEdge = H.alongRange(vlo, vhi, back)
+    local pipeSpotPos = MissionWorld.anchor("pipeSpot").CFrame.Position
+    check(
+        H.along(pipeSpotPos, back) > tankBackEdge,
         "물탱크: 파이프 착공 자리는 뒤 끝 바깥"
     )
     for _, id in { "unloadPoint", "roverDock", "pipeSpot" } do
         check(MissionWorld.anchor(id) ~= nil, "물탱크: 자리 " .. id)
     end
     check(
-        MissionWorld.anchor("pipeSpot").CFrame.Position.Z
-            > MissionWorld.getMarker("WaterTank").position.Z,
+        H.along(pipeSpotPos - MissionWorld.getMarker("WaterTank").position, back) > 0,
         "물탱크: 파이프 자리는 얼음 쪽 면"
     )
 
@@ -1238,8 +1300,20 @@ do
     local exitCf = MissionWorld.exitCFrame()
     check(
         exitCf ~= nil and exitCf.LookVector:Dot(exitInfo.cframe.LookVector) > 0.99,
-        "출구: 표시 방향(얼음 쪽)을 본다"
+        "출구: 표시 방향을 본다"
     )
+    -- 2026-11-15 리드가 출구를 얼음 쪽으로 다시 옮겼다: 얼음 무게중심을 본다 (Ice5만 옆쪽). 값만 남긴다
+    for i = 1, 5 do
+        local p = MissionWorld.getMarker("Ice" .. i).position
+        local dir = ((p - exitInfo.position) * Vector3.new(1, 0, 1)).Unit
+        print(
+            string.format(
+                "  INFO 출구가 보는 방향과 Ice%d 방향 내적 %.2f",
+                i,
+                exitCf.LookVector:Dot(dir)
+            )
+        )
+    end
 
     -- 얼음
     local sites = MissionWorld.iceSites()
@@ -1248,34 +1322,40 @@ do
         table.insert(order, site.markerName)
     end
     check(
-        table.concat(order, ",") == "Ice4,Ice1,Ice2,Ice3,Ice5",
+        table.concat(order, ",") == "Ice4,Ice5,Ice1,Ice3,Ice2",
         "얼음: 출구 기준 거리 순서 " .. table.concat(order, ",")
     )
     check(
-        H.near(sites[1].distanceFromExit, 184.6, 0.5)
-            and H.near(sites[5].distanceFromExit, 610.1, 0.5),
-        "얼음: 출구 거리 184.6 ~ 610.1"
+        H.near(sites[1].distanceFromExit, 412.0, 0.5)
+            and H.near(sites[2].distanceFromExit, 421.0, 0.5)
+            and H.near(sites[3].distanceFromExit, 647.2, 0.5)
+            and H.near(sites[4].distanceFromExit, 810.4, 0.5)
+            and H.near(sites[5].distanceFromExit, 937.1, 0.5),
+        "얼음: 출구 거리 412.0, 421.0, 647.2, 810.4, 937.1 (리드 실측 412, 421, 647, 810, 937)"
     )
     check(
-        H.near(sites[1].distanceFromRoverPark, 402.2, 0.5),
-        "얼음: 로버 주차 거리 (Ice4 약 402)"
+        H.near(sites[1].distanceFromRoverPark, 515.4, 0.5)
+            and H.near(sites[2].distanceFromRoverPark, 412.4, 0.5)
+            and H.near(sites[5].distanceFromRoverPark, 1037.1, 0.5),
+        "얼음: 로버 주차 거리 (Ice4 515, Ice5 412, Ice2 1037. 주차 기준이면 Ice5가 더 가깝다)"
     )
     check(
-        H.near(sites[1].distanceFromLander, 317.0, 0.5),
-        "얼음: 착륙선 거리 (Ice4 약 317)"
+        H.near(sites[1].distanceFromLander, 492.2, 0.5)
+            and H.near(sites[2].distanceFromLander, 496.1, 0.5),
+        "얼음: 착륙선 거리 (Ice4 492, Ice5 496)"
     )
     local distances = MissionWorld.iceDistances()
     check(
-        H.near(distances.Ice5, 610.1, 0.5) and H.near(distances.Ice4, 184.6, 0.5),
+        H.near(distances.Ice4, 412.0, 0.5) and H.near(distances.Ice2, 937.1, 0.5),
         "얼음: Rules용 거리표"
     )
     local iceFolder = runtime:FindFirstChild("IceSites")
-    local ice4 = iceFolder and iceFolder:FindFirstChild("Ice4")
+    local nearest = iceFolder and iceFolder:FindFirstChild("Ice4")
     check(
-        ice4 ~= nil
-            and ice4:GetAttribute("SiteIndex") == 1
-            and ice4:FindFirstChild("MinePoint") ~= nil,
-        "얼음: IceSites.Ice4 SiteIndex 1, 채취 자리"
+        nearest ~= nil
+            and nearest:GetAttribute("SiteIndex") == 1
+            and nearest:FindFirstChild("MinePoint") ~= nil,
+        "얼음: IceSites.Ice4 SiteIndex 1 (출구에서 가장 가까움), 채취 자리"
     )
     -- [2026-11-15 시험 피드백] 얼음은 영구 음영 크레이터의 어두운 표토에 섞여 있다: 반짝이는 결정이 아니라 낮게 묻힌
     -- 표토 색 덩어리. 네온, 빛, 반짝이 효과 없음. 이름표와 반짝임은 40 studs 안에서만 보인다
@@ -1427,6 +1507,7 @@ end
 print("[오두막]")
 do
     fixture.kit.Name = "KitOff"
+    fixture.airlock.Name = "AirlockOff" -- 디자이너 에어록도 빼서 대체 도형을 본다
     MissionWorld.placeBase()
     for _, id in { "lander", "airlock" } do
         local shelter = MissionWorld.getShelter(id)
@@ -1483,8 +1564,136 @@ do
         )
     end
     fixture.kit.Name = "Kit"
+    fixture.airlock.Name = "Airlock"
     MissionWorld.placeBase()
     base = runtime:FindFirstChild("Base")
+end
+
+-- 디자이너 에어록 (S9): 맞춤 배율, 해치 방향, 출입구를 해치 쪽(DoorOffsetX)으로, 로버 길 ----------------------
+print("[에어록 에셋]")
+do
+    local airlock = MissionWorld.getShelter("airlock")
+    local frame = airlock.frame
+    local visual = airlock.model:FindFirstChild("Visual")
+    local scale = airlock.model:GetAttribute("AssetScale")
+    check(
+        visual:GetAttribute("AssetSource") == "asset",
+        "에어록: Assets.Airlock 1단계 (디자이너 에셋)"
+    )
+    local vlo, vhi = H.boundsIn(visual, frame)
+    check(
+        H.near(scale, 1, 0.01) and H.near(vhi.Y - vlo.Y, 17, 0.05),
+        string.format(
+            "에어록: 표시 43 x 17 x 43에 맞춤 배율 약 1 (%.3f, 높이 %.2f)",
+            scale,
+            vhi.Y - vlo.Y
+        )
+    )
+    local spawn = MissionWorld.getMarker("SpawnLocation").position
+    local center = MissionWorld.getMarker("Airlock").position
+    local toSpawn = ((spawn - center) * Vector3.new(1, 0, 1)).Unit
+    local front = frame.LookVector
+    print(
+        string.format(
+            "  INFO 에어록 정면(해치 쪽 -Z) 방향 (%.2f, %.2f), 스폰 쪽과 내적 %.2f",
+            front.X,
+            front.Z,
+            front:Dot(toSpawn)
+        )
+    )
+    check(
+        front:Dot(toSpawn) > 0.7,
+        "에어록: 해치 쪽(정면)이 스폰 쪽 (90도 단위로 맞춤)"
+    )
+    local entry = airlock.model:FindFirstChild("Entry")
+    local expectX = -7.6 * scale
+    local function localX(name)
+        local lo, hi = H.boundsIn(entry:FindFirstChild(name), frame)
+        return (lo.X + hi.X) / 2, lo, hi
+    end
+    local doorX = localX("Door")
+    check(
+        H.near(doorX, expectX, 0.01) and H.near(airlock.model:GetAttribute("DoorX"), expectX, 0.01),
+        string.format("에어록: 문을 해치 쪽 X %.2f로 (DoorOffsetX x 배율)", doorX)
+    )
+    check(
+        H.near(localX("DoorLintel"), expectX, 0.01)
+            and H.near(localX("DoorSign"), expectX, 0.01)
+            and H.near(localX("DoorFrame"), expectX, 0.01),
+        "에어록: 문 위 막이, 표지, 문틀도 같은 X"
+    )
+    local gap = MissionWorld.CONFIG.entry.doorGap
+    local _, _, leftHi = localX("WallFrontLeft")
+    local _, rightLo = localX("WallFrontRight")
+    check(
+        H.near(leftHi.X, expectX - gap / 2, 0.01) and H.near(rightLo.X, expectX + gap / 2, 0.01),
+        "에어록: 정면 벽 출입구가 해치 앞에 열린다"
+    )
+    local inside = frame:PointToObjectSpace(airlock.inside.Position)
+    check(
+        H.near(inside.X, expectX, 0.01)
+            and MissionWorld.zoneAt(airlock.inside.Position) ~= "outside",
+        "에어록: 대피 지점은 출입구 안쪽, 산소 구역 안"
+    )
+    local doorWorld = entry:FindFirstChild("Door").CFrame.Position
+    local function flatDist(a, b)
+        return math.sqrt((a.X - b.X) ^ 2 + (a.Z - b.Z) ^ 2)
+    end
+    check(
+        flatDist(doorWorld, spawn) < flatDist(center, spawn) - 10,
+        "에어록: 계단 해치 출입구가 스폰 쪽에 있다"
+    )
+    local panelX = frame:PointToObjectSpace(airlock.panel.CFrame.Position).X
+    check(
+        math.abs(panelX - expectX) < gap / 2 + 3 and math.abs(panelX - expectX) > gap / 2,
+        "에어록: 제어반은 옮긴 출입구 옆"
+    )
+    -- 착륙선은 DoorOffsetX가 없어 가운데
+    local lander = MissionWorld.getShelter("lander")
+    local llo, lhi = H.boundsIn(lander.model:FindFirstChild("Visual"), lander.frame)
+    local ldoorLo, ldoorHi = H.boundsIn(H.find(lander.model, "Entry.Door"), lander.frame)
+    check(
+        H.near((ldoorLo.X + ldoorHi.X) / 2, (llo.X + lhi.X) / 2, 0.01),
+        "착륙선: DoorOffsetX가 없으면 출입구는 가운데"
+    )
+    -- 벽 밖으로 못 나간다: DoorOffsetX가 너무 크면 문 틈 절반만큼 안쪽으로 자른다
+    fixture.airlock:SetAttribute("DoorOffsetX", 100)
+    MissionWorld.placeBase()
+    local clamped = MissionWorld.getShelter("airlock")
+    local clo, chi = H.boundsIn(clamped.model:FindFirstChild("Visual"), clamped.frame)
+    local cdoorLo, cdoorHi = H.boundsIn(H.find(clamped.model, "Entry.Door"), clamped.frame)
+    local cdoorX = (cdoorLo.X + cdoorHi.X) / 2
+    check(
+        H.near(cdoorX, chi.X - gap / 2, 0.01)
+            and cdoorX + gap / 2 <= chi.X + 1e-3
+            and clo.X < cdoorX,
+        string.format("에어록: 너무 큰 DoorOffsetX는 벽 안으로 자른다 (%.2f)", cdoorX)
+    )
+    fixture.airlock:SetAttribute("DoorOffsetX", -7.6)
+    MissionWorld.placeBase()
+    base = runtime:FindFirstChild("Base")
+    -- 로버 길: 주차판 -> 출구 곧은 길이 에어록, 착륙선 경계를 지나는지 (지나면 warn만, 표시는 옮기지 않는다)
+    local crossAirlock = MissionWorld.pathCrossesShelter("RoverPark", "BaseExit", "airlock")
+    local crossLander = MissionWorld.pathCrossesShelter("RoverPark", "BaseExit", "lander")
+    print(
+        string.format(
+            "  INFO 로버 길 RoverPark -> BaseExit: 에어록 %s, 착륙선 %s, 태양광 판 %s",
+            tostring(crossAirlock),
+            tostring(crossLander),
+            tostring(MissionWorld.pathCrossesSolarField("RoverPark", "BaseExit"))
+        )
+    )
+    check(
+        crossAirlock == false and crossLander == false,
+        "로버 길: RoverPark -> BaseExit는 에어록, 착륙선 밖"
+    )
+    local warned = false
+    for _, text in warnings do
+        if string.find(text, "건물을 지납니다", 1, true) then
+            warned = true
+        end
+    end
+    check(not warned, "로버 길: 대피처 경고 없음")
 end
 
 -- 패널 수 ---------------------------------------------------------------------
@@ -1705,12 +1914,13 @@ do
         check(okFace, "갇힘 방지: 건물 반대쪽을 본다")
         local a, b = rootOf(insideA).CFrame.Position, rootOf(insideB).CFrame.Position
         check((a - b).Magnitude >= 2.9, "갇힘 방지: 여러 명은 옆으로 나란히")
+        -- Part 좌표는 float32라 같은 값도 조금 다르게 읽힌다 (예: -20.02 -> -20.020004)
         check(
-            rootOf(farAway).CFrame.Position == farPos,
+            (rootOf(farAway).CFrame.Position - farPos).Magnitude < 1e-3,
             "갇힘 방지: 멀리 있는 플레이어는 그대로"
         )
         check(
-            rootOf(driver).CFrame.Position == driverPos,
+            (rootOf(driver).CFrame.Position - driverPos).Magnitude < 1e-3,
             "갇힘 방지: 운전석에 앉은 플레이어는 건드리지 않는다"
         )
         check(fhi.Z > flo.Z, "갇힘 방지: 그린하우스 경계")
@@ -1836,12 +2046,12 @@ do
         "파이프: 관로 " .. info.segments .. "구간, 진행 0이면 안 보임"
     )
     local wellhead = H.find(facilitiesFolder, "pipe1.Wellhead")
-    local ice4 = MissionWorld.getMarker("Ice4").position
+    local site1 = MissionWorld.getMarker("Ice4").position
     local wlo, whi = H.bounds(wellhead)
     local wc = (wlo + whi) / 2
     check(
-        math.abs(wc.X - ice4.X) < 1 and math.abs(wc.Z - ice4.Z) < 1,
-        "파이프: 우물머리는 가장 가까운 얼음 지점(Ice4)"
+        math.abs(wc.X - site1.X) < 1 and math.abs(wc.Z - site1.Z) < 1,
+        "파이프: 우물머리는 가장 가까운 얼음 지점(siteIndex 1 = Ice4)"
     )
     local tankPipe = H.find(facilitiesFolder, "pipe1.TankPipe")
     check(
@@ -1881,22 +2091,27 @@ do
             "파이프: 탱크와 같은 배율 (따로 맞추지 않는다)"
         )
         local rlo, rhi = H.bounds(ring)
+        local back = fixture.tankBack
+        local side = Vector3.new(back.Z, 0, -back.X) -- 뒤 끝 방향에 수직인 수평축
+        local _, tankEdge = H.alongRange(tlo, thi, back)
+        local ringNear = H.alongRange(rlo, rhi, back)
         check(
-            H.near(rlo.Z, thi.Z, 0.01),
+            H.near(ringNear, tankEdge, 0.01),
             string.format(
                 "파이프: 고리가 탱크 뒤 끝 면에 닿는다 (%.3f, %.3f)",
-                rlo.Z,
-                thi.Z
+                ringNear,
+                tankEdge
             )
         )
         check(
-            H.near((rlo.X + rhi.X) / 2, (tlo.X + thi.X) / 2, 0.01),
+            H.near(H.along((rlo + rhi) / 2, side), H.along((tlo + thi) / 2, side), 0.01),
             "파이프: 고리 가운데가 탱크 축에"
         )
         check(rlo.Y >= tlo.Y and rhi.Y <= thi.Y, "파이프: 고리가 탱크 높이 범위 안")
-        local pipeLo = H.bounds(tankPipe:FindFirstChild("Visual"))
+        local pipeLo, pipeHi = H.bounds(tankPipe:FindFirstChild("Visual"))
+        local pipeNear = H.alongRange(pipeLo, pipeHi, back)
         check(
-            pipeLo.Z >= thi.Z - 0.01,
+            pipeNear >= tankEdge - 0.01,
             "파이프: 연결관은 탱크 바깥(얼음 쪽)으로 나간다"
         )
         local baseLo, baseHi = H.bounds(ground)
@@ -1929,10 +2144,10 @@ do
     MissionWorld.setPipeSite("pipe1", 2)
     wlo, whi = H.bounds(H.find(facilitiesFolder, "pipe1.Wellhead"))
     wc = (wlo + whi) / 2
-    local ice1 = MissionWorld.getMarker("Ice1").position
+    local site2 = MissionWorld.getMarker("Ice5").position
     check(
-        math.abs(wc.X - ice1.X) < 1 and math.abs(wc.Z - ice1.Z) < 1,
-        "파이프: 지점을 바꾸면 우물머리 이동 (Ice1)"
+        math.abs(wc.X - site2.X) < 1 and math.abs(wc.Z - site2.Z) < 1,
+        "파이프: 지점을 바꾸면 우물머리 이동 (siteIndex 2 = Ice5)"
     )
 
     check(MissionWorld.place("rocket") == false, "시설: 모르는 시설은 놓지 않는다")
@@ -2132,8 +2347,13 @@ do
         "대체: 파이프는 Kit Connector + Elbow"
     )
     local tlo, thi = H.bounds(tankVisual)
-    local plo = H.bounds(pipeVisual)
-    check(H.near(plo.Z, thi.Z, 0.01), "대체: 키트 파이프도 탱크 뒤 끝에 붙는다")
+    local plo, phi = H.bounds(pipeVisual)
+    local _, tankEdge = H.alongRange(tlo, thi, fixture.tankBack)
+    local pipeNear = H.alongRange(plo, phi, fixture.tankBack)
+    check(
+        H.near(pipeNear, tankEdge, 0.01),
+        "대체: 키트 파이프도 탱크 뒤 끝에 붙는다"
+    )
     fixture.tank.Name = "WaterTank"
     fixture.pipe.Name = "Pipe"
     MissionWorld.reset()
