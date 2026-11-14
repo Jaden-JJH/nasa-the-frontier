@@ -1,4 +1,4 @@
-# The Frontier v2 인수인계 (2026-11-14 약 17:40, 컨텍스트 압축 직전)
+# The Frontier v2 인수인계 (최종 갱신 2026-11-15 약 03:00)
 
 압축 뒤의 Claude가 이 문서 하나로 이어 갈 수 있게 쓴다. 결정 근거와 세부는 아래 문서에 있고, 이 문서는 "지금 어디까지 왔고 다음에 무엇을 하나"만 담는다.
 
@@ -15,35 +15,29 @@
 | `HANDOFF.md` | v1 인수인계(이력 참고용, v1 다음 작업 후보는 폐기) |
 
 ## 1. 지금 상태 한 줄
-v2 라운드 3 코드 완료(2026-11-14 18:00). 에이전트 6명 모두 완료(대기). 전체 검사 통과, 커밋/푸시 뒤 Studio 시험 단계.
+2026-11-15: 팀 플레이 테스트 피드백 8건(V2_PLAN 16절)을 모두 반영하고 Studio에서 확인 중. 기지를 중간 지점으로 옮기고 밸런스를 다시 맞췄다(BALANCE_LOG 8절). 남은 확인은 에어록 프롬프트 눈 확인(MCP 캡처는 PlayerGui의 BillboardGui를 못 찍음), 직접 운전 충돌 오판, 걸어서 수리, 멀티 역할 미션.
 
-## 2. 서브에이전트 (이름으로 SendMessage 하면 이어서 일함)
-| 이름 | 소유 파일 | 상태 |
+## 2. 서브에이전트 (이름으로 SendMessage 하면 이어서 일함, 2026-11-15 세션)
+11-14 세션의 v2-* 에이전트 6명은 세션이 바뀌며 없어졌다. 11-15에 새로 띄운 4명(모두 완료, 대기):
+| 이름 | 소유 파일 | 한 일 |
 |---|---|---|
-| v2-rules | `src/shared/MissionConfig.luau`, `Rules.luau`, `tests/bot_v2.luau`, `rules.spec.luau`, `run_v2.luau` | 완료(대기). 테스트 45 |
-| v2-i18n | `i18n/*`, `tools/i18n/*`, `src/shared/Msg.luau`, `Loc.luau`, `Strings.luau`(생성), `src/server/PlayerPrefs.luau`, `src/client/Localizer.luau`, `LanguageToggle.luau`, `tests/i18n.spec.luau`, `run_i18n.luau` | **CSV 유일한 관리자**, 대기. CSV 481행 |
-| v2-world | `src/server/MissionWorld.luau`, `src/shared/WorldMath.luau`, `tests/world.spec.luau`, `world_smoke.luau`, `run_world.luau` | 완료(대기). 스모크 173 |
-| v2-server | `src/server/*`(v2 모듈), `src/shared/Remotes.luau`, `RankingV2.luau`, `tests/server_smoke_v2.luau`, `ranking_v2.spec.luau`, **`tests/run.luau`** | 완료(대기). v2 서버 스모크 219 |
-| v2-client | `src/client/*`, `src/shared/ClientMath.luau`, `tests/client.spec.luau`, `run_client.luau` | 완료(대기). 클라이언트 테스트 15. 키 11개는 기존 toast.* 키로 교체 |
-| v2-facts | `docs/content/FACTS_V2.md` | 완료 |
-- 모든 에이전트 규칙: 구독 계정만(API 키 금지), git add/commit/push 금지, 금지 문자 9종 금지, stylua는 자기 파일에만(전체는 `--check`).
-- 2026-11-14 16:46 첫 계정이 구독 5시간 한도(18:20 초기화)에 걸려 사용자가 다른 계정(team 구독, `claude auth status`로 확인 완료)으로 로그인. 한도에 또 걸리면 API로 우회하지 말고 멈춘 지점을 알린다.
-- 에이전트는 같은 보고를 SendMessage와 idle_notification으로 두 번 보낸다. 한 번만 처리.
+| fb-server | `src/server/*`(MissionWorld 포함), `src/shared/WorldMath.luau`, `Remotes.luau`, `tests/server_smoke_v2.luau`, `world_smoke.luau`, `world.spec.luau` | S1 비용 Attribute, S2 그린하우스 갇힘, S3 패널 충돌, S4 천장, S5 얼음 외형, S6 충전 상태, S7 역할 미션(`RoleMissions.luau`), S8 픽스처 이전, S9 에어록 DoorOffsetX와 길 검사, S10 배터리 버그, S11 얼음 번호, S12 덩어리 지면 맞춤 |
+| fb-client | `src/client/*`, `src/shared/ClientMath.luau`, `tests/client.spec.luau`, `run_client.luau` | C1 비용 줄, C2 충전 표시(`RoverChargeSign`), C3 건물 카드(`BuildingInfoUI`), C4 역할 미션 화면(`ScoutMarkers`), C5 프롬프트 보호와 `DebugPrompts` 스위치, 얼음 번호 표시, Localizer TextArgs |
+| fb-i18n | `i18n/*`, `tools/i18n/*`, `Strings.luau`, `Msg.luau`, `Loc.luau`, i18n 테스트 | **CSV 유일한 관리자.** info, 충전, 역할 미션 키 추가(CSV 522행) |
+| fb-balance | `MissionConfig.luau`, `Rules.luau`, `bot_v2`, `rules.spec`, `run_v2`, BALANCE_LOG 8절 | 기지 이동 뒤 재조정 |
+- 규칙(모두 같음): 구독 계정만(API 키 금지, 한도에 걸리면 멈춤), git 금지, 금지 문자 9종 금지, stylua는 자기 파일만, selene 경고 0.
+- 에이전트끼리 서로 기다리다 멈추는 일이 두 번 있었다(키 이름을 다른 담당이 이미 바꿔 둔 경우). 담당이 "기다리는 중"이라고 하면 리드가 CSV나 코드를 직접 보고 정확한 이름을 알려 준다.
 
-## 3. 검사 상태 (2026-11-14 18:00 기준)
-- **전부 통과**: `lune run tests/run.luau` 종료 코드 0(단위 288 = 기존 273 + Client 15, 월드 스모크 173, v2 서버 스모크 219, build --check, lint 누락 0). stylua 통과, selene 오류 0(v1 경고 1). 아래 17:35 기록은 이력.
-- `lune run tests/run.luau`(서버 담당이 통합): 단위 273, 월드 스모크 173, v2 서버 스모크 219, `tools/i18n/build.luau --check` 통과. **`tools/i18n/lint.luau`만 실패 12건(모두 src/client의 키)** -> v2-client가 기존 키로 바꾸면 통과하고 CI 초록.
-- v1 서버 스모크는 run.luau에서 뺐다(파일은 남음). v1 모듈 파일은 남아 있지만 부팅하지 않는다(Main.server가 v2 부팅).
-- 검사 명령(저장소 루트, 각각): `export PATH="$HOME/.rokit/bin:$PATH"`; `stylua --check src tests`; `selene src tests`(경고 0이어야 함, 경고도 CI 실패); `lune run tests/run.luau`; `rm -rf build`.
+## 3. 검사 상태 (2026-11-15 03:00)
+- `lune run tests/run.luau` 종료 코드 0: 단위 300(Client 포함), 월드 스모크 246, v2 서버 스모크 300, i18n build --check, lint 누락 0. stylua 통과, selene 오류 0 경고 0.
+- 검사 명령(저장소 루트): `export PATH="$HOME/.rokit/bin:$PATH"`; `stylua --check src tests`; `selene src tests`(경고도 CI 실패); `lune run tests/run.luau`; `rm -rf build`.
+- zsh 주의: `git show "${rev}:path"`처럼 중괄호를 쓴다(`$rev:s...`는 zsh 변형 기호로 해석됨).
 
 ## 4. 커밋 상태
-- 마지막 커밋 `09c6ae8`(원격과 같음). 그 뒤 v2 코드, 문서, 에셋, 데이터가 전부 **미커밋**(`git status`로 확인).
-- 화면 담당이 끝나고 전체 검사가 통과하면 커밋한다(에이전트 작업 중 커밋 금지: 레이스). 커밋 메시지는 영어 conventional, AI 표기 없음.
-- 푸시: 사용자 pre-push 훅이 하루 3회 제한. **2026-11-14는 2회 사용, 1회 남음.** `--no-verify` 우회는 사용자에게 다시 물어야 한다.
-- **저장소 이전(2026-11-14 18:05, 사용자 요청):** 새 비공개 저장소 `Jaden-JJH/nasa-the-frontier`가 `origin`(이력 전체와 `v1-final` 태그 = `2d6307d` 옮김). 옛 저장소 `Jaden-JJH/the-frontier`는 지우지 않고 원격 이름 `legacy`로 남김(더 이상 푸시하지 않음).
-- 2026-11-14 푸시: 옛 저장소 3회(한도 소진) + 새 저장소 첫 푸시는 사용자 허락으로 `--no-verify`. 이후 우회는 다시 허락받는다.
-- 커밋 `c19d223`(클라이언트 늦은 수정), `5bf7958`(selene 경고 수정: selene는 경고만 있어도 종료 코드 1이라 옛 main CI가 빨간색이었음), `b728397`(Airlock.fbx, SolarTower.fbx 원본 추가, 사용자가 `나사/` 폴더에 넣은 원본은 그대로 둠).
-- `.gitignore`: `.env`, `*.rbxm`(그래서 `assets/models/KitImports_v1.rbxm`은 제외됨), `.omc/`.
+- 저장소: **`Jaden-JJH/nasa-the-frontier`(비공개)가 origin.** 옛 `Jaden-JJH/the-frontier`는 remote `legacy`(푸시하지 않음). 협업자(쓰기, 개인 저장소 최대 권한): jiwon-lab(수락), MuhtasimMahim, ryujaen(초대).
+- 마지막 푸시 `cd82738`(2026-11-15). 2026-11-15 푸시 3회를 모두 썼다. 그 뒤 커밋은 다음 날 푸시하거나 사용자에게 `--no-verify` 허락을 다시 받는다.
+- 커밋 메시지 영어 conventional, AI 표기 없음. 에이전트 작업 중에는 커밋하지 않는다.
+- 팀원 테스트 방식: 팀원은 Team Create로 같은 플레이스를 열고 Play만 한다. Rojo Connect는 Jaden(리드)만(여러 명이 연결하면 옛 코드가 덮어쓸 수 있음).
 
 ## 5. Roblox 새 프로젝트
 - 경험 `[NASA] The Frontier`, 소유 Jaden(user 11824484899), Universe 10776510720, Place 139751582320388(이름 11142026_1). Team Create에 지원 참여. Rojo 7.7.1 플러그인 설치됨.
@@ -67,17 +61,17 @@ v2 라운드 3 코드 완료(2026-11-14 18:00). 에이전트 6명 모두 완료(
 - 그린하우스 LED 바와 수경 베드는 해당 업그레이드 가동 때만 보임. 사실 카드 artemis는 첫 착륙 직후, 긴 카드는 약 14초 표시. Tip `tip.pause_to_save`는 첫 업그레이드 가동 직후.
 - 웹판은 Mahi가 PlayCanvas로 만든다. 공유 파일: `i18n/strings.json`, `i18n/loc.js`, `i18n/golden.json`, `data/donki/windows.json`. 규칙 수치 공유용 `rules_v2.json` 생성 도구는 아직 없음(할 일).
 
-## 7. 다음 할 일 (순서)
-1. v2-client 최종 보고 받기 -> lint 0, `lune run tests/run.luau` 전체 통과(종료 코드 0), stylua/selene 확인을 리드가 직접 실행.
-2. 계약 정리: v2-server와 v2-client가 보고한 계약 차이를 `CONTRACT_V2.md`에 반영(서버 차이 1~11은 승인됨: AirlockDoors/OxygenV2/ContributionsV2 신규, RoleUpdate 문자열 키, warning은 15초 경보 뒤, 추가 필드, Records 개인별, 원격 회수 겸용, 핀 규칙, RankingV2, 출구 40 stud 출발 등).
-3. 커밋(여러 개로 나눠: feat(shared) 규칙과 설정, feat(i18n), feat(server), feat(client), feat(world), test, docs, assets/data) 후 푸시 1회(오늘 남은 1회).
-4. Studio 시험: 리드가 `rojo serve`를 백그라운드로 켜고(저장소 루트, Rokit PATH) 사용자는 Studio Rojo 플러그인에서 Connect만 누름. 이후 MCP로 Play 시작/정지, Output 읽기(get_console_output), 화면 캡처.
-   - 확인 목록: 부팅 로그와 오류, 미션 선택 지도(A/D 잠김), 착륙 연출, HUD(EN/KR 전환), 에어록 점검과 산소, 패널 설치, 그린하우스 착공과 솟아오름, 자율주행 파견과 지도 아이콘, SEP 15초 경보와 대피, GST 지도 지직거림, 핀 화살표, 걸어서 수리 흐름, 충돌 판정 오판, 결과 화면과 순위, 그린하우스 방향(FarmPad Yaw), 에어록 크기, 바닥 판 묻힘, DoubleSided 경고, Studio API 접근 없으면 기록 offline 표시.
-   - 시험 결과로 BALANCE_LOG 7.6을 채우고 시작 식량(35~38) 등 미세 조정.
-5. 번역 검수: 번역 담당 2명이 CSV(481행)를 나눠 교차 검수(7~12세 쉬운 영어, 사실 문구 정확성), 리드 최종 확인.
-6. `rules_v2.json` 생성 도구(Mahi 공유, Q22).
-7. B 발전 기지(V2_PLAN 5절, 15.7): 지원에게 MissionB 표시와 더 험한 지형 요청, 타워 3기와 수송망, 로버 2대.
-8. 발표 자료 마무리(PRESENTATION_BRIEF의 [확인 필요] 남은 것: 비즈니스 모델(재은), 데모 영상), 정리 대상: v1 파일 삭제(B 전에), Figma Page 1 API 키 스크린샷 삭제 권고.
+## 7. 다음 할 일 (순서, 2026-11-15)
+1. Studio 확인(사용자 허락: 수정되면 바로 Play 가능. 단 Play 시작 전 알리고, 사용자가 직접 할 때는 건드리지 않는다):
+   - 에어록 프롬프트와 비용 줄은 사용자 눈으로 확인(MCP screen_capture는 PlayerGui 아래 BillboardGui를 찍지 못함, 빨간 시험 상자로 확인). 디버그는 서버에서 `workspace:SetAttribute("DebugPrompts", true)`.
+   - 직접 운전 충돌 오판, 걸어서 수리 흐름, 주차 브레이크가 걸린 로버 타기, 충전 막힘 이유(에너지/판 밖), 멀티 역할 미션(2인 이상), 에어록이 동쪽(+X)을 보는 방향이 괜찮은지, 언어 전환.
+   - 확인 완료: HUD, 배터리 칩, 건물 카드, 새 에어록 모델과 계단 해치 출입구, 가만히 둔 로버 배터리 유지, 얼음 70 stud 안 보임과 30 stud 이름표 "Ice Site N"과 덩어리.
+   - 결과로 BALANCE_LOG 7.6을 채우고, 2인 처음 은메달(22 -> 16%) 조정 여부 판단(fb-balance 추천: 그대로 두고 실측 뒤).
+2. 번역 검수(CSV 522행, 7 ~ 12세 쉬운 영어와 사실 문구, 리뷰 2명이 제안하고 fb-i18n이 반영).
+3. `rules_v2.json` 생성 도구(Mahi 웹판 공유, Q22).
+4. B 발전 기지(V2_PLAN 5절, 15.7). `ServerStorage.Assets.SolarTower` 준비됨.
+5. 발표 자료(PRESENTATION_BRIEF [확인 필요]: 비즈니스 모델, 데모 영상), v1 파일 삭제(B 전), Figma Page 1 API 키 스크린샷 삭제 권고. Studio API 접근과 최대 인원 4는 여전히 보류(메뉴 위치 추측 금지).
+- 참고: 에셋 ID 203785492가 "Asset type does not match" 경고를 낸다(소리나 이미지 ID 종류 불일치로 추정, 아직 원인 미확인).
 
 ## 8. 사용자 작업 방식 (요약)
 - 응답은 한국어, 짧게 결론 먼저. 큰 결정은 추천 답과 함께 하나씩 묻는다. 기술적인 세부는 리드가 정하고 알린다.
