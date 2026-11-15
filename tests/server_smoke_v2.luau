@@ -293,6 +293,20 @@ end)
 roblox.implementMethod("RunService", "IsServer", function()
     return true
 end)
+-- BindableFunction.OnInvoke / Invoke (Lune에 없다. DevBridge FrontierDev 검사용)
+local invokeHandlers = setmetatable({}, { __mode = "k" })
+roblox.implementProperty("BindableFunction", "OnInvoke", function(inst)
+    return invokeHandlers[inst]
+end, function(inst, fn)
+    invokeHandlers[inst] = fn
+end)
+roblox.implementMethod("BindableFunction", "Invoke", function(inst, ...)
+    return invokeHandlers[inst](...)
+end)
+-- 라이브 서버처럼 false (DevBridge.install이 FrontierDev를 만들지 않아야 한다)
+roblox.implementMethod("RunService", "IsStudio", function()
+    return false
+end)
 roblox.implementProperty("RemoteEvent", "OnServerEvent", function(inst)
     return signalFor(inst, "OnServerEvent")
 end)
@@ -912,6 +926,7 @@ M.Roles = loadModule(Server:FindFirstChild("Roles"))
 M.RoleMissions = loadModule(Server:FindFirstChild("RoleMissions"))
 M.RecordsV2 = loadModule(Server:FindFirstChild("RecordsV2"))
 M.SpaceWeather = loadModule(Server:FindFirstChild("SpaceWeather"))
+M.DevBridge = loadModule(Server:FindFirstChild("DevBridge"))
 M.MissionClock = loadModule(Server:FindFirstChild("MissionClock"))
 M.ClientMath = loadModule(Shared:FindFirstChild("ClientMath"))
 M.WorldMath = loadModule(Shared:FindFirstChild("WorldMath"))
@@ -3114,6 +3129,155 @@ do
     for _, p in { gu, ha, io } do
         leave(p)
     end
+end
+
+print("[5판 Studio 개발 다리 FrontierDev]")
+do
+    local dev = M.DevBridge
+    check(
+        dm:GetService("ServerStorage"):FindFirstChild("FrontierDev") == nil,
+        "라이브(IsStudio false): FrontierDev 없음"
+    )
+    local made = dev.install(true)
+    check(
+        made ~= nil and made.Parent == dm:GetService("ServerStorage") and made.Name == "FrontierDev",
+        "Studio(IsStudio true): ServerStorage.FrontierDev (BindableFunction)"
+    )
+    check(dev.install(false) == nil, "install(false)는 아무것도 만들지 않는다")
+    local viaInvoke = made:Invoke("probe")
+    check(
+        type(viaInvoke) == "table" and viaInvoke.ok == true and viaInvoke.phase ~= nil,
+        'FrontierDev:Invoke("probe")가 표를 돌려준다'
+    )
+    check(dev.run("nope").ok == false, "모르는 명령: ok false + 명령 목록")
+    local jo = makePlayer("Jo", 1010)
+    moveTo(jo, H.landerInside())
+    join(jo)
+    local p0 = dev.run("probe")
+    check(
+        p0.ok and p0.phase == "selecting" and p0.day == nil,
+        "probe: selecting, Rules 상태 없음"
+    )
+    check(dev.run("setResources", { energy = 1 }).ok == false, "playing 전 setResources 거절")
+    local w = dev.run("setWindow", { id = "2023-01-27" })
+    check(
+        w.ok and w.nextWindow == "2023-01-27" and w.appliedNow == false,
+        "setWindow: 다음 판 구간"
+    )
+    check(dev.run("setWindow", { id = "nope" }).ok == false, "setWindow: 없는 구간 거절")
+    local sel = dev.run("selectMission", { id = "C" })
+    check(sel.ok and M.MissionFlow.getPhase() == "landing", "selectMission C: landing")
+    advance(M.MissionFlow.CONFIG.landingSeconds + 0.5)
+    local p1 = dev.run("probe")
+    check(
+        p1.phase == "playing"
+            and p1.day == 1
+            and p1.window == "2023-01-27"
+            and p1.clockRunning == true
+            and type(p1.resources.energy) == "number",
+        "probe: playing, day 1, 구간 2023-01-27, 시계 돎"
+    )
+    check(
+        dev.run("clock", { run = false }).state.clockRunning == false,
+        "clock run false: 시계 멈춤"
+    )
+    local res = dev.run("setResources", { energy = 77, water = 66 })
+    check(
+        res.ok and res.state.resources.energy == 77 and res.state.resources.water == 66,
+        "setResources: 에너지 77, 물 66 (식량 그대로)"
+    )
+    local panels = dev.run("givePanels", { count = 5 })
+    check(
+        panels.ok
+            and panels.state.panels == 5
+            and #Workspace.MissionRuntime.Base.SolarField.Panels:GetChildren() == 5,
+        "givePanels 5: 월드 패널 5장"
+    )
+    check(
+        dev.run("givePanels", { count = 2, add = true }).state.panels == 7,
+        "givePanels add 2 -> 7"
+    )
+    local farm = dev.run("completeFacility", { id = "farm", leaveDays = 1 })
+    check(
+        farm.ok
+            and farm.state.facilities.farm.status == "building"
+            and farm.state.facilities.farm.daysLeft == 1
+            and Workspace.MissionRuntime.Facilities:FindFirstChild("farm") ~= nil,
+        "completeFacility farm leaveDays 1: 건설 중 1일 (솟아오름 장면)"
+    )
+    local step = dev.run("advance", { days = 1 })
+    check(
+        step.advanced == 1 and step.state.day == 2 and step.state.facilities.farm.status == "active",
+        "advance 1: day 2, 그린하우스 완공"
+    )
+    local led = dev.run("completeFacility", { id = "hydroponics" })
+    check(
+        led.ok
+            and led.state.facilities.hydroponics.status == "active"
+            and led.state.facilities.pipe.status == "active"
+            and table.find(led.alsoCompleted, "pipe") ~= nil,
+        "completeFacility hydroponics: 선행 파이프도 완공"
+    )
+    check(
+        dev.run("completeFacility", { id = "tower" }).ok == false,
+        "completeFacility: 모르는 시설 거절"
+    )
+    -- 사건 날로 뛰기: 2023-01-27 구간 SEP 29일 -> 28일에 내려 하루 마감으로 들어간다 (문 잠금)
+    local sepDay = nil
+    for _, e in H.rules().weather.events do
+        if e.kind == "SEP" and sepDay == nil then
+            sepDay = e.day
+        end
+    end
+    local jump = dev.run("jumpToDay", { day = sepDay })
+    check(
+        jump.ok
+            and jump.landedOn == sepDay - 1
+            and jump.advanced == 1
+            and jump.state.day == sepDay
+            and jump.state.weatherToday.sep == true
+            and M.AirlockDoors.isLocked(),
+        string.format(
+            "jumpToDay %d(SEP): %d일에 내려 advance 1, 문 잠금",
+            sepDay,
+            sepDay - 1
+        )
+    )
+    local calm = dev.run("jumpToDay", { day = sepDay + 4 })
+    check(
+        calm.ok and calm.state.day == sepDay + 4 and not M.AirlockDoors.isLocked(),
+        "jumpToDay(사건 없는 날): 효과 꺼짐, 문 열림"
+    )
+    check(dev.run("jumpToDay", { day = 999 }).ok == false, "jumpToDay: 범위 밖 거절")
+    local other = nil
+    for _, window in loadModule(Shared:FindFirstChild("SpaceWeatherData")).windows do
+        if window.id ~= "2023-01-27" and other == nil then
+            other = window.id
+        end
+    end
+    local swapped = dev.run("setWindow", { id = other })
+    check(
+        swapped.ok and swapped.appliedNow == true and swapped.state.window == other,
+        "setWindow(진행 중): 지금 판 구간도 " .. tostring(other)
+    )
+    local gold = dev.run("nearGold")
+    check(
+        gold.ok
+            and gold.state.facilities.hydroponics.status == "building"
+            and gold.state.facilities.hydroponics.daysLeft == 1
+            and gold.state.facilities.led.status == "active"
+            and gold.state.facilities.nutrient.status == "active"
+            and gold.state.facilities.airlock.status == "active",
+        "nearGold: 수경 재배만 1일 남김, 나머지 완공"
+    )
+    dev.run("advance", { days = 1 })
+    check(
+        M.MissionFlow.getPhase() == "result" and M.MissionFlow.getResult().medal == "gold",
+        "nearGold 뒤 advance 1: 금메달 결과"
+    )
+    check(dev.run("advance", { days = 1 }).ok == false, "결과 화면에서 advance 거절")
+    made:Destroy()
+    leave(jo)
 end
 
 -- 페이로드 검사 ----------------------------------------------------------------

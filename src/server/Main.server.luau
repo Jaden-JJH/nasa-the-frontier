@@ -4,10 +4,13 @@
 -- MissionFlow.start가 문(AirlockDoors), 로버(RoverFleet), 상호작용(Interactions)을 기지에 붙이고 미션 선택을 연다.
 -- v1 부팅(DevMap, GameFlow, Construction, ModulePanels, WaterLoop, Events, LandingSite, KitImports)은 더 이상 돌리지 않는다.
 -- v1 파일은 지우지 않았다(다음 라운드에 정리).
+-- Studio(RunService:IsStudio())일 때만 DevBridge가 ServerStorage.FrontierDev(BindableFunction)를 만든다.
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 
 local Remotes = require(ReplicatedStorage.Shared.Remotes)
+local DevBridge = require(script.Parent.DevBridge)
 local MissionFlow = require(script.Parent.MissionFlow)
 local MissionWorld = require(script.Parent.MissionWorld)
 local PlayerPrefs = require(script.Parent.PlayerPrefs)
@@ -27,3 +30,5 @@ if not ok then
 end
 MissionWorld.placeBase()
 MissionFlow.start(BOOT_MISSION)
+-- Studio에서만: ServerStorage.FrontierDev (데모 촬영용 장면 명령, 라이브 서버에는 만들지 않는다)
+DevBridge.install(RunService:IsStudio())

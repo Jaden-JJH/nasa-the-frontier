@@ -1138,6 +1138,11 @@ function MissionFlow.debugAdvanceDay()
     onDayTick()
 end
 
+-- 미션 선택을 서버에서 확정한다 (DevBridge selectMission, Studio 재촬영용. selecting일 때만)
+function MissionFlow.debugConfirmMission(id: string)
+    confirmMission(id)
+end
+
 MissionFlow.flow = flow
 
 return MissionFlow
