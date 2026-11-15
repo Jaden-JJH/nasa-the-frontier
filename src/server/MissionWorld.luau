@@ -115,6 +115,7 @@ local CFG = {
         lightColor = { 235, 242, 255 },
         lightRange = 16,
         lightBrightness = 1.2,
+        tag = "ShelterInterior", -- 화면 InteriorView가 찾는 태그 (카메라가 방 밖이면 로컬로 숨김)
     },
     shelters = {
         lander = {
@@ -140,6 +141,10 @@ local CFG = {
             console = false,
             panel = true,
             signKey = "world.sign.airlock",
+            -- [2026-11-15 Studio] 실내 방은 계단 해치 모듈 안만: 출입구(DoorOffsetX) 가운데, 폭 10, 높이 8.5, 문 뒤 길이 30
+            -- (리드 지시). 산소 구역, 대피 지점도 이 방. Airlock.fbx 실측: 모듈은 반지름 약 5, 중심 높이 약 6(바닥 약 1)인
+            -- 원통이라 바닥이 기초 판인 방은 원 안에 다 들어가지 못한다. 바깥에서 안 보이게 하는 것은 InteriorView(로컬 숨김)
+            room = { width = 10, height = 8.5, length = 30 },
         },
     } :: { [string]: any },
     -- [Q28, Q33] 에어록 상태별 산소 구역 종류: 점검 전과 멈춤은 유지, 가동은 회복
@@ -1657,21 +1662,34 @@ end
 -- 대피처 안 보이는 방 (CFG.interior): 산소 구역 크기 상자 안쪽 면에 얇은 벽 4면(앞 벽은 doorX에 출입구), 천장, 바닥 판,
 -- 실내 빛, 안쪽 문 상태등(entry에 둔다). 벽과 천장은 충돌하고 CanQuery를 켜 둔다(카메라가 벽 뒤로 가지 않고 방 안으로 당겨진다).
 -- shape가 octagon이면 팔각 벽 안에 들어가는 정사각형. 반환: 만든 모델
-local function buildInterior(
-    parent: Instance,
-    entry: Instance,
-    frame: CFrame,
+type RoomBox = { x0: number, x1: number, z0: number, z1: number, height: number }
+
+-- 실내 방 상자 (frame 로컬). room(셸터 spec.room: width, height, length)이 있으면 출입구(doorX) 가운데, 문 뒤에서
+-- length만큼, 산소 구역 안으로 자른 상자. 없으면 산소 구역 크기(팔각이면 대각 벽 안). 너무 작으면 nil
+local function interiorBox(
     lo: Vector3,
     hi: Vector3,
     zoneMin: Vector3,
     zoneMax: Vector3,
     doorX: number,
     doorZ: number,
-    shape: string
-): Model?
+    shape: string,
+    room: any?
+): RoomBox?
     local e = CFG.entry
     local c = CFG.interior
     local t = c.wallThickness
+    if room then
+        local half = math.max(room.width / 2, e.doorGap / 2 + t + c.minSideWall)
+        local x0 = math.max(zoneMin.X + c.inset, doorX - half)
+        local x1 = math.min(zoneMax.X - c.inset, doorX + half)
+        local z0 = doorZ + e.doorThickness / 2 + c.frontGap
+        local z1 = math.min(zoneMax.Z - c.inset, z0 + room.length)
+        if x1 - x0 < e.doorGap + 2 * t or z1 - z0 < 2 * t + 1 then
+            return nil
+        end
+        return { x0 = x0, x1 = x1, z0 = z0, z1 = z1, height = math.max(room.height, c.minHeight) }
+    end
     local x0, x1 = zoneMin.X + c.inset, zoneMax.X - c.inset
     local z0 = doorZ + e.doorThickness / 2 + c.frontGap
     local z1 = zoneMax.Z - c.inset
@@ -1687,11 +1705,22 @@ local function buildInterior(
         x0, x1 = math.max(x0, cx - half), math.min(x1, cx + half)
     end
     local height = math.clamp(zoneMax.Y, c.minHeight, c.maxHeight)
-    local gapLeft, gapRight = doorX - e.doorGap / 2, doorX + e.doorGap / 2
     if x1 - x0 < e.doorGap + 2 * t or z1 - z0 < 2 * t + 1 then
         return nil
     end
+    return { x0 = x0, x1 = x1, z0 = z0, z1 = z1, height = height }
+end
+
+-- 실내 방 (box는 interiorBox). 모델에 태그 CFG.interior.tag: 화면(InteriorView)이 카메라가 방 밖이면 이 모델을
+-- 로컬로 숨긴다(LocalTransparencyModifier). 그래서 바깥에서는 에셋 외형만 보인다 (2026-11-15 Studio: 방이 캡슐을 덮음)
+local function buildInterior(parent: Instance, frame: CFrame, room: RoomBox, doorX: number): Model
+    local e = CFG.entry
+    local c = CFG.interior
+    local t = c.wallThickness
+    local x0, x1, z0, z1, height = room.x0, room.x1, room.z0, room.z1, room.height
+    local gapLeft, gapRight = doorX - e.doorGap / 2, doorX + e.doorGap / 2
     local model = newModel("Interior", parent)
+    model:AddTag(c.tag)
     local color = rgb(c.color)
     local function box(name: string, size: Vector3, center: Vector3, collide: boolean): Part
         local part = newPart({
@@ -1774,7 +1803,7 @@ local function buildInterior(
         color = rgb(CFG.colors.doorLocked),
         material = Enum.Material.Neon,
         canCollide = false,
-        parent = entry,
+        parent = model, -- AirlockDoors가 Entry와 Interior에서 DoorLamp를 찾는다
     })
     lamp.CanQuery = false
     lamp.CastShadow = false
@@ -1821,12 +1850,22 @@ local function buildShelter(id: string, parent: Instance)
     local lo, hi = boundsIn(visual, frame)
     lo = Vector3.new(lo.X, 0, lo.Z)
     local shape = if info.shape == "Cylinder" and source ~= "placeholder" then "octagon" else "box"
-    local entryModel, door, zoneMin, zoneMax, doorZ, doorX =
+    local _, door, zoneMin, zoneMax, doorZ, doorX =
         buildEntry(model, frame, lo, hi, shape, true, spec.signKey, doorOffset)
     model:SetAttribute("DoorX", doorX)
+    local room: RoomBox? = nil
     if source ~= "placeholder" then
-        buildInterior(model, entryModel, frame, lo, hi, zoneMin, zoneMax, doorX, doorZ, shape)
+        room = interiorBox(lo, hi, zoneMin, zoneMax, doorX, doorZ, shape, spec.room)
     end
+    if room then
+        buildInterior(model, frame, room, doorX)
+        if spec.room then
+            -- 산소 구역, 대피 지점, 콘솔을 방 안으로 (출입구 앞 zoneDoorMargin은 그대로 구역에 넣는다)
+            zoneMin = Vector3.new(room.x0, 0, zoneMin.Z)
+            zoneMax = Vector3.new(room.x1, room.height, room.z1)
+        end
+    end
+    local backZ = if room and spec.room then room.z1 else hi.Z - CFG.entry.zoneInset
 
     local e = CFG.entry
     local zone = newMarker(
@@ -1848,15 +1887,18 @@ local function buildShelter(id: string, parent: Instance)
         console = nil,
         panel = nil,
         light = nil,
-        inside = frame * CFrame.new(doorX, e.insideHeight, (doorZ + hi.Z) / 2), -- 출입구 안쪽
+        inside = frame * CFrame.new(doorX, e.insideHeight, (doorZ + backZ) / 2), -- 출입구 안쪽
     }
     if spec.console then
         local size = vec(CFG.console.size)
         local console = newPart({
             name = "Console",
             size = size,
-            cframe = frame
-                * CFrame.new(0, size.Y / 2, hi.Z - e.zoneInset - CFG.console.backGap - size.Z / 2),
+            cframe = frame * CFrame.new(
+                if room and spec.room then doorX else 0,
+                size.Y / 2,
+                backZ - CFG.console.backGap - size.Z / 2
+            ),
             color = rgb(CFG.colors.console),
             material = Enum.Material.Metal,
             parent = model,

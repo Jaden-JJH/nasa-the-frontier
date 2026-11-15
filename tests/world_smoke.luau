@@ -1183,12 +1183,14 @@ do
                 )
             end
             local lamps = 0
-            for _, child in entryModel:GetChildren() do
-                if
-                    child:GetAttribute("DoorLamp") == true
-                    and child.Material == Enum.Material.Neon
-                then
-                    lamps += 1
+            for _, holder in { entryModel, room } do
+                for _, child in holder:GetChildren() do
+                    if
+                        child:GetAttribute("DoorLamp") == true
+                        and child.Material == Enum.Material.Neon
+                    then
+                        lamps += 1
+                    end
                 end
             end
             check(
@@ -1199,6 +1201,71 @@ do
                 doorPart:GetAttribute("SlideX") == 1 or doorPart:GetAttribute("SlideX") == -1,
                 "문: " .. id .. " 미끄러질 방향 SlideX"
             )
+            check(
+                room:HasTag(MissionWorld.CONFIG.interior.tag),
+                "실내: "
+                    .. id
+                    .. " 태그 ShelterInterior (카메라가 방 밖이면 화면에서 숨김)"
+            )
+            -- [2026-11-15 Studio] 실내 방 꼭짓점 8개가 외형 경계 안. 에어록은 계단 해치 모듈(출입구 X 가운데, 폭 10) 안
+            local spec = MissionWorld.CONFIG.shelters[id].room
+            local cornersIn = true
+            for _, cx in { rlo.X, rhi.X } do
+                for _, cy in { rlo.Y, rhi.Y } do
+                    for _, cz in { rlo.Z, rhi.Z } do
+                        local inVisual = cx >= vlo.X - 1e-3
+                            and cx <= vhi.X + 1e-3
+                            and cy >= -1e-3
+                            and cy <= vhi.Y + 1e-3
+                            and cz >= vlo.Z - 1e-3
+                            and cz <= vhi.Z + 1e-3
+                        local inModule = spec == nil
+                            or math.abs(cx - doorX) <= spec.width / 2 + 1e-3
+                        if not inVisual or not inModule then
+                            cornersIn = false
+                        end
+                    end
+                end
+            end
+            check(
+                cornersIn,
+                "실내: "
+                    .. id
+                    .. " 방 꼭짓점 8개가 외형 경계(와 해치 모듈 폭) 안"
+            )
+            if spec then
+                local zlo2, zhi2 = H.boundsIn(shelter.zone, frame)
+                check(
+                    rhi.X - rlo.X <= spec.width + 1e-3
+                        and H.near((rlo.X + rhi.X) / 2, doorX, 0.01)
+                        and H.near(rhi.Y, spec.height, 0.01)
+                        and rhi.Z - rlo.Z <= spec.length + 1e-3
+                        and H.near(zlo2.X, rlo.X, 0.01)
+                        and H.near(zhi2.X, rhi.X, 0.01)
+                        and H.near(zhi2.Y, spec.height, 0.01)
+                        and H.near(zhi2.Z, rhi.Z, 0.01),
+                    string.format(
+                        "실내: %s 해치 모듈 방 %.1f x %.1f x %.1f (출입구 X %.2f 가운데), 산소 구역 = 방",
+                        id,
+                        rhi.X - rlo.X,
+                        rhi.Y,
+                        rhi.Z - rlo.Z,
+                        doorX
+                    )
+                )
+                -- 참고: Airlock.fbx 실측 모듈 원통(반지름 약 5, 중심 높이 약 6)과 방 모서리 거리 (Studio 확인용)
+                local scale = shelter.model:GetAttribute("AssetScale") or 1
+                local half = (rhi.X - rlo.X) / 2
+                print(
+                    string.format(
+                        "  INFO %s 방 모서리와 모듈 원통 중심 거리: 위 %.2f, 아래 %.2f (원통 반지름 %.2f)",
+                        id,
+                        math.sqrt(half ^ 2 + (rhi.Y - 6 * scale) ^ 2),
+                        math.sqrt(half ^ 2 + (6 * scale) ^ 2),
+                        5 * scale
+                    )
+                )
+            end
         end
     end
     local floor = lander.model:FindFirstChild("Floor")

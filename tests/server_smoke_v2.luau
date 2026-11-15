@@ -1002,9 +1002,11 @@ do
         local doorPart = entry.Door
         local closedAt = doorPart.CFrame.Position
         local lamps = {}
-        for _, child in entry:GetChildren() do
-            if child:GetAttribute("DoorLamp") == true then
-                table.insert(lamps, child)
+        for _, holder in { entry, entry.Parent:FindFirstChild("Interior") } do
+            for _, child in holder:GetChildren() do
+                if child:GetAttribute("DoorLamp") == true then
+                    table.insert(lamps, child)
+                end
             end
         end
         local red = Color3.fromRGB(table.unpack(M.AirlockDoors.CONFIG.lampClosed))

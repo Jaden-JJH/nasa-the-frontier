@@ -604,4 +604,14 @@ return function(t)
             t.falsy(ClientMath.pipePickOpen(nil))
         end
     )
+
+    t.test("ClientMath: 상자 안 판정 (실내 방 로컬 숨김)", function()
+        local size = { X = 10, Y = 8, Z = 30 }
+        t.truthy(ClientMath.insideBox({ X = 0, Y = 0, Z = 0 }, size), "가운데")
+        t.truthy(ClientMath.insideBox({ X = 4.9, Y = -3.9, Z = 14.9 }, size), "모서리 안")
+        t.falsy(ClientMath.insideBox({ X = 5.2, Y = 0, Z = 0 }, size), "옆으로 밖")
+        t.truthy(ClientMath.insideBox({ X = 5.2, Y = 0, Z = 0 }, size, 0.3), "여유 안")
+        t.falsy(ClientMath.insideBox({ X = 0, Y = 4.5, Z = 0 }, size, 0.3), "천장 위")
+        t.falsy(ClientMath.insideBox(nil, size), "잘못된 값")
+    end)
 end

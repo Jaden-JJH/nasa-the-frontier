@@ -868,6 +868,21 @@ function ClientMath.iceLabel(site: any): { [string]: any }
     return { key = "map.ice.label", args = { n = ClientMath.iceNumber(site) } }
 end
 
+-- 상자 로컬 좌표 point(X, Y, Z)가 크기 size인 상자(가운데 원점) 안인지. margin만큼 넓혀 본다
+-- (대피처 실내 방: 카메라가 방 안일 때만 방을 보인다, InteriorView)
+function ClientMath.insideBox(point: any, size: any, margin: number?): boolean
+    if type(point) ~= "table" and typeof(point) ~= "Vector3" then
+        return false
+    end
+    if type(size) ~= "table" and typeof(size) ~= "Vector3" then
+        return false
+    end
+    local m = if isNumber(margin) then margin :: number else 0
+    return math.abs(point.X) <= size.X / 2 + m
+        and math.abs(point.Y) <= size.Y / 2 + m
+        and math.abs(point.Z) <= size.Z / 2 + m
+end
+
 -- 물 파이프 지점을 지금 고를 수 있는지: 파이프가 해금(available)됐고 아직 지점이 없다. 역할과 무관
 -- (CONTRACT_V2 9.1 7번 SetPipeSite는 역할 제한 없음. 지도 전체 보기와 핀만 관제사 전용, Q25)
 function ClientMath.pipePickOpen(state: any): boolean

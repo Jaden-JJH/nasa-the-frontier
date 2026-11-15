@@ -7,7 +7,7 @@
 --      프롬프트를 "잠김" 키로 바꾼다. 누르면 그 플레이어에게만 "밖에 나갈 수 없어요" 토스트.
 -- MissionWorld가 만든 MissionRuntime 안의 Entry.Door를 모두 찾는다. MissionWorld.reset 뒤에는 attach를 다시 부른다.
 -- [2026-11-15 플레이 테스트] 열림과 잠김이 구별되지 않았다: 열면 문이 옆으로 미끄러져 비키고(Attribute SlideX 쪽, 문 폭만큼)
--- 같은 Entry 안 상태등(Attribute DoorLamp인 Neon 파트, 바깥과 안쪽)이 초록, 닫히면 제자리에 불투명하게 서고 빨강,
+-- 상태등(Attribute DoorLamp인 Neon 파트, 바깥은 Entry, 안쪽은 Interior)이 초록, 닫히면 제자리에 불투명하게 서고 빨강,
 -- SEP 잠금 동안은 빨강이 깜빡인다.
 
 local PromptKit = require(script.Parent.PromptKit)
@@ -178,10 +178,18 @@ function AirlockDoors.attach(root: Instance)
                 hold = 0,
                 distance = CFG.promptDistance,
             })
+            -- 상태등: Entry(바깥)와 같은 대피처의 Interior(안쪽)에서 Attribute DoorLamp인 파트
             local lamps: { BasePart } = {}
-            for _, sibling in parent:GetChildren() do
-                if sibling:IsA("BasePart") and sibling:GetAttribute("DoorLamp") == true then
-                    table.insert(lamps, sibling)
+            local holders: { Instance } = { parent }
+            local room = parent.Parent and parent.Parent:FindFirstChild("Interior")
+            if room then
+                table.insert(holders, room)
+            end
+            for _, holder in holders do
+                for _, sibling in holder:GetChildren() do
+                    if sibling:IsA("BasePart") and sibling:GetAttribute("DoorLamp") == true then
+                        table.insert(lamps, sibling)
+                    end
                 end
             end
             local side = descendant:GetAttribute("SlideX")

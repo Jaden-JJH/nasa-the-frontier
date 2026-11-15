@@ -43,6 +43,7 @@ local ResultV2 = require(script.Parent.ResultV2)
 local BuildingInfoUI = require(script.Parent.BuildingInfoUI)
 local RoverChargeSign = require(script.Parent.RoverChargeSign)
 local ScoutMarkers = require(script.Parent.ScoutMarkers)
+local InteriorView = require(script.Parent.InteriorView)
 
 local RUNTIME_FOLDER = "MissionRuntime"
 local RESET_RETRY_COUNT = 10
@@ -233,6 +234,7 @@ local MODULES = {
     { name = "HUDV2", module = HUDV2 },
     { name = "BuildingInfoUI", module = BuildingInfoUI }, -- HUDV2 뒤 (compact 위치가 HUD 오른쪽 열을 따른다)
     { name = "RoverChargeSign", module = RoverChargeSign },
+    { name = "InteriorView", module = InteriorView },
     { name = "ScoutMarkers", module = ScoutMarkers },
     { name = "HeadStatus", module = HeadStatus },
     { name = "WeatherFX", module = WeatherFX },
