@@ -14,3 +14,8 @@ globalTypes.d.luau
 
 # local secrets (NASA API key etc.)
 .env
+
+# private team notes (meeting transcripts, internal memos) - keep local only
+docs/meetings/
+docs/PPT_자료_*.txt
+docs/개발브리프_*.txt
