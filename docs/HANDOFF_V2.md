@@ -35,7 +35,7 @@
 - zsh 주의: `git show "${rev}:path"`처럼 중괄호를 쓴다(`$rev:s...`는 zsh 변형 기호로 해석됨).
 
 ## 4. 커밋 상태
-- 저장소: **`Jaden-JJH/nasa-the-frontier`(비공개)가 origin.** 옛 `Jaden-JJH/the-frontier`는 remote `legacy`(푸시하지 않음). 협업자(쓰기, 개인 저장소 최대 권한): jiwon-lab(수락), MuhtasimMahim, ryujaen(초대).
+- 저장소: **`Jaden-JJH/the-frontier-NSAC`(비공개)가 origin.** 옛 `Jaden-JJH/the-frontier`는 remote `legacy`(푸시하지 않음). 협업자(쓰기, 개인 저장소 최대 권한): jiwon-lab(수락), MuhtasimMahim, ryujaen(초대).
 - 마지막 푸시 `cd82738`(2026-11-15). 2026-11-15 푸시 3회를 모두 썼다. 그 뒤 커밋은 다음 날 푸시하거나 사용자에게 `--no-verify` 허락을 다시 받는다.
 - 커밋 메시지 영어 conventional, AI 표기 없음. 에이전트 작업 중에는 커밋하지 않는다.
 - 팀원 테스트 방식: 팀원은 Team Create로 같은 플레이스를 열고 Play만 한다. Rojo Connect는 Jaden(리드)만(여러 명이 연결하면 옛 코드가 덮어쓸 수 있음).
