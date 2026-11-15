@@ -29,7 +29,7 @@
 - 에이전트끼리 서로 기다리다 멈추는 일이 두 번 있었다(키 이름을 다른 담당이 이미 바꿔 둔 경우). 담당이 "기다리는 중"이라고 하면 리드가 CSV나 코드를 직접 보고 정확한 이름을 알려 준다.
 
 ## 3. 검사 상태 (2026-11-15 03:00)
-- `lune run tests/run.luau` 종료 코드 0: 단위 300(Client 포함), 월드 스모크 246, v2 서버 스모크 300, i18n build --check, lint 누락 0. stylua 통과, selene 오류 0 경고 0.
+- `lune run tests/run.luau` 종료 코드 0: 단위 302(Client 포함), 월드 스모크 271, v2 서버 스모크 315, rules export --check, i18n build --check, lint 누락 0. stylua 통과, selene 오류 0 경고 0.
 - 검사 명령(저장소 루트): `export PATH="$HOME/.rokit/bin:$PATH"`; `stylua --check src tests`; `selene src tests`(경고도 CI 실패); `lune run tests/run.luau`; `rm -rf build`.
 - zsh 주의: `git show "${rev}:path"`처럼 중괄호를 쓴다(`$rev:s...`는 zsh 변형 기호로 해석됨).
 
@@ -54,12 +54,12 @@
 - 정지 규칙: 우선순위 정지(LED, 영양분, 수경, 파이프, 에어록, 그린하우스 마지막) + 시설 유지비를 대원 에너지보다 먼저(대원 에너지 미납은 실패 아님, 에너지 감점과 경고 배너)(BALANCE_LOG 6.2).
 - 밸런스 확정(사용자 "추천대로"): 시작 에너지 40, 물 50, **식량 37**, 패널 13장 x 2, LED/영양분 E35 W20, LED 유지 5, 파이프/수경 E60 W40, 자율주행 하루 에너지 12, 직접 운전 배터리 0.15/s, 부스터 x2, 충전 시 에너지 20 남김, 인원 비례 소비 끔. 결과는 BALANCE_LOG 7.5.1(솔로 처음 실패 28%, 2회차 20%, 2인 처음 32%, 4인 처음 10%, 모두 식량 실패). 사용자 목표는 "조금 쉽게" 조정 뒤 이 값.
 - 걸어서 수리: 고친 대원을 로버 운전석에 태우고 직접 몰고 귀환(순간 이동 없음). 걷기 출발은 에어록, 한도 704 stud = 882 m.
-- 직접 운전 충돌: 지형 포함 급정거 감지(0.25초 안 속도 12 이상에서 절반 아래) + RoverHazard 태그. Studio에서 오판 보정 필요.
+- 직접 운전 충돌: CONTRACT 9.1 8번(2026-11-15 S13, 정면 가파른 벽이나 RoverHazard만, 기준 속도 15).
 - 얼음 후보지 이름은 모든 화면에서 "Ice Site N / 얼음 후보지 N"(중첩 Msg map.ice.label).
 - 시설 이름: Greenhouse/그린하우스, LED Grow Lights/LED 조명, Nutrient System/영양분 관리, Hydroponics/수경 재배, Water Pipe/물 파이프. 관제사 역할 영어 "Mission Control". 영어 날짜는 "August 12, 2024".
 - 사실 확인: 아르테미스 III는 2027년 저궤도 시험, 첫 착륙은 2028년 아르테미스 IV(NASA 2026-02-27 직접 확인) -> "2024년 NASA가 발표한 남극 착륙 후보 지역 9곳(원래 아르테미스 III용)". 얼음 = "탐사 후보지". GST = "지구 쪽 지원 시스템 장애". 지형 = 지원의 LOLA 데이터(PRESENTATION_BRIEF 3.7).
 - 그린하우스 LED 바와 수경 베드는 해당 업그레이드 가동 때만 보임. 사실 카드 artemis는 첫 착륙 직후, 긴 카드는 약 14초 표시. Tip `tip.pause_to_save`는 첫 업그레이드 가동 직후.
-- 웹판은 Mahi가 PlayCanvas로 만든다. 공유 파일: `i18n/strings.json`, `i18n/loc.js`, `i18n/golden.json`, `data/donki/windows.json`. 규칙 수치 공유용 `rules_v2.json` 생성 도구는 아직 없음(할 일).
+- 웹판은 Mahi가 PlayCanvas로 만든다. 공유 파일: `i18n/strings.json`, `i18n/loc.js`, `i18n/golden.json`, `data/donki/windows.json`. 규칙 수치 공유용 `data/rules_v2.json`은 `tools/rules/export.luau`가 만들고 run.luau가 `--check`로 검사(2026-11-15). MissionConfig를 바꾸면 export를 다시 돌린다.
 
 ## 7. 다음 할 일 (순서, 2026-11-15)
 1. Studio 확인(사용자 허락: 수정되면 바로 Play 가능. 단 Play 시작 전 알리고, 사용자가 직접 할 때는 건드리지 않는다):
@@ -68,7 +68,7 @@
    - 확인 완료: HUD, 배터리 칩, 건물 카드, 새 에어록 모델과 계단 해치 출입구, 가만히 둔 로버 배터리 유지, 얼음 70 stud 안 보임과 30 stud 이름표 "Ice Site N"과 덩어리.
    - 결과로 BALANCE_LOG 7.6을 채우고, 2인 처음 은메달(22 -> 16%) 조정 여부 판단(fb-balance 추천: 그대로 두고 실측 뒤).
 2. 번역 검수(CSV 522행, 7 ~ 12세 쉬운 영어와 사실 문구, 리뷰 2명이 제안하고 fb-i18n이 반영).
-3. `rules_v2.json` 생성 도구(Mahi 웹판 공유, Q22).
+3. (완료) `rules_v2.json` 생성 도구. Mahi에게 `data/rules_v2.json`, `data/README_rules.md` 전달.
 4. B 발전 기지(V2_PLAN 5절, 15.7). `ServerStorage.Assets.SolarTower` 준비됨.
 5. 발표 자료(PRESENTATION_BRIEF [확인 필요]: 비즈니스 모델, 데모 영상), v1 파일 삭제(B 전), Figma Page 1 API 키 스크린샷 삭제 권고. Studio API 접근과 최대 인원 4는 여전히 보류(메뉴 위치 추측 금지).
 - 참고: 에셋 ID 203785492가 "Asset type does not match" 경고를 낸다(소리나 이미지 ID 종류 불일치로 추정, 아직 원인 미확인).

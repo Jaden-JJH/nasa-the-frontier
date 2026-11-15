@@ -197,7 +197,7 @@ export type MissionResult = {
 5. Records는 플레이어마다 따로 보낸다. 모양 `{ missionId, mission = { entries, rank?, entry? }, global = { entries, rank?, mine? }, status, submitted }`. 전체 리더보드 줄에 최고 점수 합 계산용 `missions` 표를 더한다.
 6. 원격 회수 요청은 직접 운전 로버가 기지 밖에 서 있을 때(방전, 끼임) 주차판으로 끌어오는 데도 쓴다. 탱크의 물은 잃고 쿨다운 15초.
 7. `SetPipeSite`는 역할 제한이 없다. 핀은 멀티에서 관제사만, 솔로는 누구나.
-8. 직접 운전 충돌 파손은 `Rules.applyRoverHit`, 그 자리 수리는 `Rules.repairRover`(처음 보고의 "상태 복사 후 damage만 올림"은 Rules 함수로 대체). 충돌 판정은 0.25초 안에 속도 12 이상에서 절반 아래로 떨어지는 급정거 + `RoverHazard` 태그.
+8. 직접 운전 충돌 파손은 `Rules.applyRoverHit`, 그 자리 수리는 `Rules.repairRover`. 판정(2026-11-15 S13 이후): 수평 속도만 보고 0.25초 안 최고 속도 15 이상에서 65% 넘게 줄고, 진행 방향 광선 3개 중 하나가 약 60도보다 가파른 정면 벽(법선 Y < 0.5)이나 `RoverHazard`를 맞힐 때만 1회. 공중과 착지 뒤 0.5초는 제외, 쿨다운 2초. `RoverHazard` 정면 접촉은 속도 12 이상. 값은 `RoverFleet.MANUAL_DRIVE`.
 9. 걸어서 수리: 고친 대원을 로버 운전석에 태우고 직접 몰고 귀환한다(`toast.rover.repaired_drive_back`, 순간 이동 없음). 처음 보고의 "에어록 안으로 옮김"은 폐기.
 10. 자율주행 출발 연출은 출구 쪽으로 40 stud만 달린 뒤 사라진다(주차판에서 출구로 곧게 가면 착륙선을 뚫고 지나감).
 11. 새 공용 모듈 `RankingV2`(v1 `Ranking`은 v1 결과 화면이 쓰고 있어 분리).
@@ -219,7 +219,7 @@ export type MissionResult = {
 ### 9.3 팀 플레이 테스트 피드백 반영 (2026-11-15, V2_PLAN 16절)
 - 프롬프트 비용 Attribute(서버 fb-server, 화면 PromptUI): `CostEnergy`, `CostWater`(number, 0이면 없음), `BuildDays`(건설을 시작하는 프롬프트만), `Affordable`(boolean, 비용이 있을 때만), `LockMsg`(JSON Msg: `toast.pipe.locked {need, done}`, `toast.build.need_prereq {facility}`, `toast.panel.limit_today {perDay}`). 대상: AirlockPrompt, PanelPrompt, BuildPrompt(그린하우스, 업그레이드 3종), PipePrompt, 로버 RepairPrompt(걸어서 수리 포함). 모든 commit과 publish 때 다시 쓴다. 숫자는 MissionConfig에서 읽는다.
 - 물 파이프 프롬프트는 해금 전에도 보이고, 누르면 `toast.pipe.locked`.
-- 로버 충전: StateUpdate `rover`에 `charging`, `battery`, `batteryMax`, `atBase`가 항상 있고 `batteryPercent`, `chargeBlocked`(Msg 또는 nil)를 더한다. 섀시(`Rover.Chassis`) Attribute `Charging`, `BatteryPercent`(0 ~ 100 정수), `ChargeBlocked`(키), `ChargeBlockedArgs`(JSON). 막힘 키: `hud.rover.charge_blocked_energy {keep}`(기지 에너지가 chargeKeepEnergy 이하), `hud.rover.charge_blocked_seat`(충전판 위 운전석에 사람), 화면 전용 `hud.rover.charge_blocked_pad`(주차판 밖).
+- 로버 충전: StateUpdate `rover`에 `charging`, `battery`, `batteryMax`, `atBase`가 항상 있고 `batteryPercent`, `chargeBlocked`(Msg 또는 nil)를 더한다. 섀시(`Rover.Chassis`) Attribute `Charging`, `BatteryPercent`(0 ~ 100 정수), `ChargeBlocked`(키), `ChargeBlockedArgs`(JSON). 막힘 키: `hud.rover.charge_blocked_energy {keep}`(기지 에너지가 chargeKeepEnergy 이하), `hud.rover.charge_blocked_seat`(충전판 위 운전석에 사람), `hud.rover.charge_blocked_pad`(기지 안이지만 주차판 밖, 서버가 보냄. 서버가 이유를 안 보낼 때만 화면이 짐작).
 - 시설과 패널은 건설과 솟아오름 동안 충돌을 끄고, 충돌이 켜지는 순간 경계 안 플레이어를 정면 바깥 지면으로 옮긴다(운전석은 제외). 설치한 패널은 충돌이 켜지고 `RoverHazard` 태그(세게 부딪히면 로버 파손 1, 패널은 고정).
 - 대피처(착륙선, 에어록)마다 보이지 않는 `Ceiling`과 `DoorLintel`. 코드 오두막일 때는 벽과 지붕 충돌도 남긴다.
 - 얼음 후보지 외형: 묻힌 표토색 Slate 덩어리, 충돌 없음, 이름표와 반짝임은 `MaxDistance` 40. 네온, 빛, 파티클 없음. MinePoint와 `SiteIndex`, `MarkerName`은 그대로.
@@ -228,3 +228,5 @@ export type MissionResult = {
   - `MissionState.roleMissions = { [tostring(userId)] = { id, progress, goal, done, radius?, targets? } }`. 솔로이거나 배정 전이면 nil. radius는 guide 30, scout 12. targets는 scout만 `{ { id, key, x, z, visited } }`.
   - `GameOver.crew[i]`에 `userId`(모든 모드), `roleMission = { id, progress, goal, done }`(멀티만, 나간 플레이어 줄에도 남음).
   - 완료 알림: 본인 `rolemission.<id>.done_self`, 다른 플레이어 `rolemission.done_team { name, role }`(role은 중첩 `role.*.name`).
+- 자율주행 파견 시각 규칙(2026-11-15, 팀원 "순간이동" 피드백): Rules는 하루 마감마다 trip.elapsed를 1씩 올린다. 서버는 하루가 절반 넘게 남았을 때 보내면 그날을 세고, 아니면 elapsed -1로 시작한다(`RoverFleet.CONFIG.dispatchDayMinLeft = 0.5`). 실제 왕복은 계획 일수 x 30초 +- 반나절(1일 왕복 15 ~ 45초). 서버는 `rover.fsd`에 오늘 지도 구간(mapFrom, mapTo, mapFromAt, mapToAt)을 보내고 화면 아이콘은 그 구간을 따른다(`ClientMath.fsdMapProgress`).
+- 대피처 문 상태등(열림 초록, 닫힘 빨강, SEP 잠금 빨강 깜빡임)과 보이는 실내 방(`Base.*Shelter.Interior`, `MissionWorld.CONFIG.interior`).
