@@ -122,7 +122,8 @@ end
 -- 지자기 폭풍 진행 중 (지도와 핀 화살표 끊김)
 function Session.isGst()
     local w = weather()
-    return w ~= nil and w.kind == "GST" and w.stage == "active"
+    -- SEP와 같은 날이면 kind는 SEP이고 gst = true (서버 MissionState.weather.gst)
+    return w ~= nil and w.stage == "active" and (w.gst == true or w.kind == "GST")
 end
 
 -- 태양 고에너지 입자 폭풍 진행 중 (외출 금지, 로버 정지)

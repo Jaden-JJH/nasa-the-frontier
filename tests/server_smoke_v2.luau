@@ -1068,8 +1068,28 @@ do
         "MissionSelectOpen: A 잠김, B 곧 열림, C 플레이, D 잠김"
     )
     check(
-        payload and payload.defaultMissionId == "C" and type(payload.deadline) == "number",
-        "MissionSelectOpen: 기본 C, 마감 시각"
+        payload and payload.defaultMissionId == "C" and payload.deadline == nil,
+        "MissionSelectOpen: 기본 C, 타이틀에 있는 동안 마감 없음"
+    )
+    -- [QA A9] 30초는 누군가 미션 선택 화면에 들어온 순간(MissionSelectSeen)부터. 그 전에는 오래 있어도 확정하지 않는다
+    advance(31)
+    check(
+        M.MissionFlow.getPhase() == "selecting",
+        "선택 타이머: 타이틀에서 31초 있어도 selecting"
+    )
+    H.fire("MissionSelectSeen", ana)
+    local seenAt = Workspace:GetServerTimeNow()
+    local armed = R.last("MissionSelectOpen", ana)
+    check(
+        armed
+            and type(armed.args[1].deadline) == "number"
+            and H.near(armed.args[1].deadline - seenAt, 30, 0.01),
+        "선택 타이머: 미션 선택 화면에 들어온 순간부터 30초 마감"
+    )
+    H.fire("MissionSelectSeen", ana)
+    check(
+        H.near(R.last("MissionSelectOpen", ana).args[1].deadline, armed.args[1].deadline, 1e-6),
+        "선택 타이머: 두 번째 신호는 마감을 바꾸지 않는다"
     )
     check(payload and type(payload.bestMedals) == "table", "MissionSelectOpen: bestMedals 표")
     local oxygen = R.last("OxygenUpdate", ana)
@@ -1090,8 +1110,16 @@ do
     check(M.MissionFlow.getPhase() == "selecting", "SelectMission B: 그대로 selecting")
     M.MissionFlow.setNextWindow("2022-08-12")
     moveTo(ana, H.landerInside())
-    H.fire("SelectMission", ana, "C")
-    check(M.MissionFlow.getPhase() == "landing", "SelectMission C: landing")
+    advance(30 - (Workspace:GetServerTimeNow() - seenAt) - 0.5)
+    check(
+        M.MissionFlow.getPhase() == "selecting",
+        "선택 타이머: 마감 0.5초 전은 selecting"
+    )
+    advance(1)
+    check(
+        M.MissionFlow.getPhase() == "landing",
+        "선택 타이머: 30초 뒤 기본 C 자동 확정 -> landing"
+    )
     local landing = R.last("LandingSequence")
     check(
         landing
@@ -1943,6 +1971,31 @@ do
             "SEP 잠금: 닫힌 문 상태등이 빨강으로 깜빡인다"
         )
     end
+    -- [QA B4] SEP와 GST가 같은 날: weather.kind는 SEP, weather.gst = true. 서버도 지도 행동을 GST로 거절
+    do
+        local before = H.rules()
+        check(H.state().weather.gst == false, "SEP만 있는 날: weather.gst false")
+        local both = M.Rules.copy(before)
+        both.weather = table.clone(both.weather)
+        both.weather.events = table.clone(both.weather.events)
+        table.insert(both.weather.events, { kind = "GST", day = both.day, durationDays = 1 })
+        M.MissionFlow.flow.commit(both)
+        advance(0.6)
+        local w = H.state().weather
+        check(
+            w.kind == "SEP" and w.sep == true and w.gst == true,
+            "SEP + GST 같은 날: kind SEP, sep true, gst true"
+        )
+        local gstMark = R.mark()
+        H.fire("SetPipeSite", ana, 2)
+        H.fire("SetPin", ana, 2)
+        check(
+            R.notified(gstMark, "toast.map.offline_gst", ana) ~= nil,
+            "SEP + GST 같은 날: 서버도 GST로 거절 (화면 gst와 같음)"
+        )
+        M.MissionFlow.flow.commit(before)
+        advance(0.6)
+    end
     local door = Workspace.MissionRuntime.Base.LanderShelter.Entry.Door:FindFirstChild("DoorPrompt")
     check(
         door and door:GetAttribute("ActionKey") == "prompt.act.door_locked",
@@ -2106,6 +2159,10 @@ do
     check(M.MissionFlow.getPhase() == "selecting", "재시작 -> selecting")
     local open = R.last("MissionSelectOpen", ana)
     check(open and open.args[1].bestMedals.C == "gold", "MissionSelectOpen bestMedals C = gold")
+    check(
+        open and open.args[1].deadline == nil,
+        "재시작: 새 선택 라운드는 신호 전까지 마감 없음"
+    )
     local rover = M.RoverFleet.model()
     check(rover and rover.Parent == Workspace.MissionRuntime, "재시작: 로버 다시 만듦")
     check(
@@ -2222,7 +2279,7 @@ do
     )
     advance(0.3)
     check(H.state().rover.state == "driving", "rover.state driving")
-    -- [S13] 충돌 판정 (리드 결정 2026-11-15): 수평 급정거(18 이상에서 65% 넘게 감소) + 앞 광선이 벽 같은 면(법선 Y < 0.5)을
+    -- [S13] 충돌 판정 (리드 결정 2026-11-15): 수평 급정거(15 이상에서 65% 넘게 감소, 최고 속도 18보다 낮아 부스터 없이도 센다) + 앞 광선이 벽 같은 면(법선 Y < 0.5)을
     -- 정면으로 맞힐 때만 1회. 완만한 경사, 약한 급감속, 착지 직후는 0회. RoverHazard(패널, 바위)는 정면 접촉이면 12 이상 1회
     do
         local chassis = rover.PrimaryPart
@@ -2280,28 +2337,28 @@ do
             H.rules().rover.damage == damage0 and hitsSince(mark) == 0,
             "충돌: 완만한 경사 급감속은 0회"
         )
-        -- 2) 벽 앞이어도 약한 급감속(16 -> 3, 기준 18 미만)과 덜 준 급감속(20 -> 8, 60% 감소)은 0회
+        -- 2) 벽 앞이어도 약한 급감속(13 -> 3, 기준 15 미만)과 덜 준 급감속(20 -> 8, 60% 감소)은 0회
         fakeImpact.walls = {
             { point = pos + Vector3.new(5, 0, 0), normal = Vector3.new(-1, 0, 0), halfWidth = 20 },
         }
-        sample(16)
+        sample(13)
         sample(3)
         advance(0.3)
         sample(20)
         sample(8)
         check(
             H.rules().rover.damage == damage0,
-            "충돌: 기준 미달 급감속은 벽 앞이어도 0회 (18 미만, 65% 미만)"
+            "충돌: 기준 미달 급감속은 벽 앞이어도 0회 (15 미만, 65% 미만)"
         )
-        -- 3) 벽 정면 20 -> 3: 1회. 같은 충돌의 연속 신호는 2초 안이면 한 번
+        -- 3) 벽 정면 17 -> 3 (부스터 없는 최고 속도 18 아래): 1회. 같은 충돌의 연속 신호는 2초 안이면 한 번
         advance(0.3)
         mark = R.mark()
-        sample(20)
-        sample(19)
+        sample(17)
+        sample(16)
         sample(3)
         check(
             H.rules().rover.damage == damage0 + 1 and hitsSince(mark) == 1,
-            "충돌: 벽 정면 급정거 1회"
+            "충돌: 부스터 없는 벽 정면 급정거(17 -> 3) 1회"
         )
         advance(0.3)
         sample(20)
@@ -2532,6 +2589,48 @@ do
         "StateUpdate rover.broken.manual"
     )
     check(not M.RoverFleet.registerHit(20), "고장 뒤 충돌은 더 세지 않는다")
+    -- [QA C4b, C4c] 수동 고장 로버 원격 회수: 기지 밖이면 GST 날은 거절, 기지 안이면 회수하지 않고 R 수리 안내
+    do
+        local anaAt = ana.Character:GetPivot()
+        local roverAt = rover:GetPivot()
+        moveTo(ana, H.landerInside())
+        do
+            local far = H.icePosition(1)
+            rover:PivotTo(CFrame.new(far + Vector3.new(0, 4, 0)))
+            local before = H.rules()
+            local gst = M.Rules.copy(before)
+            gst.weather = table.clone(gst.weather)
+            gst.weather.events = table.clone(gst.weather.events)
+            table.insert(gst.weather.events, { kind = "GST", day = gst.day, durationDays = 1 })
+            M.MissionFlow.flow.commit(gst)
+            local gstMark = R.mark()
+            H.fire("RemoteRecoverRover", ana)
+            check(
+                not M.RoverFleet.isAtBase()
+                    and R.notified(gstMark, "toast.map.offline_gst", ana) ~= nil
+                    and H.flat(rover.PrimaryPart.CFrame.Position, far) < 1,
+                "GST 날: 기지 밖 로버 끌어오기도 거절 (그 자리에 그대로)"
+            )
+            M.MissionFlow.flow.commit(before)
+        end
+        local parkPad = M.MissionWorld.anchor("roverPark")
+        rover:PivotTo(CFrame.new(parkPad.CFrame.Position + Vector3.new(0, 3, 0)))
+        local atBaseMark = R.mark()
+        H.fire("RemoteRecoverRover", ana)
+        advance(0.6)
+        check(
+            M.RoverFleet.isAtBase()
+                and R.notified(atBaseMark, "toast.rover.broken_manual", ana) ~= nil
+                and H.rules().rover.status == "broken"
+                and H.rules().rover.recovering ~= true
+                and rover.Parent ~= nil
+                and H.state().rover.state == "broken",
+            "기지 안 수동 고장: 원격 회수 대신 R 수리 안내, 로버 그대로 broken"
+        )
+        rover:PivotTo(roverAt)
+        ana.Character:PivotTo(anaAt)
+        advance(0)
+    end
     H.trigger(repair, ana)
     check(
         H.rules().rover.status == "parked"
@@ -2923,17 +3022,20 @@ do
     for _, p in { cy, flo } do
         moveTo(p, H.landerInside())
     end
-    -- 역할 바꾸기: 탐사대원 Di가 엔지니어 자리로 (Flo와 맞바꿈) -> Di panels 0부터, Flo는 water (Ed는 scout 유지)
+    -- 역할 바꾸기: 탐사대원 Di가 엔지니어 자리로 (Flo와 맞바꿈) -> Flo는 water 0부터 (Ed는 scout 유지).
+    -- 패널 칸이 다 차 있어(위 panels 검사) Di는 panels 대신 scout 0부터 (QA D5: 칸 0이면 끝낼 수 없는 panels를 주지 않는다)
     H.fire("ChooseRole", di, "engineer")
     advance(0)
     check(
-        H.mission(di).id == "panels"
+        H.mission(di).id == "scout"
             and H.mission(di).progress == 0
+            and H.mission(di).done == false
+            and #H.mission(di).targets == 3
             and H.mission(flo).id == "water"
             and H.mission(flo).progress == 0
             and H.mission(ed).id == "scout"
             and H.mission(ed).done == true,
-        "역할 바꾸기: Di panels, Flo water 새로, Ed scout 그대로"
+        "역할 바꾸기: Di 엔지니어(칸 0이라 scout), Flo water 새로, Ed scout 그대로"
     )
     -- 결과: 4줄 모두 userId와 roleMission
     H.topUp({ water = 0, food = 0 })
@@ -2957,7 +3059,7 @@ do
             and byId[505].id == "scout"
             and byId[505].done == true
             and byId[404]
-            and byId[404].id == "panels"
+            and byId[404].id == "scout"
             and byId[606]
             and byId[606].id == "water",
         "4명 GameOver: crew 4줄 roleMission (Ed scout 완료)"
@@ -2967,6 +3069,47 @@ do
     check(M.MissionFlow.getPhase() == "selecting", "4명: 재시작 -> selecting")
     check(M.RoleMissions.recordOf(505) == nil, "재시작: 역할 미션 초기화")
     for _, p in { cy, di, ed, flo } do
+        leave(p)
+    end
+end
+
+print("[4판 멀티 3명: 자동 배정]")
+do
+    -- [QA D2] Q25: 3명이면 관제사 1, 탐사대원 1, 엔지니어 1 (아무도 고르지 않으면 자동 배정)
+    local gu = makePlayer("Gu", 707)
+    local ha = makePlayer("Ha", 808)
+    local io = makePlayer("Io", 909)
+    for _, p in { gu, ha, io } do
+        moveTo(p, H.landerInside())
+        join(p)
+    end
+    M.MissionFlow.setNextWindow("2022-08-12")
+    H.fire("SelectMission", gu, "C")
+    check(H.state().mode == "multi" and H.state().players == 3, "3명 확정: multi")
+    advance(10.2)
+    local roles = R.last("RoleUpdate").args[1]
+    local c = { controller = 0, explorer = 0, engineer = 0 }
+    for _, role in roles do
+        c[role] += 1
+    end
+    check(
+        c.controller == 1 and c.explorer == 1 and c.engineer == 1,
+        string.format(
+            "3명 자동 배정: 관제사 %d, 탐사대원 %d, 엔지니어 %d",
+            c.controller,
+            c.explorer,
+            c.engineer
+        )
+    )
+    local ids = {}
+    for _, p in { gu, ha, io } do
+        local mission = H.mission(p)
+        if mission then
+            ids[mission.id] = true
+        end
+    end
+    check(ids.guide and ids.water and ids.panels, "3명 역할 미션: guide, water, panels")
+    for _, p in { gu, ha, io } do
         leave(p)
     end
 end

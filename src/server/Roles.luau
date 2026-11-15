@@ -118,9 +118,21 @@ local function setRole(player: Player, role: string?)
     ContributionsV2.setRole(player, role)
 end
 
--- 빈자리 순서: 관제사 -> 탐사대원 -> 엔지니어 -> (넘치면) 탐사대원
+-- 빈자리 순서: 관제사 -> 첫 탐사대원 -> 엔지니어 -> 두 번째 탐사대원 (Q25: 3명이면 관제사, 탐사대원, 엔지니어 1명씩,
+-- 4명이면 탐사대원 2명. 2026-11-15 QA D2: 3명 자동 배정에 엔지니어가 없었다)
 local function autoRole(player: Player): string
-    for _, role in { "controller", "explorer", "engineer" } do
+    if fits(player, "controller") then
+        return "controller"
+    end
+    local c = counts()
+    local current = roles[player]
+    if current then
+        c[current] -= 1
+    end
+    if c.explorer < 1 and fits(player, "explorer") then
+        return "explorer"
+    end
+    for _, role in { "engineer", "explorer" } do
         if fits(player, role) then
             return role
         end

@@ -84,7 +84,7 @@ local CFG = RoverFleet.CONFIG
 -- 바퀴 아래 광선으로 공중을 알아내고, 공중에서 내려앉으면 landingIgnoreSeconds 동안 보지 않는다.
 -- RoverHazard 태그 파트(패널, 바위)는 정면 접촉이면 약한 기준(hazardImpactSpeed)으로 센다. 연속 신호는 impactCooldownSeconds에 한 번
 RoverFleet.MANUAL_DRIVE = {
-    impactSpeed = 18, -- studs/s, 수평 (이전 12)
+    impactSpeed = 15, -- studs/s, 수평. 최고 속도 18보다 낮아야 부스터 없이도 정면 충돌이 센다 (2026-11-15 QA, 이전 18, 처음 12)
     impactDropRatio = 0.35, -- 속도가 65% 넘게 줄어야 (이전 0.5)
     impactWindowSeconds = 0.25,
     impactCooldownSeconds = 2, -- 이전 1 (v1 ROVER_DAMAGE.hitCooldown)
@@ -1468,9 +1468,20 @@ function RoverFleet.remoteRecover(player: Player)
         end
         return
     end
+    -- 직접 운전 수동 고장(왕복 없음)이 기지 안에 있으면 회수하지 않고 그 자리 R 수리 안내. Rules 원격 회수로 넘기면
+    -- 로버가 1일 동안 사라지고 HUD가 "얼음 가는 중"으로 보였다 (2026-11-15 QA C4b)
+    if status == "broken" and (rover == nil or RoverFleet.isAtBase()) then
+        flow.notify(player, Msg.new("toast.rover.broken_manual"), "warn")
+        return
+    end
     -- 직접 운전 로버(주차 중이거나 수동 고장)가 기지 밖에 서 있으면 주차판으로 끌어온다. 수동 고장은 그대로 남아
-    -- 기지에서 R로 고친다
+    -- 기지에서 R로 고친다. GST 날은 지도와 같이 막는다 (QA C4c, 콘솔 버튼도 GST에 꺼짐)
     if (status == "parked" or status == "broken") and rover and not RoverFleet.isAtBase() then
+        local _, gst = flow.weather()
+        if gst then
+            flow.notify(player, Msg.new("toast.map.offline_gst"), "warn")
+            return
+        end
         local s = seat
         if s and s.Occupant ~= nil then
             flow.notify(player, Msg.new("toast.rover.occupied"), "warn")

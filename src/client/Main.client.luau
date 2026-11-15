@@ -162,6 +162,7 @@ end)
 
 -- 화면 전환 ------------------------------------------------------------------------
 local titleDismissed = false
+local selectSeenSent = false -- 이번 선택 라운드에 MissionSelectSeen을 보냈는지 (서버 30초 타이머 시작 신호)
 
 local function applyScreens()
     local phase = Session.phase()
@@ -179,6 +180,12 @@ local function applyScreens()
     -- 화면마다 따로 격리한다 (init에 실패한 화면이 있어도 나머지는 바뀐다)
     safe("TitleV2.setVisible", TitleV2.setVisible, selecting and not titleDismissed)
     safe("MissionSelectUI.setVisible", MissionSelectUI.setVisible, selecting and titleDismissed)
+    if selecting and titleDismissed and not selectSeenSent then
+        selectSeenSent = true
+        Net.fire("MissionSelectSeen")
+    elseif not selecting then
+        selectSeenSent = false
+    end
     safe(
         "RoleSelectUI.setVisible",
         RoleSelectUI.setVisible,

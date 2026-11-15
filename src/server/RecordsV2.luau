@@ -27,6 +27,7 @@ RecordsV2.CONFIG = {
     sendMission = 10, -- 화면에 보내는 줄 수 (결과 화면은 5줄만 그린다, Q24)
     sendGlobal = 10,
     retryDelay = 1,
+    closeWaitSeconds = 25, -- 서버가 닫힐 때(BindToClose) 진행 중인 기록 저장을 기다리는 최대 시간 (Roblox 한도 30초)
 }
 
 local CFG = RecordsV2.CONFIG
@@ -38,6 +39,7 @@ local globalList: { RankingV2.GlobalEntry } = {}
 local status: Status = "loading"
 local loaded = false
 local initialized = false
+local pendingSaves = 0 -- 진행 중인 submit 저장 수 (BindToClose가 기다린다, 2026-11-15 QA A7b)
 local recordsStore: any = nil
 local leaderboardStore: any = nil
 local currentMission = "C"
@@ -222,6 +224,12 @@ function RecordsV2.init()
     end
     initialized = true
     task.spawn(load)
+    game:BindToClose(function()
+        local deadline = os.clock() + CFG.closeWaitSeconds
+        while pendingSaves > 0 and os.clock() < deadline do
+            task.wait(0.5)
+        end
+    end)
 end
 
 export type Submission = {
@@ -236,7 +244,19 @@ export type Submission = {
 
 -- 메달을 딴 판 제출 (비동기). 저장이 끝나면 모두에게 Records(submitted = true)
 function RecordsV2.submit(run: Submission)
+    pendingSaves += 1
     task.spawn(function()
+        local ok, err = pcall(RecordsV2._save, run)
+        pendingSaves -= 1
+        if not ok then
+            warn("[RecordsV2] 기록 저장 실패: " .. tostring(err))
+        end
+    end)
+end
+
+-- submit 본문 (저장 재시도, 오프라인이면 메모리 순위만)
+function RecordsV2._save(run: Submission)
+    do
         while not loaded do
             task.wait(CFG.retryDelay)
         end
@@ -312,7 +332,7 @@ function RecordsV2.submit(run: Submission)
         lastSubmitted = { missionId = run.missionId, entry = entry, rank = rank }
         currentMission = run.missionId
         sendAll(true)
-    end)
+    end
 end
 
 return RecordsV2

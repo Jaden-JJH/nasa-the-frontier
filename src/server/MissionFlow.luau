@@ -2,6 +2,8 @@
 -- v2 게임 흐름 (docs/CONTRACT_V2.md 2.2 MissionFlow, 4절 Remotes, 5절 MissionState, 6절 MissionResult)
 -- phase: selecting -> landing -> playing -> result -> (재시작) selecting
 --   selecting: 첫 입장자가 미션을 고른다(MissionSelectOpen). CONFIG.selectSeconds(30초)가 지나면 C (Q23).
+--     30초는 누군가 타이틀에서 시작을 눌러 미션 선택 화면에 들어온 순간(클라이언트 MissionSelectSeen)부터 센다.
+--     그 전에는 마감이 없고(payload.deadline nil) 확정하지 않는다 (2026-11-15 QA A9: 타이틀에 머무는 동안 C가 확정됨)
 --   landing: 미션 확정 순간 서버 인원으로 솔로(1명)와 멀티(2명 이상)를 정하고 판 동안 바꾸지 않는다(Q6).
 --            Rules.newState(실측 얼음 거리, 무작위 DONKI 구간), LandingSequence, 멀티면 역할 선택 10초.
 --   playing: MissionClock 30초 DayTick -> Rules.applyDay -> 알림 -> Rules.checkEnd. 금메달이면 그 순간 끝(Q2).
@@ -107,6 +109,7 @@ local mode = "solo"
 local rules: any = nil
 local chooser: Player? = nil
 local selectDeadline = 0
+local selectArmed = false -- 이번 선택 라운드에서 누군가 미션 선택 화면에 들어왔는지 (30초 타이머 시작)
 local selectToken = 0
 local landingToken = 0
 local maxPlayers = 1
@@ -448,9 +451,16 @@ function MissionFlow.buildState(): { [string]: any }
     base.ice = iceView(state)
     base.rover = RoverFleet.view(state)
     base.deliveries = state.deliveries
-    local weather = Rules.weatherStatus(state)
+    local weather: any = Rules.weatherStatus(state)
     if weather and weather.stage == "warning" and not SpaceWeather.isWarning() then
         weather = nil
+    end
+    if weather then
+        -- SEP와 GST가 같은 날이면 kind는 SEP지만 GST 규칙(지도, 핀, 파견, 파이프 거절)도 걸린다. 화면이 서버 거절과
+        -- 같게 따로 알린다 (2026-11-15 QA B4)
+        local sepOn, gstOn = Rules.weatherOn(state)
+        weather.sep = weather.stage == "active" and sepOn ~= nil
+        weather.gst = weather.stage == "active" and gstOn ~= nil
     end
     base.weather = weather
     base.stalled = state.stalled
@@ -648,7 +658,7 @@ local function selectPayload(player: Player): { [string]: any }
     return {
         chooserUserId = if chooser then chooser.UserId else 0,
         chooserName = if chooser then chooser.DisplayName else "",
-        deadline = selectDeadline,
+        deadline = if selectArmed then selectDeadline else nil,
         defaultMissionId = CFG.defaultMission,
         missions = missionStates(),
         bestMedals = RecordsV2.bestMedals(player),
@@ -666,9 +676,14 @@ local function openSelection()
     if not chooser then
         return
     end
-    selectDeadline = workspace:GetServerTimeNow() + CFG.selectSeconds
+    if selectArmed then
+        selectDeadline = workspace:GetServerTimeNow() + CFG.selectSeconds
+    end
     for _, player in Players:GetPlayers() do
         sendSelectOpen(player)
+    end
+    if not selectArmed then
+        return
     end
     local token = selectToken
     task.delay(CFG.selectSeconds, function()
@@ -696,6 +711,7 @@ local function beginSelecting(leaving: Player?)
     dayStart, prevDayStart = nil, nil
     RecordsV2.clearSubmitted()
     chooser = firstPlayer(leaving)
+    selectArmed = false
     openSelection()
     publish()
 end
@@ -1064,6 +1080,15 @@ function MissionFlow.start(bootMission: string?)
 
     Remotes.get("SelectMission").OnServerEvent:Connect(function(player: Player, id: any)
         ServerUtil.safeCall("SelectMission", onSelectMission, player, id)
+    end)
+    Remotes.get("MissionSelectSeen").OnServerEvent:Connect(function()
+        ServerUtil.safeCall("MissionSelectSeen", function()
+            -- 첫 사람이 미션 선택 화면에 들어온 순간부터 30초 (이미 세는 중이면 그대로)
+            if phase == "selecting" and not selectArmed and chooser ~= nil then
+                selectArmed = true
+                openSelection()
+            end
+        end)
     end)
     Remotes.get("RequestRestart").OnServerEvent:Connect(function(player: Player)
         ServerUtil.safeCall("RequestRestart", onRequestRestart, player)

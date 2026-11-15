@@ -236,7 +236,10 @@ end
 
 local function missionRow(order, rank, entry, mine)
     local names = crewNames(entry)
-    local nameValue = if #names > 0 then Msg.list(names) else modeMsg(entry)
+    -- 순위 줄: "솔로" 또는 "팀 N명" 다음에 이름 (V2_PLAN Q5, 2026-11-15 QA D9: 이름만 보였다)
+    local nameValue = if #names > 0
+        then { key = "fmt.list.start", args = { a = modeMsg(entry), b = Msg.list(names) } }
+        else modeMsg(entry)
     local value = {
         key = "fmt.list.two",
         args = {

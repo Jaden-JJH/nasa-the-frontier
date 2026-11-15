@@ -26,6 +26,7 @@ Remotes.NAMES = {
     "Records", -- (payload) 미션 순위와 전체 리더보드
     -- 클라이언트 -> 서버 (CONTRACT_V2 4.2)
     "SelectMission", -- (missionId)
+    "MissionSelectSeen", -- () 타이틀에서 시작을 눌러 미션 선택 화면이 보임 (첫 신호부터 30초 자동 선택 타이머)
     "ChooseRole", -- (role)
     "SetPin", -- (siteIndex?)
     "DispatchRover", -- (siteIndex, rush)

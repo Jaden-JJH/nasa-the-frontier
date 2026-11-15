@@ -4,7 +4,8 @@
 --   controller  guide   핀을 찍은 얼음 후보지에 관제사가 아닌 팀원이 반경 안에 들어오기 (같은 후보지는 한 번만)
 --   explorer    water   (먼저 배정된 탐사대원) 본인이 물탱크에 물 내리기
 --   explorer    scout   (두 번째 탐사대원) 앞으로 지을 시설 자리에 가 보기 (그린하우스, 물 파이프, 태양광 설치 자리)
---   engineer    panels  본인이 태양광 패널 설치 (남은 패널 칸이 모자라면 목표를 줄인다)
+--   engineer    panels  본인이 태양광 패널 설치 (남은 패널 칸이 모자라면 목표를 줄인다). 배정 때 남은 칸이 0이면
+--                       panels 대신 scout (2026-11-15 QA D5: 0/1로 끝낼 수 없었다)
 -- 배정: Roles가 역할을 바꿀 때마다 assign을 부른다(선택 시간이 끝난 뒤, 멀티만). 역할이 같으면 미션과 진행을 그대로 두고,
 --   역할이 바뀌면 새 역할 미션을 0부터. 탐사대원은 다른 탐사대원이 water를 갖고 있지 않으면 water, 있으면 scout.
 -- 진행: water, panels는 MissionFlow flow.contribute에서(onContribute), guide, scout는 주기 검사(step)에서. playing일 때만 센다.
@@ -231,6 +232,8 @@ function RoleMissions.assign(
             if id == ROLE_MISSIONS.explorerFirst then
                 waterTaken = true
             end
+        elseif id == "panels" and panelSlotsLeft() == 0 then
+            id = ROLE_MISSIONS.explorerSecond
         end
         if id then
             records[player.UserId] = newRecord(player, role, id)
