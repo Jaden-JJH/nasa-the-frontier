@@ -912,6 +912,9 @@ M.Roles = loadModule(Server:FindFirstChild("Roles"))
 M.RoleMissions = loadModule(Server:FindFirstChild("RoleMissions"))
 M.RecordsV2 = loadModule(Server:FindFirstChild("RecordsV2"))
 M.SpaceWeather = loadModule(Server:FindFirstChild("SpaceWeather"))
+M.MissionClock = loadModule(Server:FindFirstChild("MissionClock"))
+M.ClientMath = loadModule(Shared:FindFirstChild("ClientMath"))
+M.WorldMath = loadModule(Shared:FindFirstChild("WorldMath"))
 
 do
     local remotes = ReplicatedStorage:FindFirstChild("Remotes")
@@ -993,6 +996,47 @@ do
         doors == 2,
         "AirlockDoors: 착륙선과 에어록 문 2개에 프롬프트 (" .. tostring(doors) .. ")"
     )
+    -- [2026-11-15 플레이 테스트] 열림과 닫힘이 보이게: 열면 옆으로 비키고 상태등 초록, 닫히면 제자리 빨강
+    do
+        local entry = Workspace.MissionRuntime.Base.LanderShelter.Entry
+        local doorPart = entry.Door
+        local closedAt = doorPart.CFrame.Position
+        local lamps = {}
+        for _, child in entry:GetChildren() do
+            if child:GetAttribute("DoorLamp") == true then
+                table.insert(lamps, child)
+            end
+        end
+        local red = Color3.fromRGB(table.unpack(M.AirlockDoors.CONFIG.lampClosed))
+        local green = Color3.fromRGB(table.unpack(M.AirlockDoors.CONFIG.lampOpen))
+        local function lampsAre(color)
+            for _, lamp in lamps do
+                if lamp.Color ~= color then
+                    return false
+                end
+            end
+            return #lamps == 2
+        end
+        check(lampsAre(red) and doorPart.CanCollide, "문: 닫힘 = 빨간 상태등 2개, 충돌")
+        H.trigger(doorPart:FindFirstChild("DoorPrompt"), nil) -- 아직 플레이어 없음 (문은 누가 눌러도 같다)
+        advance(M.AirlockDoors.CONFIG.slideSeconds + 0.1)
+        local moved = H.flat(doorPart.CFrame.Position, closedAt)
+        check(
+            not doorPart.CanCollide
+                and doorPart:GetAttribute("Open") == true
+                and moved > doorPart.Size.X * 0.9
+                and lampsAre(green),
+            string.format("문: 열림 = 옆으로 %.1f stud 비킴, 초록 상태등", moved)
+        )
+        advance(M.AirlockDoors.CONFIG.openSeconds + M.AirlockDoors.CONFIG.slideSeconds + 0.6)
+        check(
+            doorPart.CanCollide
+                and doorPart:GetAttribute("Open") == false
+                and H.flat(doorPart.CFrame.Position, closedAt) < 1e-3
+                and lampsAre(red),
+            "문: 저절로 닫힘 = 제자리, 빨간 상태등"
+        )
+    end
     local state = H.state()
     check(
         state and state.phase == "selecting" and state.missionId == nil,
@@ -1300,18 +1344,128 @@ do
     -- 그대로 두려고 에너지를 채우고, 파견 뒤 왕복을 1일로 줄인다 (테스트 단축, 일수 계산은 rules.spec이 본다)
     H.topUp({ energy = 100 })
     mark = R.mark()
+    local roverBefore = M.RoverFleet.model()
+    local startPos = roverBefore and roverBefore.PrimaryPart.CFrame.Position
+    advance(18) -- 하루 후반에 보낸다 (절반 넘게 남았으면 그날을 센다, RoverFleet.CONFIG.dispatchDayMinLeft 0.5)
+    local dispatchedAt = Workspace:GetServerTimeNow()
     H.fire("DispatchRover", ana, 1, false)
     check(H.rules().rover.status == "fsd", "파견: Rules rover fsd")
+    -- [FSD 순간 이동, 2026-11-15 플레이 테스트] 하루 후반에 보낸 왕복은 그날을 세지 않는다(elapsed -1). 출발 직후 로버는
+    -- 얼음 후보지에 없고 출구 쪽 40 stud만 달린 뒤 사라진다. 귀환은 계획 일수 x 30초 +- 반나절. 지도 진행은 0에서 커진다
     do
+        local trip = H.rules().rover.trip
+        local site = H.icePosition(1)
+        local endsAt = M.MissionClock.dayEndsAt()
+        local day = M.MissionConfig.DAY_SECONDS
+        check(
+            trip.elapsed == -1 and endsAt ~= nil and endsAt - dispatchedAt < day / 2,
+            "FSD: 하루 후반 파견은 그날을 세지 않는다 (elapsed "
+                .. tostring(trip.elapsed)
+                .. ", 남은 "
+                .. string.format("%.1f", endsAt - dispatchedAt)
+                .. "초)"
+        )
+        local pos = roverBefore.PrimaryPart.CFrame.Position
+        local st = H.state()
+        check(
+            roverBefore.Parent ~= nil
+                and H.flat(pos, startPos) <= M.RoverFleet.CONFIG.exitDistance + 1
+                and H.flat(pos, site) > 200
+                and type(st.rover.x) == "number"
+                and H.flat(Vector3.new(st.rover.x, 0, st.rover.z), site) > 200,
+            "FSD: 파견 직후 로버(월드, rover.x/z)는 기지 근처, 얼음 후보지에서 "
+                .. math.floor(H.flat(pos, site))
+                .. " stud"
+        )
+        local fsd = st.rover.fsd
+        local p0 = M.ClientMath.fsdMapProgress(fsd, dispatchedAt)
+        local p1 = M.ClientMath.fsdMapProgress(fsd, dispatchedAt + 1)
+        local pEnd = M.ClientMath.fsdMapProgress(fsd, endsAt)
+        local planned = trip.totalDays * day
+        local span = (endsAt - dispatchedAt) + trip.totalDays * day
+        check(
+            fsd
+                and fsd.mapFrom == 0
+                and p0 < 0.01
+                and p1 > p0
+                and p1 < 1 / span * 1.5
+                and H.near(pEnd, (endsAt - dispatchedAt) / span, 0.002)
+                and M.ClientMath.roundTripFraction(p1) < 0.05,
+            string.format(
+                "FSD: 지도 진행 0 -> 1초 뒤 %.4f -> 첫 마감 %.3f (왕복 %.0f초, 계획 %d일)",
+                p1,
+                pEnd,
+                span,
+                trip.totalDays
+            )
+        )
+        advance(2.5)
+        check(
+            roverBefore.Parent == nil and H.state().rover.x == nil,
+            "FSD: 출발 연출 뒤 숨김, rover.x 없음"
+        )
+        -- 같은 Rules로 왕복을 끝까지 돌려 본다 (복사본, 진짜 판은 그대로): 귀환하는 하루 마감 수와 실제 시간
+        local sim = M.Rules.copy(H.rules())
+        local ticks = 0
+        local progressSeen = { pEnd }
+        while sim.rover.status == "fsd" and ticks < 10 do
+            sim = M.Rules.applyDay(sim, M.MissionConfig)
+            ticks += 1
+            if sim.rover.status == "fsd" and sim.rover.trip then
+                local leg = M.WorldMath.fsdLeg({
+                    totalDays = sim.rover.trip.totalDays,
+                    elapsed = sim.rover.trip.elapsed,
+                    skipped = true,
+                    startedAt = dispatchedAt,
+                    firstTickAt = endsAt,
+                    dayEndsAt = endsAt + ticks * day,
+                    daySeconds = day,
+                    stopped = false,
+                })
+                table.insert(progressSeen, leg.to)
+            end
+        end
+        local seconds = (endsAt - dispatchedAt) + (ticks - 1) * day
+        local growing = true
+        for i = 2, #progressSeen do
+            if progressSeen[i] <= progressSeen[i - 1] then
+                growing = false
+            end
+        end
+        check(
+            sim.rover.status == "broken"
+                or (
+                    ticks == trip.totalDays + 1
+                    and seconds >= planned - day / 2
+                    and seconds <= planned + day / 2
+                ),
+            string.format(
+                "FSD: 귀환은 하루 마감 %d번 뒤 %.1f초 (계획 %d일 = %d초 +- 반나절)",
+                ticks,
+                seconds,
+                trip.totalDays,
+                planned
+            )
+        )
+        check(
+            growing,
+            "FSD: 하루마다 지도 진행이 커진다 (" .. #progressSeen .. "구간)"
+        )
+        check(
+            sim.rover.status == "broken" or sim.deliveries > H.rules().deliveries,
+            "FSD: 귀환 때 물 하역"
+        )
+    end
+    do
+        -- 아래 흐름(하루 단위 우주 기상 일정)을 그대로 두려고 하루 시작에 보낸 1일 왕복으로 바꾼다
         local shorter = M.Rules.copy(H.rules())
         shorter.rover.trip.totalDays = 1
+        shorter.rover.trip.elapsed = 0
         M.MissionFlow.flow.commit(shorter)
         advance(0)
     end
     check(R.notified(mark, "toast.rover.dispatched") ~= nil, "알림 toast.rover.dispatched")
     local rover = M.RoverFleet.model()
-    check(rover and rover.Parent ~= nil, "파견 직후: 출구로 달려가는 중 (보임)")
-    advance(4.5)
     check(rover and rover.Parent == nil, "출구 뒤 숨김 (Parent = nil)")
     local s = H.state()
     check(
@@ -1772,6 +1926,23 @@ do
     )
     check(R.notified(mark, "toast.sep.shelter_rover", ana) ~= nil, "알림 toast.sep.shelter_rover")
     check(M.AirlockDoors.isLocked(), "SEP: 문 잠금")
+    do
+        local entry = Workspace.MissionRuntime.Base.LanderShelter.Entry
+        local lamp = entry:FindFirstChild("DoorLight")
+        local seen = {}
+        for _ = 1, 4 do
+            seen[lamp.Color:ToHex()] = true
+            advance(M.AirlockDoors.CONFIG.blinkSeconds)
+        end
+        local kinds = 0
+        for _ in seen do
+            kinds += 1
+        end
+        check(
+            kinds == 2 and entry.Door.CanCollide,
+            "SEP 잠금: 닫힌 문 상태등이 빨강으로 깜빡인다"
+        )
+    end
     local door = Workspace.MissionRuntime.Base.LanderShelter.Entry.Door:FindFirstChild("DoorPrompt")
     check(
         door and door:GetAttribute("ActionKey") == "prompt.act.door_locked",
@@ -1798,6 +1969,12 @@ do
     sw = R.since(mark, "SpaceWeather")
     check(sw and sw.args[1].stage == "ended", "SEP ended")
     check(not M.AirlockDoors.isLocked(), "SEP 끝: 문 열림")
+    do
+        local lamp = Workspace.MissionRuntime.Base.LanderShelter.Entry:FindFirstChild("DoorLight")
+        local red = Color3.fromRGB(table.unpack(M.AirlockDoors.CONFIG.lampClosed))
+        advance(M.AirlockDoors.CONFIG.blinkSeconds * 2)
+        check(lamp.Color == red, "SEP 끝: 깜빡임 멈추고 빨강 (닫힘)")
+    end
     H.unseat(ana)
     check(seat.Occupant == nil, "하차")
 end

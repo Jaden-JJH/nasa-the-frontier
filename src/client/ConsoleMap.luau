@@ -3,15 +3,13 @@
 -- 월드 XZ를 지도 픽셀로 옮겨(ClientMath, 위 = -Z) 그린다: 기지, 얼음 후보지 5곳(번호, 쿨타임, 파이프), 관제사 핀,
 -- 로버(주차, 직접 운전, 자율주행 이동, 고장 위치), 대원 위치. 얼음 후보지를 누르면 onSiteClicked(siteIndex).
 -- GST(지자기 폭풍) 중에는 지도가 지직거리고 아이콘이 멈춘다(마지막 위치 유지, Q8 "통신 끊김").
--- 자율주행 아이콘은 하루 단위 진행(progress)을 왕복 일수로 나눠 그날 안에서 부드럽게 움직인다.
+-- 자율주행 아이콘은 서버가 보낸 오늘 구간(rover.fsd.mapFrom ~ mapTo, 서버 시각)을 이어 파견 순간부터 귀환까지 부드럽게 움직인다.
 -- 한 화면에 하나만 있으므로 단일 모듈이다. 갱신은 ConsoleUI가 보일 때만 tick()으로 부른다.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local ClientMath = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ClientMath"))
-local MissionConfig =
-    require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("MissionConfig"))
 
 local Icons = require(script.Parent.Icons)
 local Session = require(script.Parent.Session)
@@ -50,7 +48,6 @@ local fit = nil
 local worldSites = {} -- [index] = Vector3
 local selectedSite = nil
 local lastBrokenFraction = 1
-local trip = { progress = nil, changedAt = 0, site = nil }
 local offline = false
 local staticClock = 0
 
@@ -188,39 +185,6 @@ local function refreshPin()
     end
 end
 
--- 자율주행 진행 비율을 그날 안에서 부드럽게. progress는 하루 단위로만 바뀌므로
--- 왕복 일수로 하루 몫을 구하고, 오늘 지난 비율(state.dayEndsAt 기준, 없으면 progress가 바뀐 뒤 흐른 시간)만큼 더한다
-local function smoothProgress(state, fsd)
-    local now = os.clock()
-    if trip.progress ~= fsd.progress or trip.site ~= fsd.siteIndex then
-        trip.progress = fsd.progress
-        trip.site = fsd.siteIndex
-        trip.changedAt = now
-    end
-    if fsd.stoppedBy or fsd.recovering then
-        return fsd.progress
-    end
-    local days = nil
-    for _, site in ipairs(state.ice or {}) do
-        if site.index == fsd.siteIndex then
-            days = if fsd.rush and type(site.rushDays) == "number"
-                then site.rushDays
-                else site.fsdDays
-        end
-    end
-    if type(days) ~= "number" or days <= 0 then
-        return fsd.progress
-    end
-    local daySeconds = MissionConfig.DAY_SECONDS
-    local dayFraction
-    if type(state.dayEndsAt) == "number" then
-        dayFraction = 1 - (state.dayEndsAt - workspace:GetServerTimeNow()) / daySeconds
-    else
-        dayFraction = (now - trip.changedAt) / daySeconds
-    end
-    return math.min(fsd.progress + math.clamp(dayFraction, 0, 1) / days, 1)
-end
-
 local function roverWorldPosition(state)
     local rover = state.rover
     local missionId = state.missionId or "C"
@@ -236,7 +200,9 @@ local function roverWorldPosition(state)
             if rover.fsd.recovering then
                 fraction = lastBrokenFraction * (1 - math.clamp(rover.fsd.progress or 0, 0, 1))
             else
-                fraction = ClientMath.roundTripFraction(smoothProgress(state, rover.fsd))
+                fraction = ClientMath.roundTripFraction(
+                    ClientMath.fsdMapProgress(rover.fsd, workspace:GetServerTimeNow())
+                )
             end
             local p = ClientMath.tripPoint(exit, site, fraction)
             return Vector3.new(p.X, 0, p.Z)

@@ -407,4 +407,48 @@ function WorldMath.facilityIndex(facilityId: string): number
     return math.max(1, n or 1)
 end
 
+export type FsdLegInput = {
+    totalDays: number, -- Rules trip.totalDays
+    elapsed: number, -- Rules trip.elapsed (파견한 날을 세지 않으면 -1에서 시작)
+    skipped: boolean, -- 파견한 날을 왕복 일수에 세지 않았는지
+    startedAt: number?, -- 파견 서버 시각 (모르면 nil: 하루를 통째로 센다)
+    firstTickAt: number?, -- 파견 뒤 첫 하루 마감 서버 시각
+    dayEndsAt: number, -- 지금 하루가 끝나는 서버 시각
+    daySeconds: number,
+    stopped: boolean, -- 오늘 우주 기상으로 로버가 멈춘 날 (Rules가 오늘 진행시키지 않는다)
+}
+
+export type FsdLeg = { from: number, to: number, fromAt: number, toAt: number }
+
+-- 자율주행 지도 진행 구간 (로버가 숨은 동안 콘솔 지도 아이콘, V2_PLAN Q8).
+-- Rules는 하루 마감마다 trip.elapsed를 1 올리고 elapsed = totalDays에서 귀환한다. 지도에는 파견 순간 0에서 귀환하는
+-- 하루 마감 1까지 실제 시간 비율로 움직이는 왕복 진행(0..1)을 준다. 구간 0 = 파견부터 첫 하루 마감까지(짧을 수 있다),
+-- 구간 1 이후 = 하루씩. 오늘 구간의 시작(from, fromAt)과 오늘 마감 때 값(to, toAt)을 돌려주고, 화면은 그 사이를 잇는다.
+-- 멈춘 날은 to = from (아이콘 정지).
+function WorldMath.fsdLeg(input: FsdLegInput): FsdLeg
+    local day = math.max(input.daySeconds, MIN_EXTENT)
+    local offset = if input.skipped then 1 else 0
+    local first = day
+    if input.startedAt and input.firstTickAt then
+        first = math.clamp(input.firstTickAt - input.startedAt, 0, day)
+    end
+    local full = math.max(0, math.floor(input.totalDays + 0.5) - 1 + offset)
+    local total = first + full * day
+    local toAt = input.dayEndsAt
+    if total <= EPSILON then
+        return { from = 1, to = 1, fromAt = toAt, toAt = toAt }
+    end
+    local k = math.clamp(math.floor(input.elapsed + 0.5) + offset, 0, full)
+    local function at(i: number): number
+        if i <= 0 then
+            return 0
+        end
+        return math.min(1, (first + (i - 1) * day) / total)
+    end
+    local from = at(k)
+    local to = if input.stopped then from else at(k + 1)
+    local fromAt = if k == 0 and input.startedAt then input.startedAt else toAt - day
+    return { from = from, to = to, fromAt = fromAt, toAt = toAt }
+end
+
 return WorldMath

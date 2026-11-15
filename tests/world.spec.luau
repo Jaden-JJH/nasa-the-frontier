@@ -344,4 +344,66 @@ return function(t)
         t.near(WorldMath.clamp01(-0.2), 0)
         t.near(WorldMath.lerp(2, 6, 0.25), 3)
     end)
+
+    t.test("WorldMath: 자율주행 지도 구간 (파견일 안 셈, 3일 왕복)", function()
+        -- 파견 1000초, 첫 마감 1020초 (20초 남음), 3일 왕복 -> 전체 20 + 90 = 110초
+        local base = {
+            totalDays = 3,
+            skipped = true,
+            startedAt = 1000,
+            firstTickAt = 1020,
+            daySeconds = 30,
+            stopped = false,
+        }
+        local function leg(elapsed: number, endsAt: number, stopped: boolean?)
+            local input = table.clone(base) :: any
+            input.elapsed = elapsed
+            input.dayEndsAt = endsAt
+            input.stopped = stopped == true
+            return WorldMath.fsdLeg(input)
+        end
+        local a = leg(-1, 1020)
+        t.near(a.from, 0, "파견 순간 0")
+        t.near(a.fromAt, 1000, "파견 시각부터")
+        t.near(a.to, 20 / 110, "첫 마감까지 20초 몫")
+        local b = leg(0, 1050)
+        t.near(b.from, 20 / 110, "이어서")
+        t.near(b.fromAt, 1020)
+        t.near(b.to, 50 / 110)
+        local c = leg(2, 1110)
+        t.near(c.from, 80 / 110)
+        t.near(c.to, 1, "귀환 마감에서 1")
+        local stopped = leg(1, 1080, true)
+        t.near(stopped.from, 50 / 110, "멈춘 날: 어제 끝 자리")
+        t.near(stopped.to, stopped.from, "멈춘 날: 움직이지 않음")
+        local afterStop = leg(1, 1110)
+        t.near(afterStop.from, 50 / 110, "멈춘 다음 날 같은 자리에서 다시")
+        t.near(afterStop.fromAt, 1080)
+    end)
+
+    t.test("WorldMath: 자율주행 지도 구간 (시작 모름, 파견일 셈)", function()
+        local unknown = WorldMath.fsdLeg({
+            totalDays = 2,
+            elapsed = 1,
+            skipped = false,
+            dayEndsAt = 500,
+            daySeconds = 30,
+            stopped = false,
+        })
+        t.near(unknown.from, 0.5, "Rules progress와 같다")
+        t.near(unknown.to, 1)
+        t.near(unknown.fromAt, 470)
+        local counted = WorldMath.fsdLeg({
+            totalDays = 1,
+            elapsed = 0,
+            skipped = false,
+            startedAt = 100,
+            firstTickAt = 110,
+            dayEndsAt = 110,
+            daySeconds = 30,
+            stopped = false,
+        })
+        t.near(counted.from, 0)
+        t.near(counted.to, 1, "파견일을 세면 첫 마감에서 귀환")
+    end)
 end

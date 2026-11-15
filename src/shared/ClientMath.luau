@@ -170,6 +170,28 @@ function ClientMath.roundTripFraction(progress: any): number
     return 1 - math.abs(1 - 2 * p)
 end
 
+-- 자율주행 지도 아이콘의 왕복 진행(0..1). 서버가 rover.fsd에 오늘 구간(mapFrom, mapTo, mapFromAt, mapToAt, 서버 시각)을
+-- 보내면 now(workspace:GetServerTimeNow())에 맞춰 그 사이를 잇는다. 없으면 Rules 하루 단위 progress 그대로
+-- (예전처럼 파견 전에 지난 하루 몫을 더하면 보내자마자 아이콘이 얼음 후보지에 가 있었다, 2026-11-15 플레이 테스트)
+function ClientMath.fsdMapProgress(fsd: any, now: any): number
+    if type(fsd) ~= "table" then
+        return 0
+    end
+    local from, to, fromAt, toAt = fsd.mapFrom, fsd.mapTo, fsd.mapFromAt, fsd.mapToAt
+    if
+        isNumber(from)
+        and isNumber(to)
+        and isNumber(fromAt)
+        and isNumber(toAt)
+        and isNumber(now)
+    then
+        local span = toAt - fromAt
+        local t = if span > 1e-6 then math.clamp((now - fromAt) / span, 0, 1) else 1
+        return math.clamp(from + (to - from) * t, 0, 1)
+    end
+    return if isNumber(fsd.progress) then math.clamp(fsd.progress, 0, 1) else 0
+end
+
 -- from에서 to로 fraction(0..1)만큼 간 점
 function ClientMath.tripPoint(from: XZ, to: XZ, fraction: number): XZ
     local f = math.clamp(if isNumber(fraction) then fraction else 0, 0, 1)

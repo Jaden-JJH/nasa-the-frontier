@@ -12,6 +12,8 @@
 --     brokenDistance만큼 간 자리에 멈춰 보이고, 걸어가서 R로 고치면(Rules.walkRepairRover) 자율주행을 끝내고 고친 대원이
 --     운전석에 앉아 직접 몰고 돌아온다(좌석이 산소를 채운다, Q28).
 --     원격 회수(Rules.remoteRecoverRover)는 콘솔에서. Rules가 일수, 에너지, 파손 확률, 물을 모두 계산한다.
+--     하루가 절반 넘게 지난 뒤 보낸 왕복은 그날을 세지 않는다(trip.elapsed -1 시작, CONFIG.dispatchDayMinLeft). 숨은 동안 지도 아이콘은
+--     rover.fsd.mapFrom ~ mapTo(WorldMath.fsdLeg)로 파견 순간부터 귀환 하루 마감까지 실제 시간 비율로 움직인다.
 -- 수동 충돌 파손은 Rules.applyRoverHit, 그 자리 R 수리는 Rules.repairRover(수동 고장 = status "broken" + 왕복 없음).
 
 local Players = game:GetService("Players")
@@ -22,6 +24,8 @@ local MissionConfig = require(ReplicatedStorage.Shared.MissionConfig)
 local Msg = require(ReplicatedStorage.Shared.Msg)
 local Remotes = require(ReplicatedStorage.Shared.Remotes)
 local Rules = require(ReplicatedStorage.Shared.Rules)
+local WorldMath = require(ReplicatedStorage.Shared.WorldMath)
+local MissionClock = require(script.Parent.MissionClock)
 local MissionWorld = require(script.Parent.MissionWorld)
 local PromptKit = require(script.Parent.PromptKit)
 local RoverRig = require(script.Parent.RoverRig)
@@ -56,6 +60,11 @@ RoverFleet.CONFIG = {
     -- 자율주행 출발 연출 (Q8): 출구 쪽으로 exitDistance만큼 달려 나간 뒤 사라진다. 착륙선과 에어록이 주차판과 출구 사이에
     -- 있어 출구까지 곧게 가면 건물을 뚫고 지나가므로 짧게만 달린다
     exitDistance = 40,
+    -- 파견한 날의 남은 시간이 하루의 이 비율 이상일 때만 그날을 왕복 1일째로 센다 (2026-11-15 플레이 테스트: 하루 마감 직전에
+    -- 보내면 Rules가 몇 초 뒤 마감에서 하루를 통째로 세어 1일 왕복이 2초 만에 돌아왔다). [리드 결정] 0.5 = 반올림:
+    -- 하루가 절반 넘게 남았으면 그날을 세고, 아니면 서버가 trip.elapsed를 -1로 시작한다. 실제 왕복은 계획 일수 x 30초
+    -- +- 반나절(1일 왕복 15 ~ 45초), 평균은 계획과 같다. 1로 올리면 항상 계획 이상(길어야 하루 더)
+    dispatchDayMinLeft = 0.5,
     exitSpeed = 20, -- studs/s
     animHz = 15,
     flipUpY = 0.3,
@@ -112,6 +121,9 @@ local exiting = false
 local dispatching = false
 local takingOver = false -- 걸어서 수리 뒤 대원이 고장 자리에서 로버를 넘겨받는 중 (그 자리에 둔다)
 local exitToken = 0
+-- 이번 자율주행 왕복의 실제 시간 (지도 아이콘 구간 계산, WorldMath.fsdLeg). 파견 성공 때 정하고 판이 바뀌면 지운다
+local timeline: { siteIndex: number, startedAt: number, firstTickAt: number, skipped: boolean }? =
+    nil
 
 local battery = MissionConfig.MANUAL_DRIVE.batteryMax
 local tank = 0
@@ -1283,6 +1295,7 @@ end
 
 -- 새 판: 배터리 가득, 탱크 비움
 function RoverFleet.reset()
+    timeline = nil
     battery = manual().batteryMax
     tank = 0
     boosting = false
@@ -1411,11 +1424,26 @@ function RoverFleet.dispatch(player: Player, siteIndex: any, rush: any)
         end
     end
     dispatching = true
+    local now = workspace:GetServerTimeNow()
+    local endsAt = MissionClock.dayEndsAt()
+    local skip = endsAt ~= nil
+        and (endsAt - now) / MissionConfig.DAY_SECONDS < CFG.dispatchDayMinLeft - 1e-6
     local ok = flow.act(player, function(state, config)
-        return Rules.dispatchRover(state, config, siteIndex, rushOn)
+        local good, new, msg, events = Rules.dispatchRover(state, config, siteIndex, rushOn)
+        if good and skip and new.rover.trip then
+            -- 파견한 날은 세지 않는다: 첫 하루 마감에서 0, 그 뒤 totalDays번째 마감에서 귀환
+            new.rover.trip.elapsed = -1
+        end
+        return good, new, msg, events
     end)
     dispatching = false
     if ok then
+        timeline = {
+            siteIndex = siteIndex,
+            startedAt = now,
+            firstTickAt = endsAt or now,
+            skipped = skip,
+        }
         setBoosting(false)
         driveOut()
         RoverFleet.refresh()
@@ -1459,6 +1487,36 @@ function RoverFleet.remoteRecover(player: Player)
     flow.act(player, Rules.remoteRecoverRover)
 end
 
+-- rover.fsd = Rules.roverFsdView + 지도 아이콘 오늘 구간 (mapFrom, mapTo: 왕복 진행 0..1, mapFromAt, mapToAt: 서버 시각).
+-- 화면(ClientMath.fsdMapProgress)은 그 사이를 이어 파견 순간부터 귀환 하루 마감까지 아이콘을 움직인다
+local function fsdView(state: any): { [string]: any }?
+    local view = Rules.roverFsdView(state, MissionConfig) :: any
+    local trip = state.rover.trip
+    local endsAt = MissionClock.dayEndsAt()
+    if not view or view.recovering or not trip or not endsAt then
+        return view
+    end
+    local line = timeline
+    if line and line.siteIndex ~= trip.siteIndex then
+        line = nil
+    end
+    local leg = WorldMath.fsdLeg({
+        totalDays = trip.totalDays,
+        elapsed = trip.elapsed,
+        skipped = if line then line.skipped else false,
+        startedAt = if line then line.startedAt else nil,
+        firstTickAt = if line then line.firstTickAt else nil,
+        dayEndsAt = endsAt,
+        daySeconds = MissionConfig.DAY_SECONDS,
+        stopped = view.stoppedBy ~= nil,
+    })
+    view.mapFrom = math.floor(leg.from * 1000 + 0.5) / 1000
+    view.mapTo = math.floor(leg.to * 1000 + 0.5) / 1000
+    view.mapFromAt = leg.fromAt
+    view.mapToAt = leg.toAt
+    return view
+end
+
 -- MissionState.rover (CONTRACT_V2 5절 + 화면용 추가 필드)
 function RoverFleet.view(state: any): { [string]: any }
     local m = manual()
@@ -1484,7 +1542,7 @@ function RoverFleet.view(state: any): { [string]: any }
         chargeBlocked = chargeBlocked, -- Msg 또는 nil (섀시 Attribute ChargeBlocked와 같은 이유)
         batteryPercent = batteryPercent(),
         atBase = RoverFleet.isAtBase(),
-        fsd = Rules.roverFsdView(state, MissionConfig),
+        fsd = fsdView(state),
     }
     -- 보이는 로버의 지면 좌표 (StreamingEnabled로 로버 모델이 클라이언트에 없을 때 지도용). 숨김이면 없음
     local position = chassisPosition()

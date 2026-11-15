@@ -78,6 +78,17 @@ return function(t)
         t.near(ClientMath.roundTripFraction(0.75), 0.5)
         t.near(ClientMath.roundTripFraction(1), 0)
         t.near(ClientMath.roundTripFraction(7), 0, "범위 밖은 자른다")
+        local fsd = { progress = 0, mapFrom = 0.2, mapTo = 0.5, mapFromAt = 100, mapToAt = 130 }
+        t.near(ClientMath.fsdMapProgress(fsd, 100), 0.2, "구간 시작")
+        t.near(ClientMath.fsdMapProgress(fsd, 115), 0.35, "구간 가운데")
+        t.near(ClientMath.fsdMapProgress(fsd, 200), 0.5, "마감 뒤는 마감 값")
+        t.near(ClientMath.fsdMapProgress(fsd, 50), 0.2, "시작 전은 시작 값")
+        t.near(
+            ClientMath.fsdMapProgress({ progress = 0.5 }, 115),
+            0.5,
+            "구간 없으면 Rules progress 그대로 (파견 전 하루 몫을 더하지 않는다)"
+        )
+        t.near(ClientMath.fsdMapProgress(nil, 115), 0)
         local p = ClientMath.tripPoint({ X = 0, Z = 0 }, { X = 100, Z = -40 }, 0.5)
         t.near(p.X, 50)
         t.near(p.Z, -20)
