@@ -15,6 +15,7 @@
 | `HANDOFF.md` | v1 인수인계(이력 참고용, v1 다음 작업 후보는 폐기) |
 
 ## 1. 지금 상태 한 줄
+- **2026-11-15 12:20 배포:** 사용자가 Studio File > Publish와 공개 설정을 마쳐 "[NASA] The Frontier"가 16세 이상 공개(Content May Vary). 아이콘과 썸네일 없음, 최대 인원 4 설정과 16세 미만 공개(Expand your audience)는 남음. 데모 영상 계획은 docs/video/(video-sonnet).
 2026-11-15: 팀 플레이 테스트 피드백 8건(V2_PLAN 16절)을 모두 반영하고 Studio에서 확인 중. 기지를 중간 지점으로 옮기고 밸런스를 다시 맞췄다(BALANCE_LOG 8절). 남은 확인은 에어록 프롬프트 눈 확인(MCP 캡처는 PlayerGui의 BillboardGui를 못 찍음), 직접 운전 충돌 오판, 걸어서 수리, 멀티 역할 미션.
 
 ## 2. 서브에이전트 (이름으로 SendMessage 하면 이어서 일함, 2026-11-15 세션)
