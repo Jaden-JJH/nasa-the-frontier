@@ -93,6 +93,28 @@ local CFG = {
         lightRange = 18,
         lightBrightness = 1,
         insideHeight = 3, -- 대피 이동 지점 높이 (바닥 위)
+        -- 문 상태등 (AirlockDoors가 색을 바꾼다: 열림 초록, 닫힘 빨강, SEP 잠금 빨강 깜빡임). 문 위 표지 바로 위, 바깥과 안쪽
+        lampSize = { 1.4, 0.45, 0.3 },
+        lampGap = 0.15, -- 표지 윗면과 상태등 사이
+        lampLightRange = 6,
+    },
+    -- [2026-11-15 플레이 테스트] 대피처 안 보이는 방: 에셋 외형은 충돌이 없고 한쪽 면 메시라 안에서 보이지 않고, 출입 벽은
+    -- 투명이라 안이 바깥과 같아 보였다. 산소 구역 크기의 밝은 회색 얇은 벽 4면, 천장, 바닥 판, 짧은 실내 빛을 코드로 만든다.
+    -- 외형 경계 안쪽이라 바깥 모습은 에셋 그대로. 캡슐처럼 둥근 에셋에서 모서리가 비치면 inset을 늘리거나 maxHeight를 낮춘다.
+    -- 대체 도형 오두막(placeholder)은 벽이 이미 보여서 만들지 않는다
+    interior = {
+        inset = 0.5, -- 산소 구역 옆면, 뒷면에서 안으로 (산소 구역은 외형 경계보다 entry.zoneInset 안)
+        frontGap = 0.3, -- 문 뒷면과 앞 벽 사이
+        wallThickness = 0.3,
+        minSideWall = 0.8, -- 팔각(둥근 외형) 방을 좁힐 때도 출입구 양옆에 남기는 앞 벽 길이
+        minHeight = 7.5, -- 문 + 표지 + 상태등 위
+        maxHeight = 10,
+        color = { 214, 217, 222 },
+        floorColor = { 176, 180, 188 },
+        floorThickness = 0.1,
+        lightColor = { 235, 242, 255 },
+        lightRange = 16,
+        lightBrightness = 1.2,
     },
     shelters = {
         lander = {
@@ -273,6 +295,8 @@ local CFG = {
         postCap = { 255, 205, 60 },
         panel = { 40, 42, 48 },
         console = { 255, 140, 60 },
+        doorOpen = { 70, 230, 110 }, -- 문 상태등 (AirlockDoors.CONFIG와 같은 값으로 시작)
+        doorLocked = { 235, 60, 55 },
         pipe = { 190, 192, 198 },
         ledGlow = { 255, 120, 220 },
         iceGlint = { 215, 232, 245 }, -- 얼음 후보지 가까이에서만 보이는 작은 반짝임
@@ -1470,6 +1494,34 @@ local function buildEntry(
             gui.Parent = sign
             keyedLabel(gui, signKey, frameColor)
         end
+        -- 열 때 미끄러질 방향(문 로컬 X 부호): 건물 가운데 쪽 (가장자리로 옮긴 출입구도 벽 밖으로 나가지 않게)
+        door:SetAttribute("SlideX", if doorX > cx + MIN_EXTENT then -1 else 1)
+        -- 바깥 상태등: 표지 바로 위 (AirlockDoors가 Attribute DoorLamp인 형제 파트 색을 바꾼다)
+        local lampSize = vec(e.lampSize)
+        local lamp = newPart({
+            name = "DoorLight",
+            size = lampSize,
+            cframe = frame
+                * CFrame.new(
+                    doorX,
+                    e.doorHeight + e.frameBorder + e.signHeight + e.lampGap + lampSize.Y / 2,
+                    doorZ - e.doorThickness / 4
+                ),
+            color = rgb(CFG.colors.doorLocked),
+            material = Enum.Material.Neon,
+            canCollide = false,
+            parent = entry,
+        })
+        lamp.CanQuery = false
+        lamp.CastShadow = false
+        lamp:SetAttribute("DoorLamp", true)
+        local lampLight = Instance.new("PointLight")
+        lampLight.Name = "LampLight"
+        lampLight.Color = lamp.Color
+        lampLight.Range = e.lampLightRange
+        lampLight.Brightness = 1
+        lampLight.Shadows = false
+        lampLight.Parent = lamp
         -- 내부의 따뜻한 빛 (Attachment는 파트 아래에만 둘 수 있어 표지에 붙이고 위치를 맞춘다)
         local glow = Instance.new("Attachment")
         glow.Name = "InteriorLight"
@@ -1602,6 +1654,134 @@ end
 
 -- 대피처 (착륙선, 에어록) --------------------------------------------------
 
+-- 대피처 안 보이는 방 (CFG.interior): 산소 구역 크기 상자 안쪽 면에 얇은 벽 4면(앞 벽은 doorX에 출입구), 천장, 바닥 판,
+-- 실내 빛, 안쪽 문 상태등(entry에 둔다). 벽과 천장은 충돌하고 CanQuery를 켜 둔다(카메라가 벽 뒤로 가지 않고 방 안으로 당겨진다).
+-- shape가 octagon이면 팔각 벽 안에 들어가는 정사각형. 반환: 만든 모델
+local function buildInterior(
+    parent: Instance,
+    entry: Instance,
+    frame: CFrame,
+    lo: Vector3,
+    hi: Vector3,
+    zoneMin: Vector3,
+    zoneMax: Vector3,
+    doorX: number,
+    doorZ: number,
+    shape: string
+): Model?
+    local e = CFG.entry
+    local c = CFG.interior
+    local t = c.wallThickness
+    local x0, x1 = zoneMin.X + c.inset, zoneMax.X - c.inset
+    local z0 = doorZ + e.doorThickness / 2 + c.frontGap
+    local z1 = zoneMax.Z - c.inset
+    if shape == "octagon" then
+        -- 팔각 벽(안쪽 반지름 apothem a) 안 세로로 긴 직사각형: 깊이는 문 뒤부터 산소 구역 뒷면까지 그대로 두고(뒤쪽 콘솔이
+        -- 방 안에 남게), 네 모서리가 대각 벽 안(|x| + |z| <= a sqrt(2))에 들도록 폭을 줄인다
+        local cx, cz = (lo.X + hi.X) / 2, (lo.Z + hi.Z) / 2
+        local apothem = math.max(hi.X - lo.X, hi.Z - lo.Z) / 2
+        local reach = math.max(math.abs(z0 - cz), math.abs(z1 - cz))
+        -- 작은 착륙선은 이 폭이 출입구보다 좁아지므로 출입구 + 양옆 벽 조각(minSideWall)까지는 넓힌다(모서리가 조금 비칠 수 있다)
+        local need = math.max(math.abs(doorX - cx) + e.doorGap / 2 + c.minSideWall, 0)
+        local half = math.max(apothem * math.sqrt(2) - reach - c.inset, need)
+        x0, x1 = math.max(x0, cx - half), math.min(x1, cx + half)
+    end
+    local height = math.clamp(zoneMax.Y, c.minHeight, c.maxHeight)
+    local gapLeft, gapRight = doorX - e.doorGap / 2, doorX + e.doorGap / 2
+    if x1 - x0 < e.doorGap + 2 * t or z1 - z0 < 2 * t + 1 then
+        return nil
+    end
+    local model = newModel("Interior", parent)
+    local color = rgb(c.color)
+    local function box(name: string, size: Vector3, center: Vector3, collide: boolean): Part
+        local part = newPart({
+            name = name,
+            size = size,
+            cframe = frame * CFrame.new(center),
+            color = color,
+            material = Enum.Material.SmoothPlastic,
+            canCollide = collide,
+            parent = model,
+        })
+        part.CanTouch = false
+        return part
+    end
+    local midX, midZ = (x0 + x1) / 2, (z0 + z1) / 2
+    local width, depth = x1 - x0, z1 - z0
+    box("WallBack", Vector3.new(width, height, t), Vector3.new(midX, height / 2, z1 - t / 2), true)
+    box("WallLeft", Vector3.new(t, height, depth), Vector3.new(x0 + t / 2, height / 2, midZ), true)
+    box("WallRight", Vector3.new(t, height, depth), Vector3.new(x1 - t / 2, height / 2, midZ), true)
+    local frontZ = z0 + t / 2
+    local left = math.clamp(gapLeft, x0, x1) - x0
+    local right = x1 - math.clamp(gapRight, x0, x1)
+    if left > MIN_EXTENT then
+        box(
+            "WallFrontLeft",
+            Vector3.new(left, height, t),
+            Vector3.new(x0 + left / 2, height / 2, frontZ),
+            true
+        )
+    end
+    if right > MIN_EXTENT then
+        box(
+            "WallFrontRight",
+            Vector3.new(right, height, t),
+            Vector3.new(x1 - right / 2, height / 2, frontZ),
+            true
+        )
+    end
+    local doorTop = e.doorHeight + e.frameBorder
+    if height - doorTop > MIN_EXTENT then
+        box(
+            "Lintel",
+            Vector3.new(e.doorGap, height - doorTop, t),
+            Vector3.new(doorX, (doorTop + height) / 2, frontZ),
+            true
+        )
+    end
+    local ceiling =
+        box("Ceiling", Vector3.new(width, t, depth), Vector3.new(midX, height - t / 2, midZ), true)
+    local floor = box(
+        "FloorPlate",
+        Vector3.new(width, c.floorThickness, depth),
+        Vector3.new(midX, c.floorThickness / 2 + 0.02, midZ),
+        false
+    )
+    floor.Color = rgb(c.floorColor)
+    floor.CanQuery = false
+    floor.CastShadow = false
+    -- 실내 빛: 천장 가운데 바로 아래, 짧은 거리
+    local glow = Instance.new("Attachment")
+    glow.Name = "RoomLight"
+    glow.Position = Vector3.new(0, -t / 2 - 0.3, 0)
+    local light = Instance.new("PointLight")
+    light.Color = rgb(c.lightColor)
+    light.Range = math.min(c.lightRange, math.max(width, depth))
+    light.Brightness = c.lightBrightness
+    light.Shadows = false
+    light.Parent = glow
+    glow.Parent = ceiling
+    -- 안쪽 문 상태등: 앞 벽 안쪽 면, 출입구 위 (Lintel이 없을 만큼 낮으면 출입구 옆)
+    local lampSize = vec(e.lampSize)
+    local lampY = doorTop + 0.5 + lampSize.Y / 2
+    if lampY + lampSize.Y / 2 > height - t then
+        lampY = height - t - lampSize.Y / 2 - 0.05
+    end
+    local lamp = newPart({
+        name = "DoorLightInside",
+        size = lampSize,
+        cframe = frame * CFrame.new(doorX, lampY, z0 + t + lampSize.Z / 2),
+        color = rgb(CFG.colors.doorLocked),
+        material = Enum.Material.Neon,
+        canCollide = false,
+        parent = entry,
+    })
+    lamp.CanQuery = false
+    lamp.CastShadow = false
+    lamp:SetAttribute("DoorLamp", true)
+    return model
+end
+
 local function buildShelter(id: string, parent: Instance)
     local spec = CFG.shelters[id]
     local info = markers[spec.marker]
@@ -1641,9 +1821,12 @@ local function buildShelter(id: string, parent: Instance)
     local lo, hi = boundsIn(visual, frame)
     lo = Vector3.new(lo.X, 0, lo.Z)
     local shape = if info.shape == "Cylinder" and source ~= "placeholder" then "octagon" else "box"
-    local _, door, zoneMin, zoneMax, doorZ, doorX =
+    local entryModel, door, zoneMin, zoneMax, doorZ, doorX =
         buildEntry(model, frame, lo, hi, shape, true, spec.signKey, doorOffset)
     model:SetAttribute("DoorX", doorX)
+    if source ~= "placeholder" then
+        buildInterior(model, entryModel, frame, lo, hi, zoneMin, zoneMax, doorX, doorZ, shape)
+    end
 
     local e = CFG.entry
     local zone = newMarker(

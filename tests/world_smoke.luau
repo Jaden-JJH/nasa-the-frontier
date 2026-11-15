@@ -1067,6 +1067,140 @@ do
         end
     end
     check(not visualCollide, "대피처: 외형은 충돌 없음 (걸어 들어간다)")
+    -- [2026-11-15 플레이 테스트] 안에서 보이는 방 (MissionWorld.CONFIG.interior)과 문 상태등
+    for _, shelter in { lander, airlock } do
+        local id = shelter.id
+        local frame = shelter.frame
+        local room = shelter.model:FindFirstChild("Interior")
+        check(room ~= nil, "실내: " .. id .. " 보이는 방 (Interior)")
+        if room then
+            local visible, collide = true, true
+            for _, name in { "WallBack", "WallLeft", "WallRight", "Ceiling", "Lintel" } do
+                local part = room:FindFirstChild(name)
+                if
+                    not part
+                    or part.Transparency ~= 0
+                    or part.Material ~= Enum.Material.SmoothPlastic
+                then
+                    visible = false
+                end
+                if not part or not part.CanCollide or not part.CanQuery then
+                    collide = false
+                end
+            end
+            check(
+                visible,
+                "실내: " .. id .. " 벽 3면, 천장, 문 위가 불투명한 SmoothPlastic"
+            )
+            check(
+                collide,
+                "실내: "
+                    .. id
+                    .. " 벽과 천장은 충돌, CanQuery (카메라가 벽 뒤로 안 간다)"
+            )
+            local floorPlate = room:FindFirstChild("FloorPlate")
+            check(
+                floorPlate and not floorPlate.CanCollide and floorPlate.Transparency == 0,
+                "실내: " .. id .. " 바닥 판 (충돌 없음, 턱 없음)"
+            )
+            local light = room:FindFirstChild("Ceiling")
+                and room.Ceiling:FindFirstChild("RoomLight")
+                and room.Ceiling.RoomLight:FindFirstChildOfClass("PointLight")
+            check(
+                light ~= nil and light.Range <= MissionWorld.CONFIG.interior.lightRange,
+                "실내: " .. id .. " 짧은 실내 빛"
+            )
+            local rlo, rhi = H.boundsIn(room, frame)
+            local vlo, vhi = H.boundsIn(shelter.model:FindFirstChild("Visual"), frame)
+            check(
+                rlo.X >= vlo.X - 1e-3
+                    and rhi.X <= vhi.X + 1e-3
+                    and rlo.Z >= vlo.Z - 1e-3
+                    and rhi.Z <= vhi.Z + 1e-3
+                    and rhi.Y <= vhi.Y + 1e-3,
+                string.format(
+                    "실내: %s 방은 외형 경계 안 (방 %.1f x %.1f x %.1f)",
+                    id,
+                    rhi.X - rlo.X,
+                    rhi.Y - rlo.Y,
+                    rhi.Z - rlo.Z
+                )
+            )
+            local zlo, zhi = H.boundsIn(shelter.zone, frame)
+            check(
+                rlo.X >= zlo.X - 1e-3
+                    and rhi.X <= zhi.X + 1e-3
+                    and rlo.Z >= zlo.Z - 1e-3
+                    and rhi.Z <= zhi.Z + 1e-3
+                    and rhi.Y <= zhi.Y + 1e-3,
+                "실내: " .. id .. " 방은 산소 구역 안"
+            )
+            local entryModel = shelter.model:FindFirstChild("Entry")
+            local doorPart = entryModel:FindFirstChild("Door")
+            local dlo, dhi = H.boundsIn(doorPart, frame)
+            local doorX = (dlo.X + dhi.X) / 2
+            local fl = room:FindFirstChild("WallFrontLeft")
+            local fr = room:FindFirstChild("WallFrontRight")
+            local leftEdge = if fl then select(2, H.boundsIn(fl, frame)).X else rlo.X
+            local rightEdge = if fr then H.boundsIn(fr, frame).X else rhi.X
+            local llo = H.boundsIn(room:FindFirstChild("Lintel"), frame)
+            check(
+                rightEdge - leftEdge >= doorPart.Size.X - 1e-3
+                    and leftEdge <= dlo.X + 1e-3
+                    and rightEdge >= dhi.X - 1e-3
+                    and llo.Y >= dhi.Y - 1e-3,
+                string.format(
+                    "실내: %s 앞 벽 출입구가 문 앞 (X %.2f ~ %.2f, 문 %.2f)",
+                    id,
+                    leftEdge,
+                    rightEdge,
+                    doorX
+                )
+            )
+            check(
+                rlo.Z > dhi.Z - 1e-3,
+                "실내: " .. id .. " 방은 문 뒤에서 시작 (문이 미끄러질 틈)"
+            )
+            local inside = frame:PointToObjectSpace(shelter.inside.Position)
+            check(
+                inside.X > rlo.X and inside.X < rhi.X and inside.Z > rlo.Z and inside.Z < rhi.Z,
+                "실내: " .. id .. " 대피 지점은 방 안"
+            )
+            if shelter.console then
+                local clo, chi = H.boundsIn(shelter.console, frame)
+                check(
+                    clo.X > rlo.X and chi.X < rhi.X and clo.Z > rlo.Z and chi.Z < rhi.Z - 0.3,
+                    string.format(
+                        "실내: %s 콘솔은 방 안 (뒷벽 앞) 콘솔 Z %.2f~%.2f, 방 Z %.2f~%.2f 외형 %.2f 구역 %.2f",
+                        id,
+                        clo.Z,
+                        chi.Z,
+                        rlo.Z,
+                        rhi.Z,
+                        vhi.Z,
+                        zhi.Z
+                    )
+                )
+            end
+            local lamps = 0
+            for _, child in entryModel:GetChildren() do
+                if
+                    child:GetAttribute("DoorLamp") == true
+                    and child.Material == Enum.Material.Neon
+                then
+                    lamps += 1
+                end
+            end
+            check(
+                lamps == 2,
+                "문 상태등: " .. id .. " 바깥과 안쪽 Neon 2개 (" .. lamps .. ")"
+            )
+            check(
+                doorPart:GetAttribute("SlideX") == 1 or doorPart:GetAttribute("SlideX") == -1,
+                "문: " .. id .. " 미끄러질 방향 SlideX"
+            )
+        end
+    end
     local floor = lander.model:FindFirstChild("Floor")
     local floorTop = floor.CFrame.Position.Y + floor.Size.Y / 2
     local highest = -math.huge

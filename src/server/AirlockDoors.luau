@@ -6,6 +6,9 @@
 --   2) SEP(태양 방사선 폭풍) 동안 잠금: setLocked(true)면 열린 문을 닫고(사람이 문틀에 있으면 비켜날 때까지 기다림),
 --      프롬프트를 "잠김" 키로 바꾼다. 누르면 그 플레이어에게만 "밖에 나갈 수 없어요" 토스트.
 -- MissionWorld가 만든 MissionRuntime 안의 Entry.Door를 모두 찾는다. MissionWorld.reset 뒤에는 attach를 다시 부른다.
+-- [2026-11-15 플레이 테스트] 열림과 잠김이 구별되지 않았다: 열면 문이 옆으로 미끄러져 비키고(Attribute SlideX 쪽, 문 폭만큼)
+-- 같은 Entry 안 상태등(Attribute DoorLamp인 Neon 파트, 바깥과 안쪽)이 초록, 닫히면 제자리에 불투명하게 서고 빨강,
+-- SEP 잠금 동안은 빨강이 깜빡인다.
 
 local PromptKit = require(script.Parent.PromptKit)
 local Sfx = require(script.Parent.Sfx)
@@ -15,8 +18,13 @@ local AirlockDoors = {}
 -- 엔진 수준 값 (v1 Config.AIRLOCK과 같은 값)
 AirlockDoors.CONFIG = {
     openSeconds = 6,
-    openTransparency = 0.75,
-    openColor = { 160, 175, 190 },
+    slideSeconds = 0.4, -- 문이 옆으로 비키는 시간
+    slideRatio = 0.95, -- 문 폭의 이 비율만큼 비킨다
+    animHz = 30,
+    lampOpen = { 70, 230, 110 }, -- 초록 (MissionWorld.CONFIG.colors.doorOpen)
+    lampClosed = { 235, 60, 55 }, -- 빨강 (MissionWorld.CONFIG.colors.doorLocked)
+    lampDim = { 70, 20, 20 }, -- 잠금 깜빡임의 꺼진 쪽
+    blinkSeconds = 0.5,
     promptDistance = 8,
     closeCheckDepth = 1.6, -- 닫기 전 캐릭터를 찾는 범위 = 문 두께 + 이 깊이
     closeRetrySeconds = 0.5,
@@ -28,7 +36,11 @@ type Door = {
     prompt: ProximityPrompt,
     closedColor: Color3,
     closedTransparency: number,
+    closedCFrame: CFrame,
+    slide: Vector3, -- 문 로컬 비킴 (열린 자리 = closedCFrame * slide)
+    lamps: { BasePart },
     open: boolean,
+    animToken: number,
 }
 
 local doors: { Door } = {}
@@ -46,19 +58,65 @@ local function applyPromptKeys(door: Door)
     PromptKit.setEnabled(door.prompt, locked or not door.open)
 end
 
-local function setOpen(door: Door, open: boolean)
+local function rgb(t: { number }): Color3
+    return Color3.fromRGB(t[1], t[2], t[3])
+end
+
+local function paintLamps(door: Door, color: Color3)
+    for _, lamp in door.lamps do
+        lamp.Color = color
+        local light = lamp:FindFirstChildOfClass("PointLight")
+        if light then
+            light.Color = color
+        end
+    end
+end
+
+-- 상태등: 열림 초록, 닫힘 빨강 (잠금 깜빡임은 blinkLoop가 덮어쓴다)
+local function refreshLamp(door: Door)
+    paintLamps(door, rgb(if door.open then CFG.lampOpen else CFG.lampClosed))
+end
+
+-- 문을 열린 자리나 닫힌 자리로 옮긴다 (instant면 바로)
+local function slideTo(door: Door, open: boolean, instant: boolean?)
+    door.animToken += 1
+    local token = door.animToken
+    local part = door.part
+    local target = if open then door.closedCFrame * CFrame.new(door.slide) else door.closedCFrame
+    if instant then
+        part.CFrame = target
+        return
+    end
+    local start = part.CFrame
+    local steps = math.max(1, math.floor(CFG.slideSeconds * CFG.animHz))
+    task.spawn(function()
+        for i = 1, steps do
+            task.wait(1 / CFG.animHz)
+            if token ~= door.animToken or part.Parent == nil then
+                return
+            end
+            local a = i / steps
+            part.CFrame = start:Lerp(target, a * a * (3 - 2 * a))
+        end
+    end)
+end
+
+local function setOpen(door: Door, open: boolean, instant: boolean?)
     door.open = open
     door.part.CanCollide = not open
-    door.part.Transparency = if open then CFG.openTransparency else door.closedTransparency
-    door.part.Color = if open
-        then Color3.fromRGB(CFG.openColor[1], CFG.openColor[2], CFG.openColor[3])
-        else door.closedColor
+    door.part.Transparency = door.closedTransparency
+    door.part.Color = door.closedColor
+    door.part:SetAttribute("Open", open)
+    slideTo(door, open, instant)
+    refreshLamp(door)
     applyPromptKeys(door)
 end
 
-local function characterInDoorway(part: BasePart): boolean
+-- 문틀(닫힌 자리) 안에 캐릭터가 있는지. 열린 문은 옆으로 비켜 있으므로 닫힌 자리를 본다
+local function characterInDoorway(door: Door): boolean
+    local part = door.part
     local size = part.Size + Vector3.new(0, 0, CFG.closeCheckDepth)
-    for _, hit in workspace:GetPartBoundsInBox(part.CFrame, size) do
+    for _, hit in workspace:GetPartBoundsInBox(door.closedCFrame, size) do
         local model = hit:FindFirstAncestorOfClass("Model")
         if model and model:FindFirstChildOfClass("Humanoid") then
             return true
@@ -69,7 +127,7 @@ end
 
 -- 문틀이 비면 닫는다 (지금 세대가 끝나면 그만둔다)
 local function closeWhenClear(door: Door, myGeneration: number)
-    while myGeneration == generation and characterInDoorway(door.part) do
+    while myGeneration == generation and characterInDoorway(door) do
         task.wait(CFG.closeRetrySeconds)
     end
     if myGeneration == generation and door.open then
@@ -120,14 +178,26 @@ function AirlockDoors.attach(root: Instance)
                 hold = 0,
                 distance = CFG.promptDistance,
             })
+            local lamps: { BasePart } = {}
+            for _, sibling in parent:GetChildren() do
+                if sibling:IsA("BasePart") and sibling:GetAttribute("DoorLamp") == true then
+                    table.insert(lamps, sibling)
+                end
+            end
+            local side = descendant:GetAttribute("SlideX")
+            local sign = if typeof(side) == "number" and side < 0 then -1 else 1
             local door: Door = {
                 part = descendant,
                 prompt = prompt,
                 closedColor = descendant.Color,
                 closedTransparency = descendant.Transparency,
+                closedCFrame = descendant.CFrame,
+                slide = Vector3.new(sign * descendant.Size.X * CFG.slideRatio, 0, 0),
+                lamps = lamps,
                 open = false,
+                animToken = 0,
             }
-            setOpen(door, false)
+            setOpen(door, false, true)
             table.insert(doors, door)
             table.insert(
                 connections,
@@ -156,6 +226,25 @@ function AirlockDoors.detach()
     table.clear(doors)
 end
 
+-- 잠금 동안 닫힌 문 상태등을 빨강 / 어두운 빨강으로 깜빡인다 (세대가 바뀌거나 잠금이 풀리면 멈춘다)
+local function blinkLoop(myGeneration: number)
+    local on = true
+    while locked and myGeneration == generation do
+        for _, door in doors do
+            if not door.open then
+                paintLamps(door, rgb(if on then CFG.lampClosed else CFG.lampDim))
+            end
+        end
+        on = not on
+        task.wait(CFG.blinkSeconds)
+    end
+    if myGeneration == generation then
+        for _, door in doors do
+            refreshLamp(door)
+        end
+    end
+end
+
 -- SEP 잠금 (Q15). 열린 문은 문틀이 비면 바로 닫는다
 function AirlockDoors.setLocked(value: boolean)
     if locked == value then
@@ -166,10 +255,14 @@ function AirlockDoors.setLocked(value: boolean)
     local myGeneration = generation
     for _, door in doors do
         applyPromptKeys(door)
+        refreshLamp(door)
         -- 세대를 바꿔 이전 닫기 대기가 멈췄으므로 열린 문은 다시 닫기를 기다린다
         if door.open then
             task.spawn(closeWhenClear, door, myGeneration)
         end
+    end
+    if locked then
+        task.spawn(blinkLoop, myGeneration)
     end
 end
 
