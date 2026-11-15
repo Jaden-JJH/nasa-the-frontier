@@ -868,6 +868,34 @@ function ClientMath.iceLabel(site: any): { [string]: any }
     return { key = "map.ice.label", args = { n = ClientMath.iceNumber(site) } }
 end
 
+-- 물 파이프 지점을 지금 고를 수 있는지: 파이프가 해금(available)됐고 아직 지점이 없다. 역할과 무관
+-- (CONTRACT_V2 9.1 7번 SetPipeSite는 역할 제한 없음. 지도 전체 보기와 핀만 관제사 전용, Q25)
+function ClientMath.pipePickOpen(state: any): boolean
+    if type(state) ~= "table" or state.pipeSite ~= nil or type(state.facilities) ~= "table" then
+        return false
+    end
+    local pipe = state.facilities.pipe
+    return type(pipe) == "table" and pipe.status == "available"
+end
+
+-- 지도 없이 고르는 파이프 지점 목록 (관제사가 아닌 멀티 대원): 파이프가 아직 없는 얼음 후보지, siteIndex(가까운) 순.
+-- 고를 수 없으면 빈 표
+function ClientMath.pipePickSites(state: any): { any }
+    local out = {}
+    if not ClientMath.pipePickOpen(state) or type(state.ice) ~= "table" then
+        return out
+    end
+    for _, site in state.ice do
+        if type(site) == "table" and isNumber(site.index) and site.pipe ~= true then
+            table.insert(out, site)
+        end
+    end
+    table.sort(out, function(a, b)
+        return a.index < b.index
+    end)
+    return out
+end
+
 -- siteIndex(정렬 순서, 핀과 파견이 쓰는 번호)로 StateUpdate ice 항목 찾기. 없으면 nil
 function ClientMath.iceEntry(state: any, siteIndex: any): any
     if type(state) ~= "table" or type(state.ice) ~= "table" or siteIndex == nil then

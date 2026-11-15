@@ -6,6 +6,8 @@
 -- - 지도: 콘솔 지도(ConsoleMap) + 오른쪽 패널. 고른 얼음 후보지의 상태와 거리,
 --   솔로는 로버 파견(왕복 약 N일, 에너지, 가져오는 물, 위험도, 서둘러 가기, DispatchRover),
 --   멀티 관제사는 핀 찍기/지우기(SetPin), 파이프 해금 뒤에는 파이프 지점 고르기(SetPipeSite).
+--   파이프 지점은 역할과 무관하게 누구나 고른다(CONTRACT_V2 9.1 7번): 지도를 못 쓰는 대원에게는 지도 대신
+--   얼음 후보지 목록(PipeList)을 보이고, 고르면 오른쪽에 "여기에 물 파이프 연결" 버튼이 나온다.
 --   아래에 로버 상태와 고장 때 원격 회수(RemoteRecoverRover). 멀티에서 관제사가 아니면 전체 지도는 잠긴다(Q25).
 --   GST 중에는 지도가 지직거리고 파견, 핀, 파이프 버튼이 꺼진다.
 -- - 기지: 시설 목록(상태, 하루 유지비, 멈추기/다시 켜기 SetFacilityPaused, Q33)과 태양광 패널 수.
@@ -99,6 +101,9 @@ local pages = {}
 local currentTab = "map"
 local mapHolder
 local lockedNote
+local pipeList -- 지도를 못 쓰는 대원용 파이프 지점 목록 패널
+local pipeListRows -- 목록 버튼을 담는 프레임
+local pipeListSig = "" -- 목록이 바뀌었을 때만 버튼을 다시 만든다
 local sideScroll
 local baseScroll
 local crewScroll
@@ -620,9 +625,11 @@ local function refreshSite(state)
     local site = selectedSite and iceEntry(state, selectedSite)
     local canMap = Session.canUseMap()
     local gst = Session.isGst()
+    local pipeOpen = ClientMath.pipePickOpen(state)
+    -- 지도를 못 쓰는 대원도 파이프 지점은 고른다 (고른 직후 "연결됨" 안내도 보이게)
     side.siteSection.Visible = canMap
-    local pipe = (state.facilities or {}).pipe
-    local pipeOpen = type(pipe) == "table" and pipe.status == "available" and state.pipeSite == nil
+        or pipeOpen
+        or (selectedSite ~= nil and state.pipeSite == selectedSite)
     if not site then
         UI.msg(side.siteTitle, "map.tab.map")
         side.siteStatus.Visible = false
@@ -1182,6 +1189,7 @@ local function fit()
     local mapWidth = width - PANEL_PAD * 2 - sideWidth - CONTENT_GAP
     ConsoleMap.setSize(mapWidth, contentHeight)
     lockedNote.Size = UDim2.fromOffset(mapWidth, contentHeight)
+    pipeList.Size = UDim2.fromOffset(mapWidth, contentHeight)
     sideScroll.Size = UDim2.fromOffset(sideWidth, contentHeight)
     sideScroll.Position = UDim2.fromOffset(mapWidth + CONTENT_GAP, 0)
     if openFlag and currentTab == "map" then
@@ -1207,6 +1215,59 @@ local function onTick(dt)
     end
 end
 
+-- 파이프 지점 목록 (지도를 못 쓰는 대원). 후보지가 바뀌면 버튼을 다시 만들고, 고른 줄은 민트로
+local function refreshPipeList(state)
+    local list = ClientMath.pipePickSites(state)
+    local parts = {}
+    for _, site in ipairs(list) do
+        table.insert(parts, tostring(site.index) .. ":" .. tostring(site.distance))
+    end
+    local sig = table.concat(parts, ",")
+    if sig ~= pipeListSig then
+        pipeListSig = sig
+        for _, child in ipairs(pipeListRows:GetChildren()) do
+            if child:IsA("GuiButton") then
+                child:Destroy()
+            end
+        end
+        for order, site in ipairs(list) do
+            local button = UI.lunaButton({
+                Name = "Site" .. site.index,
+                LayoutOrder = order,
+                Size = UDim2.new(1, 0, 0, 44),
+            }, false)
+            button:SetAttribute("SiteIndex", site.index)
+            local label = ClientMath.iceLabel(site)
+            if type(site.distance) == "number" then
+                label = {
+                    key = "fmt.list.start",
+                    args = {
+                        a = label,
+                        b = {
+                            key = "map.ice.distance",
+                            args = {
+                                n = ClientMath.toMeters(site.distance, MissionConfig.metersPerStud),
+                            },
+                        },
+                    },
+                }
+            end
+            UI.msg(button, label)
+            button.Activated:Connect(function()
+                selectedSite = site.index
+                ConsoleUI.refresh()
+            end)
+            button.Parent = pipeListRows
+        end
+    end
+    for _, child in ipairs(pipeListRows:GetChildren()) do
+        if child:IsA("GuiButton") then
+            local chosen = child:GetAttribute("SiteIndex") == selectedSite
+            UI.setButtonEnabled(child, true, chosen)
+        end
+    end
+end
+
 -- 상태나 역할이 바뀌면 보이는 탭을 다시 그린다
 function ConsoleUI.refresh()
     local state = Session.state
@@ -1214,8 +1275,13 @@ function ConsoleUI.refresh()
         return
     end
     local canMap = Session.canUseMap()
+    local listOpen = not canMap and ClientMath.pipePickOpen(state)
     mapHolder.Visible = canMap
-    lockedNote.Visible = not canMap
+    lockedNote.Visible = not canMap and not listOpen
+    pipeList.Visible = listOpen
+    if listOpen then
+        refreshPipeList(state)
+    end
     ConsoleMap.setSelected(selectedSite)
     ConsoleMap.refresh()
     refreshSite(state)
@@ -1235,7 +1301,8 @@ function ConsoleUI.open(promptParent)
     openFlag = true
     gui.Enabled = true
     fit()
-    setTab(if Session.canUseMap() then "map" else "base")
+    local pickPipe = ClientMath.pipePickOpen(Session.state)
+    setTab(if Session.canUseMap() or pickPipe then "map" else "base")
     ConsoleUI.refresh()
     tickConn = RunService.Heartbeat:Connect(onTick)
 end
@@ -1384,6 +1451,34 @@ function ConsoleUI.init(_ctx)
         Visible = false,
         Parent = mapPage,
     }, { lockedText }, 14)
+    -- 지도를 못 쓰는 대원용 파이프 지점 목록 (지도 그림 없이)
+    local listHint = textLabel({
+        Name = "Hint",
+        LayoutOrder = 1,
+        FontFace = UI.RoundBold,
+        TextSize = 18,
+        TextColor3 = L.sky,
+    })
+    UI.msg(listHint, "toast.pipe.pick_site")
+    pipeListRows = UI.create("Frame", {
+        Name = "Rows",
+        LayoutOrder = 2,
+        Size = UDim2.fromScale(1, 0),
+        AutomaticSize = Enum.AutomaticSize.Y,
+        BackgroundTransparency = 1,
+    }, { UI.list(Enum.FillDirection.Vertical, 8) })
+    pipeList = UI.lunaPanel({
+        Name = "PipeList",
+        Size = UDim2.fromOffset(600, 460),
+        BackgroundTransparency = 0.92,
+        Visible = false,
+        Parent = mapPage,
+    }, {
+        UI.padding(16),
+        UI.list(Enum.FillDirection.Vertical, 12),
+        listHint,
+        pipeListRows,
+    }, 14)
     sideScroll = scrollPage("Side")
     sideScroll.Parent = mapPage
     buildSide()

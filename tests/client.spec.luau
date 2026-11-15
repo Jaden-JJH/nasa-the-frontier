@@ -579,4 +579,29 @@ return function(t)
         t.eq(ClientMath.toMeters(nil, 1.25), 0, "잘못된 값")
         t.eq(ClientMath.toMeters(185, MissionConfig.metersPerStud), 232, "Ice4 185 stud")
     end)
+
+    t.test(
+        "ClientMath: 파이프 지점 고르기는 역할과 무관 (해금되고 지점이 없을 때만)",
+        function()
+            local ice = {
+                { index = 3, distance = 810, pipe = false },
+                { index = 1, distance = 412, pipe = false },
+                { index = 2, distance = 421, pipe = true },
+            }
+            local open = { facilities = { pipe = { status = "available" } }, ice = ice }
+            t.truthy(ClientMath.pipePickOpen(open), "해금, 지점 없음")
+            local list = ClientMath.pipePickSites(open)
+            t.eq(#list, 2, "파이프가 이미 있는 후보지는 뺀다")
+            t.eq(list[1].index, 1, "가까운(siteIndex) 순")
+            t.eq(list[2].index, 3)
+            local chosen =
+                { facilities = { pipe = { status = "available" } }, ice = ice, pipeSite = 1 }
+            t.falsy(ClientMath.pipePickOpen(chosen), "이미 고르면 닫힘")
+            t.eq(#ClientMath.pipePickSites(chosen), 0)
+            local locked = { facilities = { pipe = { status = "locked" } }, ice = ice }
+            t.falsy(ClientMath.pipePickOpen(locked), "해금 전")
+            t.falsy(ClientMath.pipePickOpen({ ice = ice }), "시설 정보 없음")
+            t.falsy(ClientMath.pipePickOpen(nil))
+        end
+    )
 end
