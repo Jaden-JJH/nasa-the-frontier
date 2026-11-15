@@ -868,6 +868,187 @@ function ClientMath.iceLabel(site: any): { [string]: any }
     return { key = "map.ice.label", args = { n = ClientMath.iceNumber(site) } }
 end
 
+-- 화면 배율 (client Layout과 같은 식): 높이 720 기준, 0.7 ~ 1.25
+function ClientMath.layoutScale(viewportHeight: number): number
+    return math.clamp(viewportHeight / 720, 0.7, 1.25)
+end
+
+-- HUD 위쪽 배치 (2026-11-15 Studio: 폭 673 x 1080에서 "Day N of 60" 상자가 식량 칩을 가렸다). 가상 좌표(배율 적용 뒤).
+-- 입력: width(가상 폭), compact, 실측 폭과 높이(dayW: 날짜 상자, rightW, rightH: 오른쪽 로버, 배터리 열), stalled(정지 표시).
+-- 규칙: 1) 자원 칩 줄과 오른쪽 열이 한 줄에 안 들어가면 칩을 chipMin까지 줄이고, 그래도 안 되면 오른쪽 열을 칩 줄 아래로.
+--   2) 날짜 상자가 칩 줄과 오른쪽 열 사이 가운데에 들어가면 맨 위(top), 미션 문구가 옆 묶음과 겹치면 그 아래로 띄운다(spacer).
+--   3) 날짜 상자도 안 들어가면 가운데 묶음 전체를 칩 줄, 오른쪽 열, 정지 표시 아래로(below).
+-- 반환 필드는 HUDV2가 그대로 쓴다. hudRects는 같은 값으로 상자 목록을 만들어 겹침 검사에 쓴다
+ClientMath.HUD = {
+    edge = 12,
+    gap = 8,
+    top = 8,
+    chipGap = 8,
+    dayH = 34,
+    listGap = 6,
+    stallH = 26,
+    pc = {
+        chipW = 132,
+        chipH = 54,
+        chipMin = 104,
+        missionW = 520,
+        dayW = 300,
+        rightW = 220,
+        rightH = 100,
+    },
+    compact = {
+        chipW = 100,
+        chipH = 42,
+        chipMin = 84,
+        missionW = 340,
+        dayW = 170,
+        rightW = 190,
+        rightH = 90,
+    },
+}
+
+export type HudLayout = {
+    mode: string, -- "top" | "below"
+    chipW: number,
+    chipH: number,
+    rightTop: number, -- 오른쪽 열 윗변 y
+    centerTop: number, -- 가운데 묶음(날짜 상자) 윗변 y
+    centerW: number, -- 미션 문구, 우주 기상, 역할 카드 폭
+    spacer: number, -- 날짜 상자와 미션 문구 사이 띄움 (0이면 없음, 아니면 그 높이의 빈 줄)
+    stallTop: number, -- 정지 표시 윗변 y (x는 edge)
+}
+
+function ClientMath.hudLayout(input: any): HudLayout
+    local H = ClientMath.HUD
+    local base = if input.compact then H.compact else H.pc
+    local W = if isNumber(input.width) then input.width else 1280
+    local dayW = if isNumber(input.dayW) and input.dayW > 0 then input.dayW else base.dayW
+    local rightW = if isNumber(input.rightW) and input.rightW > 0 then input.rightW else base.rightW
+    local rightH = if isNumber(input.rightH) and input.rightH > 0 then input.rightH else base.rightH
+    local function rowWidth(chipW: number): number
+        return 3 * chipW + 2 * H.chipGap
+    end
+    local chipW = base.chipW
+    local rightTop = H.top
+    if H.edge + rowWidth(chipW) + H.gap + rightW + H.edge > W then
+        local fit = math.floor((W - 2 * H.edge - H.gap - rightW - 2 * H.chipGap) / 3)
+        if fit >= base.chipMin then
+            chipW = fit
+        else
+            chipW = math.min(base.chipW, math.floor((W - 2 * H.edge - 2 * H.chipGap) / 3))
+            rightTop = -1 -- 아래에서 칩 줄(과 정지 표시) 밑으로 정한다
+        end
+    end
+    local leftRight = H.edge + rowWidth(chipW)
+    local leftBottom = H.top + base.chipH
+    local stallTop = leftBottom + H.gap
+    local leftLow = if input.stalled then stallTop + H.stallH else leftBottom
+    if rightTop < 0 then
+        rightTop = leftLow + H.gap
+    end
+    local rightLeft = W - H.edge - rightW
+    local rightBottom = rightTop + rightH
+    local mid = W / 2
+    local centerW = math.min(base.missionW, W - 2 * H.edge)
+    local function clearsLeft(width: number): boolean
+        return mid - width / 2 >= leftRight + H.gap
+    end
+    local function clearsRight(width: number): boolean
+        return rightTop > H.top + base.chipH or mid + width / 2 <= rightLeft - H.gap
+    end
+    local dayFits = rightTop == H.top and clearsLeft(dayW) and clearsRight(dayW)
+    if dayFits then
+        local missionTop = H.top + H.dayH + H.listGap
+        local needed = missionTop
+        if not clearsLeft(centerW) then
+            needed = math.max(needed, leftLow + H.gap)
+        end
+        if not clearsRight(centerW) then
+            needed = math.max(needed, rightBottom + H.gap)
+        end
+        local spacer = if needed > missionTop
+            then math.max(1, needed - missionTop - H.listGap)
+            else 0
+        return {
+            mode = "top",
+            chipW = chipW,
+            chipH = base.chipH,
+            rightTop = rightTop,
+            centerTop = H.top,
+            centerW = centerW,
+            spacer = spacer,
+            stallTop = stallTop,
+        }
+    end
+    return {
+        mode = "below",
+        chipW = chipW,
+        chipH = base.chipH,
+        rightTop = rightTop,
+        centerTop = math.max(leftLow, rightBottom) + H.gap,
+        centerW = centerW,
+        spacer = 0,
+        stallTop = stallTop,
+    }
+end
+
+-- hudLayout 결과의 상자들 (가상 좌표 { name, x0, y0, x1, y1 }). 미션 문구는 윗부분 높이 missionH만 본다
+function ClientMath.hudRects(input: any, layout: HudLayout, missionH: number?): { any }
+    local H = ClientMath.HUD
+    local base = if input.compact then H.compact else H.pc
+    local W = if isNumber(input.width) then input.width else 1280
+    local dayW = if isNumber(input.dayW) and input.dayW > 0 then input.dayW else base.dayW
+    local rightW = if isNumber(input.rightW) and input.rightW > 0 then input.rightW else base.rightW
+    local rightH = if isNumber(input.rightH) and input.rightH > 0 then input.rightH else base.rightH
+    local rects = {}
+    for i = 1, 3 do
+        local x0 = H.edge + (i - 1) * (layout.chipW + H.chipGap)
+        table.insert(rects, {
+            name = "chip" .. i,
+            x0 = x0,
+            y0 = H.top,
+            x1 = x0 + layout.chipW,
+            y1 = H.top + layout.chipH,
+        })
+    end
+    table.insert(rects, {
+        name = "right",
+        x0 = W - H.edge - rightW,
+        y0 = layout.rightTop,
+        x1 = W - H.edge,
+        y1 = layout.rightTop + rightH,
+    })
+    if input.stalled then
+        table.insert(rects, {
+            name = "stalled",
+            x0 = H.edge,
+            y0 = layout.stallTop,
+            x1 = H.edge + 3 * layout.chipW + 2 * H.chipGap,
+            y1 = layout.stallTop + H.stallH,
+        })
+    end
+    local mid = W / 2
+    table.insert(rects, {
+        name = "day",
+        x0 = mid - dayW / 2,
+        y0 = layout.centerTop,
+        x1 = mid + dayW / 2,
+        y1 = layout.centerTop + H.dayH,
+    })
+    local missionTop = layout.centerTop
+        + H.dayH
+        + H.listGap
+        + (if layout.spacer > 0 then layout.spacer + H.listGap else 0)
+    table.insert(rects, {
+        name = "mission",
+        x0 = mid - layout.centerW / 2,
+        y0 = missionTop,
+        x1 = mid + layout.centerW / 2,
+        y1 = missionTop + (missionH or 60),
+    })
+    return rects
+end
+
 -- 상자 로컬 좌표 point(X, Y, Z)가 크기 size인 상자(가운데 원점) 안인지. margin만큼 넓혀 본다
 -- (대피처 실내 방: 카메라가 방 안일 때만 방을 보인다, InteriorView)
 function ClientMath.insideBox(point: any, size: any, margin: number?): boolean

@@ -614,4 +614,54 @@ return function(t)
         t.falsy(ClientMath.insideBox({ X = 0, Y = 4.5, Z = 0 }, size, 0.3), "천장 위")
         t.falsy(ClientMath.insideBox(nil, size), "잘못된 값")
     end)
+
+    t.test(
+        "ClientMath: HUD 위쪽 배치는 폭 360 / 673 / 1280 / 1920에서 겹치지 않는다",
+        function()
+            local screens = {
+                { w = 360, h = 740, compact = true }, -- 폰 세로 (터치라 compact)
+                { w = 673, h = 1080, compact = false }, -- Studio 세로로 긴 뷰포트 (보고된 겹침)
+                { w = 1280, h = 720, compact = false },
+                { w = 1920, h = 1080, compact = false },
+                { w = 673, h = 1080, compact = true },
+            }
+            for _, screen in screens do
+                for _, stalled in { false, true } do
+                    local width = screen.w / ClientMath.layoutScale(screen.h)
+                    local input = { width = width, compact = screen.compact, stalled = stalled }
+                    local layout = ClientMath.hudLayout(input)
+                    local rects = ClientMath.hudRects(input, layout, 80)
+                    local label = string.format(
+                        "%dx%d%s%s (%s, 칩 %d)",
+                        screen.w,
+                        screen.h,
+                        if screen.compact then " compact" else "",
+                        if stalled then " 정지" else "",
+                        layout.mode,
+                        layout.chipW
+                    )
+                    for i = 1, #rects do
+                        local a = rects[i]
+                        t.truthy(
+                            a.x0 >= 0 and a.x1 <= width + 1e-6,
+                            label .. ": " .. a.name .. " 화면 안"
+                        )
+                        for j = i + 1, #rects do
+                            local b = rects[j]
+                            t.falsy(
+                                ClientMath.rectsOverlap(a, b),
+                                label .. ": " .. a.name .. " / " .. b.name
+                            )
+                        end
+                    end
+                end
+            end
+            -- 보고된 화면: 날짜 상자는 칩 줄 아래로 내려간다 (또는 칩과 겹치지 않는 자리)
+            local narrow = ClientMath.hudLayout({ width = 673 / 1.25, compact = false })
+            t.eq(narrow.mode, "below", "673 x 1080: 가운데 묶음을 아래로")
+            local wide = ClientMath.hudLayout({ width = 1920 / 1.25, compact = false })
+            t.eq(wide.mode, "top", "1920 x 1080: 맨 위 가운데")
+            t.eq(wide.chipW, ClientMath.HUD.pc.chipW, "넓은 화면은 칩 크기 그대로")
+        end
+    )
 end

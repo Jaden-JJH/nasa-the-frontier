@@ -9,6 +9,8 @@
 --   아이콘, 배지 이름, 진행 n / goal, 끝나면 체크와 "완료!" + 잠깐 커지는 효과. compact는 한 줄(설명 숨김)
 -- 숫자는 화면용으로 내림(ClientMath.wholeNumber). 문구는 모두 Localizer(UI.msg)로 그린다.
 -- compact(Layout.isCompact)는 칩과 글자를 줄이고 남은 일수 줄을 숨긴다.
+-- 위쪽 배치(칩 폭, 오른쪽 열 높이, 가운데 묶음 위치)는 ClientMath.hudLayout이 화면 폭과 실측 크기로 정한다
+-- (2026-11-15 Studio: 폭 673 x 1080에서 날짜 상자가 식량 칩을 가렸다. 좁으면 칩을 줄이거나 묶음을 아래로).
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -81,6 +83,9 @@ local weatherName
 local weatherText
 local weatherSource
 local rightColumn
+local dayRow
+local missionSpacer -- 날짜 상자와 미션 문구 사이 띄움 (미션 문구가 옆 묶음과 겹칠 때만)
+local layoutQueued = false
 local roverChip
 local roverLabel
 local batteryChip
@@ -250,9 +255,9 @@ local function buildCenter()
         TextSize = 14,
         TextColor3 = L.dim,
     })
-    local dayRow = UI.lunaPanel({
+    dayRow = UI.lunaPanel({
         Name = "DayPanel",
-        LayoutOrder = 1,
+        LayoutOrder = 0,
         Size = UDim2.fromOffset(0, 34),
         AutomaticSize = Enum.AutomaticSize.X,
         BackgroundColor3 = L.bgTop,
@@ -467,6 +472,13 @@ local function buildCenter()
     }, 14)
     roleStroke = roleCard:FindFirstChildOfClass("UIStroke")
 
+    missionSpacer = UI.create("Frame", {
+        Name = "Spacer",
+        LayoutOrder = 1,
+        Size = UDim2.fromOffset(1, 0),
+        BackgroundTransparency = 1,
+        Visible = false,
+    })
     center = UI.create("Frame", {
         Name = "Center",
         AnchorPoint = Vector2.new(0.5, 0),
@@ -478,6 +490,7 @@ local function buildCenter()
     }, {
         UI.list(Enum.FillDirection.Vertical, 6, Enum.HorizontalAlignment.Center),
         dayRow,
+        missionSpacer,
         missionPanel,
         weatherPanel,
         roleCard,
@@ -609,34 +622,53 @@ local function applyLayout()
         return
     end
     local s = sizes()
+    local scale = Layout.scale()
+    local screenW = if gui and gui.AbsoluteSize.X > 0
+        then gui.AbsoluteSize.X
+        else (workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize.X or 1280)
+    local plan = ClientMath.hudLayout({
+        width = screenW / scale,
+        compact = Layout.isCompact(),
+        dayW = dayRow.AbsoluteSize.X / scale,
+        rightW = rightColumn.AbsoluteSize.X / scale,
+        rightH = rightColumn.AbsoluteSize.Y / scale,
+        stalled = stalledChip.Visible,
+    })
     for _, chip in pairs(chips) do
-        chip.frame.Size = UDim2.fromOffset(s.chipW, s.chipH)
+        chip.frame.Size = UDim2.fromOffset(plan.chipW, s.chipH)
         chip.number.TextSize = s.number
         chip.number.Position = UDim2.fromOffset(s.icon + 14, 4)
         chip.icon.Size = UDim2.fromOffset(s.icon, s.icon)
     end
     dayLabel.TextSize = s.dayText
     daysLeftLabel.Visible = not Layout.isCompact()
-    missionPanel.Size = UDim2.fromOffset(s.missionW, 0)
-    weatherPanel.Size = UDim2.fromOffset(s.missionW, 0)
-    roleCard.Size = UDim2.fromOffset(s.missionW, 0)
+    missionPanel.Size = UDim2.fromOffset(plan.centerW, 0)
+    weatherPanel.Size = UDim2.fromOffset(plan.centerW, 0)
+    roleCard.Size = UDim2.fromOffset(plan.centerW, 0)
     -- compact는 역할 미션을 한 줄로 (머리글과 설명 숨김)
     roleTitle.Visible = not Layout.isCompact()
     roleDesc.Visible = not Layout.isCompact()
-    center.Size = UDim2.fromOffset(s.missionW, 0)
+    center.Size = UDim2.fromOffset(plan.centerW, 0)
     missionLabel.TextSize = s.body
     weatherText.TextSize = s.body
-    -- compact는 가운데 묶음을 자원 줄 아래로 내려 겹치지 않게 한다
-    local rowHeight = s.chipH + 8
-    if Layout.isCompact() then
-        center.AnchorPoint = Vector2.new(0, 0)
-        center.Position = UDim2.fromOffset(EDGE, 8 + rowHeight + 4)
-        stalledChip.Position = UDim2.fromOffset(EDGE + s.missionW + 8, 8 + rowHeight + 4)
-    else
-        center.AnchorPoint = Vector2.new(0.5, 0)
-        center.Position = UDim2.new(0.5, 0, 0, 8)
-        stalledChip.Position = UDim2.fromOffset(EDGE, 8 + rowHeight)
+    center.AnchorPoint = Vector2.new(0.5, 0)
+    center.Position = UDim2.new(0.5, 0, 0, plan.centerTop)
+    missionSpacer.Visible = plan.spacer > 0
+    missionSpacer.Size = UDim2.fromOffset(1, plan.spacer)
+    rightColumn.Position = UDim2.new(1, -EDGE, 0, plan.rightTop)
+    stalledChip.Position = UDim2.fromOffset(EDGE, plan.stallTop)
+end
+
+-- 크기가 바뀌면 다음 프레임에 한 번 다시 배치 (같은 프레임에 여러 신호가 와도 한 번)
+local function queueLayout()
+    if layoutQueued then
+        return
     end
+    layoutQueued = true
+    task.defer(function()
+        layoutQueued = false
+        applyLayout()
+    end)
 end
 
 local function weatherBanner(state)
@@ -819,6 +851,9 @@ function HUDV2.init(_ctx)
     buildRight()
     applyLayout()
     Layout.changed:Connect(applyLayout)
+    gui:GetPropertyChangedSignal("AbsoluteSize"):Connect(queueLayout)
+    dayRow:GetPropertyChangedSignal("AbsoluteSize"):Connect(queueLayout)
+    rightColumn:GetPropertyChangedSignal("AbsoluteSize"):Connect(queueLayout)
     RoverBoost.drivingChanged:Connect(function()
         if lastState then
             refreshRover(lastState)
@@ -864,7 +899,10 @@ function HUDV2.update(state)
         missionPanel.Visible = false
     end
 
-    stalledChip.Visible = state.stalled == true
+    if stalledChip.Visible ~= (state.stalled == true) then
+        stalledChip.Visible = state.stalled == true
+        queueLayout()
+    end
     if state.stalled then
         UI.msg(stalledLabel, STALL_KEYS[state.stallReason] or "hud.stalled")
     end
