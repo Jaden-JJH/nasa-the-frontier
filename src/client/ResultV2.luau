@@ -668,12 +668,22 @@ end
 function ResultV2.init(_ctx)
     gui = UI.gui("ResultV2", 110)
     gui.Enabled = false
+    -- UIGradient를 CanvasGroup에 직접 달면 그룹 전체(글자, 패널 포함)가 그 색으로 물든다.
+    -- 그래서 그라데이션은 맨 뒤 배경 판(Backdrop)에만 단다
     fadeGroup = UI.create("CanvasGroup", {
         Name = "Fade",
         Size = UDim2.fromScale(1, 1),
+        BackgroundTransparency = 1,
+        Parent = gui,
+    })
+    UI.create("Frame", {
+        Name = "Backdrop",
+        Size = UDim2.fromScale(1, 1),
         BackgroundColor3 = L.white,
         BackgroundTransparency = 0.04,
-        Parent = gui,
+        BorderSizePixel = 0,
+        ZIndex = 0,
+        Parent = fadeGroup,
     }, { UI.lunaGradient() })
     local root = Layout.root(gui)
     root.Parent = fadeGroup
