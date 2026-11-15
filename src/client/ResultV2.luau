@@ -32,6 +32,7 @@ local PAD = 16
 local TOP_LIMIT = 5
 local FADE_SECONDS = 0.35
 local RESTART_RETRY_SECONDS = 3
+local RANK_VALUE_WIDTH = 190 -- 순위 줄 오른쪽 값 ("Score: 1000 and 1 day" 한 줄 14px). 이름은 그만큼 좁힌다
 
 -- 리터럴 키 표
 local MEDAL_KEYS =
@@ -57,6 +58,11 @@ local CREW_COLUMNS = {
 
 local gui
 local fadeGroup
+local summaryTiles -- 메달, 일수, 점수 칸 (GameOver 전 늦은 입장자 화면에서는 숨김)
+local scorePanelFrame
+local crewPanelFrame
+local contentRoot -- Layout.root. 페이드가 끝나면 fadeGroup 밖(gui 바로 아래)으로 옮겨 글자를 선명하게, 숨기면 되돌린다
+local fadeToken = 0
 local scroll
 local stage
 local stageLayout
@@ -91,7 +97,6 @@ local function label(props)
         BackgroundTransparency = 1,
         Size = UDim2.fromScale(1, 0),
         AutomaticSize = Enum.AutomaticSize.Y,
-        Font = UI.Font,
         TextSize = 16,
         TextColor3 = L.body,
         TextWrapped = true,
@@ -99,6 +104,10 @@ local function label(props)
     }
     for key, value in pairs(props or {}) do
         merged[key] = value
+    end
+    -- Font와 FontFace를 같이 넣으면 적용 순서에 따라 한쪽이 덮인다. FontFace가 있으면 Font는 넣지 않는다
+    if merged.FontFace == nil and merged.Font == nil then
+        merged.Font = UI.Font
     end
     return UI.create("TextLabel", merged)
 end
@@ -184,7 +193,7 @@ local function rankRow(order, rank, color, nameText, valueText, mine)
     local nameLabel = UI.create("TextLabel", {
         Name = "Name",
         Position = UDim2.fromOffset(76, 0),
-        Size = UDim2.new(1, -200, 1, 0),
+        Size = UDim2.new(1, -(76 + RANK_VALUE_WIDTH + 16), 1, 0),
         Font = UI.FontBold,
         TextSize = 15,
         TextColor3 = L.white,
@@ -202,14 +211,16 @@ local function rankRow(order, rank, color, nameText, valueText, mine)
         Name = "Value",
         AnchorPoint = Vector2.new(1, 0),
         Position = UDim2.new(1, -8, 0, 0),
-        Size = UDim2.new(0, 120, 1, 0),
+        Size = UDim2.new(0, RANK_VALUE_WIDTH, 1, 0),
         FontFace = UI.MonoBold,
         TextSize = 14,
+        TextScaled = false,
+        TextWrapped = false,
+        TextTruncate = Enum.TextTruncate.AtEnd,
         TextColor3 = L.label,
         TextXAlignment = Enum.TextXAlignment.Right,
         Parent = frame,
     })
-    UI.scaledText(valueLabel, 14, 10)
     UI.msg(valueLabel, valueText)
     return frame
 end
@@ -469,6 +480,12 @@ local function refreshCrew(crew)
         missions[index] = ClientMath.normalizeRoleMission(member.roleMission)
         anyMission = anyMission or missions[index] ~= nil
     end
+    -- 역할 미션 배지 섹션 제목 (멀티만, 배지는 이름 아래 줄마다)
+    if anyMission then
+        local title = heading("rolemission.result.title", 0, L.gold)
+        title.Name = "RoleMissionTitle"
+        title.Parent = crewTable
+    end
     local headerRow = UI.create("Frame", {
         Name = "Header",
         LayoutOrder = 1,
@@ -570,11 +587,18 @@ local function refreshResult()
     if not result then
         return
     end
+    -- 늦은 입장자(GameOver 유실, showFromState): 승패, 메달, 점수를 모른다. 중립 머리글("미션 종료")과 순위, 다시 하기만
+    -- 보이고, GameOver가 오면 show가 다시 불려 정상 화면이 된다
+    local partial = result.partial == true
+    titleLabel.Visible = not partial
+    summaryTiles.Visible = not partial
+    scorePanelFrame.Visible = not partial
+    crewPanelFrame.Visible = not partial
     local won = result.won == true
     UI.msg(tagLabel, if won then "result.tag.won" else "result.tag.lost")
-    tagLabel.TextColor3 = if won then L.mint else L.red
+    tagLabel.TextColor3 = if won then L.mint elseif partial then L.label else L.red
     UI.msg(titleLabel, if won then "result.title.won" else "result.title.lost")
-    if Msg.isMsg(result.reason) then
+    if Msg.isMsg(result.reason) and not partial then
         reasonLabel.Visible = true
         UI.msg(reasonLabel, result.reason)
     else
@@ -611,7 +635,7 @@ local function refreshResult()
     UI.msg(scoreStart, { key = "result.score.start", args = { points = startScore } })
 
     local weather = result.weather
-    weatherBox.Visible = type(weather) == "table"
+    weatherBox.Visible = type(weather) == "table" and not partial
     if type(weather) == "table" then
         if type(weather.startDate) == "table" and type(weather.endDate) == "table" then
             weatherRange.Visible = true
@@ -687,6 +711,8 @@ function ResultV2.init(_ctx)
     }, { UI.lunaGradient() })
     local root = Layout.root(gui)
     root.Parent = fadeGroup
+    root.ZIndex = 2 -- gui 바로 아래로 옮겼을 때 Backdrop(fadeGroup) 위에 그린다
+    contentRoot = root
     scroll = UI.create("ScrollingFrame", {
         Name = "Scroll",
         Size = UDim2.fromScale(1, 1),
@@ -785,12 +811,14 @@ function ResultV2.init(_ctx)
         daysTile,
         scoreTile,
     })
+    summaryTiles = tiles
     local summary = panel("Summary", 1)
     for _, child in ipairs({ tagLabel, titleLabel, reasonLabel, tiles }) do
         child.Parent = summary
     end
 
     local scorePanel = panel("ScoreDetail", 2)
+    scorePanelFrame = scorePanel
     heading("score.lost.title", 1, L.red).Parent = scorePanel
     scoreStart = label({ Name = "Start", LayoutOrder = 2, TextSize = 14, TextColor3 = L.dim })
     scoreStart.Parent = scorePanel
@@ -817,6 +845,7 @@ function ResultV2.init(_ctx)
     weatherCounts.Parent = weatherBox
 
     local crewPanel = panel("Crew", 4)
+    crewPanelFrame = crewPanel
     heading("result.crew.title", 1, L.gold).Parent = crewPanel
     crewTable = UI.create("Frame", {
         Name = "Table",
@@ -857,9 +886,10 @@ function ResultV2.init(_ctx)
         TextColor3 = L.dim,
         Visible = false,
     })
+    -- 다시 하기는 오른쪽 열 맨 위 (720 높이에서도 스크롤 없이 보이게)
     local restartBox = UI.create("Frame", {
         Name = "RestartBox",
-        LayoutOrder = 3,
+        LayoutOrder = 0,
         Size = UDim2.fromScale(1, 0),
         AutomaticSize = Enum.AutomaticSize.Y,
         BackgroundTransparency = 1,
@@ -902,9 +932,20 @@ function ResultV2.show(payload)
     if not visible then
         visible = true
         gui.Enabled = true
+        -- CanvasGroup은 제 해상도로 한 번 그려 늘리므로 글자가 흐리다. 페이드 동안만 안에 두고 끝나면 gui 바로 아래로
+        -- (v1 ResultUI와 같은 방식)
+        fadeToken += 1
+        local token = fadeToken
+        contentRoot.Parent = fadeGroup
         fadeGroup.GroupTransparency = 1
-        TweenService:Create(fadeGroup, TweenInfo.new(FADE_SECONDS), { GroupTransparency = 0 })
-            :Play()
+        local tween =
+            TweenService:Create(fadeGroup, TweenInfo.new(FADE_SECONDS), { GroupTransparency = 0 })
+        tween.Completed:Connect(function()
+            if token == fadeToken and visible then
+                contentRoot.Parent = gui
+            end
+        end)
+        tween:Play()
         scroll.CanvasPosition = Vector2.zero
         fit()
     end
@@ -924,12 +965,14 @@ function ResultV2.setRecords(payload)
     end
 end
 
--- GameOver를 놓친 늦은 입장자: 상태만으로 최소 화면 (메달과 점수는 알 수 없어 기록과 재시작만)
+-- GameOver를 놓친 늦은 입장자: 상태만으로 최소 화면 (메달과 점수는 알 수 없어 중립 머리글, 기록, 재시작만.
+-- partial = true면 refreshResult가 제목, 메달과 점수 칸, 감점, 우주 기상, 함께 한 일을 숨긴다)
 function ResultV2.showFromState(state)
     if visible or type(state) ~= "table" then
         return
     end
     ResultV2.show({
+        partial = true,
         won = false,
         medal = nil,
         day = state.day,
@@ -948,6 +991,8 @@ function ResultV2.hide()
     end
     visible = false
     gui.Enabled = false
+    fadeToken += 1
+    contentRoot.Parent = fadeGroup
     result = nil
     if heartbeat then
         heartbeat:Disconnect()
